@@ -1,0 +1,1103 @@
+/**
+ * @license
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+import React, { useState } from 'react';
+import { useCRM } from '../store';
+import { Contact, Account, UserRole } from '../types';
+import {
+  Search,
+  Plus,
+  Building2,
+  Mail,
+  Phone,
+  Linkedin,
+  User,
+  ArrowRight,
+  Trash2,
+  Upload,
+  Calendar,
+  MessageSquare,
+  FileSpreadsheet,
+  Shuffle,
+  Users2,
+  Check
+} from 'lucide-react';
+
+export default function ContactsModule() {
+  const {
+    currentUser,
+    users,
+    contacts,
+    getScopedContacts,
+    getScopedAccounts,
+    addContact,
+    deleteContact,
+    mergeContacts,
+    addAccount,
+    deleteAccount,
+    customFields,
+    activities,
+    addActivity,
+  } = useCRM();
+
+  const [activeTab, setActiveTab] = useState<'contacts' | 'accounts'>('contacts');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [selectedTag, setSelectedTag] = useState<string>('All');
+  
+  // Selection
+  const [selectedContactId, setSelectedContactId] = useState<string | null>(null);
+  const [selectedAccountId, setSelectedAccountId] = useState<string | null>(null);
+
+  // Timeline note state
+  const [timelineNote, setTimelineNote] = useState('');
+
+  // Modals state
+  const [showCreateContact, setShowCreateContact] = useState(false);
+  const [showCreateAccount, setShowCreateAccount] = useState(false);
+  const [showImportModal, setShowImportModal] = useState(false);
+  const [showMergeModal, setShowMergeModal] = useState(false);
+
+  // Form states
+  const [contactForm, setContactForm] = useState({
+    first_name: '',
+    last_name: '',
+    email: '',
+    phone: '',
+    title: '',
+    linkedin_url: '',
+    account_id: '',
+    owner_id: currentUser.id,
+    tags: '',
+    custom_values: {} as Record<string, any>
+  });
+
+  const [accountForm, setAccountForm] = useState({
+    name: '',
+    domain: '',
+    industry: '',
+    size: '51-200' as Account['size'],
+    website: '',
+    arr: 150000,
+    owner_id: currentUser.id,
+    tags: '',
+    custom_values: {} as Record<string, any>
+  });
+
+  // Import states
+  const [importCsvText, setImportCsvText] = useState('First Name,Last Name,Email,Phone,Title,Company\n');
+  const [importStatus, setImportStatus] = useState<'idle' | 'success'>('idle');
+
+  // Merge states
+  const [mergeSourceId, setMergeSourceId] = useState('');
+  const [mergeTargetId, setMergeTargetId] = useState('');
+
+  // Get Scoped lists
+  const scopedContacts = getScopedContacts();
+  const scopedAccounts = getScopedAccounts();
+
+  // Unified Lists
+  const filteredContacts = scopedContacts.filter(c => {
+    const fullName = `${c.first_name} ${c.last_name}`.toLowerCase();
+    const matchesSearch = fullName.includes(searchQuery.toLowerCase()) || c.email.toLowerCase().includes(searchQuery.toLowerCase()) || c.title.toLowerCase().includes(searchQuery.toLowerCase());
+    const matchesTag = selectedTag === 'All' || c.tags.includes(selectedTag);
+    return matchesSearch && matchesTag;
+  });
+
+  const filteredAccounts = scopedAccounts.filter(a => {
+    const matchesSearch = a.name.toLowerCase().includes(searchQuery.toLowerCase()) || a.domain.toLowerCase().includes(searchQuery.toLowerCase()) || a.industry.toLowerCase().includes(searchQuery.toLowerCase());
+    const matchesTag = selectedTag === 'All' || a.tags.includes(selectedTag);
+    return matchesSearch && matchesTag;
+  });
+
+  // Active items
+  const activeContact = scopedContacts.find(c => c.id === selectedContactId) || filteredContacts[0];
+  const activeAccount = scopedAccounts.find(a => a.id === selectedAccountId) || filteredAccounts[0];
+
+  // Activities linked to selected item
+  const contactActivities = activities.filter(act => act.contact_id === activeContact?.id);
+  const accountActivities = activities.filter(act => {
+    // Activities linked to contacts that belong to this account
+    const accountContactIds = scopedContacts.filter(c => c.account_id === activeAccount?.id).map(c => c.id);
+    return accountContactIds.includes(act.contact_id || '');
+  });
+
+  // Available tags list
+  const allContactTags = Array.from(new Set(scopedContacts.flatMap(c => c.tags)));
+  const allAccountTags = Array.from(new Set(scopedAccounts.flatMap(a => a.tags)));
+  const availableTags = activeTab === 'contacts' ? allContactTags : allAccountTags;
+
+  // Add Inline Timeline note
+  const handleAddTimelineNote = () => {
+    if (!timelineNote.trim()) return;
+    
+    if (activeTab === 'contacts' && activeContact) {
+      addActivity({
+        type: 'note',
+        title: 'Meeting note logged',
+        body: timelineNote,
+        user_id: currentUser.id,
+        contact_id: activeContact.id,
+      });
+    } else if (activeTab === 'accounts' && activeAccount) {
+      // Find primary contact
+      const primeContact = scopedContacts.find(c => c.account_id === activeAccount.id);
+      addActivity({
+        type: 'note',
+        title: 'Account Executive update',
+        body: timelineNote,
+        user_id: currentUser.id,
+        contact_id: primeContact?.id,
+      });
+    }
+
+    setTimelineNote('');
+  };
+
+  // Create Contact Handler
+  const handleCreateContactSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    addContact({
+      first_name: contactForm.first_name,
+      last_name: contactForm.last_name,
+      email: contactForm.email,
+      phone: contactForm.phone,
+      title: contactForm.title,
+      linkedin_url: contactForm.linkedin_url,
+      account_id: contactForm.account_id || '',
+      owner_id: contactForm.owner_id,
+      tags: contactForm.tags.split(',').map(t => t.trim()).filter(Boolean),
+      custom_fields: contactForm.custom_values,
+      unsubscribed: false,
+    });
+    setShowCreateContact(false);
+    // Reset
+    setContactForm({
+      first_name: '',
+      last_name: '',
+      email: '',
+      phone: '',
+      title: '',
+      linkedin_url: '',
+      account_id: '',
+      owner_id: currentUser.id,
+      tags: '',
+      custom_values: {},
+    });
+  };
+
+  // Create Account Handler
+  const handleCreateAccountSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    addAccount({
+      name: accountForm.name,
+      domain: accountForm.domain,
+      industry: accountForm.industry,
+      size: accountForm.size,
+      website: accountForm.website,
+      arr: Number(accountForm.arr),
+      owner_id: accountForm.owner_id,
+      tags: accountForm.tags.split(',').map(t => t.trim()).filter(Boolean),
+      custom_fields: accountForm.custom_values,
+    });
+    setShowCreateAccount(false);
+    setAccountForm({
+      name: '',
+      domain: '',
+      industry: '',
+      size: '51-200',
+      website: '',
+      arr: 150000,
+      owner_id: currentUser.id,
+      tags: '',
+      custom_values: {},
+    });
+  };
+
+  // Bulk CSV Import
+  const handleCsvImport = () => {
+    setImportStatus('success');
+    setTimeout(() => {
+      const lines = importCsvText.split('\n');
+      if (lines.length > 1) {
+        const headers = lines[0].split(',').map(h => h.trim().toLowerCase());
+        
+        for (let i = 1; i < lines.length; i++) {
+          const line = lines[i].trim();
+          if (!line) continue;
+          
+          const values = line.split(',').map(v => v.trim());
+          const contactData: any = {
+            first_name: '',
+            last_name: '',
+            email: '',
+            phone: '',
+            title: '',
+            account_id: '',
+            owner_id: currentUser.id,
+            tags: ['CSV-Imported'],
+            custom_fields: {},
+            unsubscribed: false,
+          };
+          
+          headers.forEach((header, index) => {
+            const val = values[index] || '';
+            if (header === 'first name' || header === 'first_name') {
+              contactData.first_name = val;
+            } else if (header === 'last name' || header === 'last_name') {
+              contactData.last_name = val;
+            } else if (header === 'email') {
+              contactData.email = val;
+            } else if (header === 'phone') {
+              contactData.phone = val;
+            } else if (header === 'title') {
+              contactData.title = val;
+            } else if (header === 'company' || header === 'company_name') {
+              const matchAcc = scopedAccounts.find(a => a.name.toLowerCase() === val.toLowerCase());
+              contactData.account_id = matchAcc ? matchAcc.id : '';
+            }
+          });
+
+          if (contactData.first_name || contactData.last_name || contactData.email) {
+            addContact(contactData);
+          }
+        }
+      }
+      setShowImportModal(false);
+      setImportStatus('idle');
+    }, 1000);
+  };
+
+  // Merge Contacts Handler
+  const handleMergeSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!mergeSourceId || !mergeTargetId || mergeSourceId === mergeTargetId) return;
+    
+    const target = contacts.find(c => c.id === mergeTargetId);
+    if (!target) return;
+
+    mergeContacts(mergeSourceId, mergeTargetId, {
+      tags: Array.from(new Set([...target.tags, 'Merged-Record']))
+    });
+
+    setShowMergeModal(false);
+    setSelectedContactId(mergeTargetId);
+    setMergeSourceId('');
+    setMergeTargetId('');
+  };
+
+  const isReadOnly = currentUser.role === UserRole.VIEWER;
+
+  return (
+    <div className="flex-1 flex overflow-hidden bg-theme-base text-theme-primary">
+      
+      {/* LEFT COLUMN: LIST PANEL */}
+      <div className="w-1/2 flex flex-col border-r border-theme-border bg-theme-card h-full select-none">
+        
+        {/* Module Header Toolbar */}
+        <div className="p-4 border-b border-theme-border space-y-3 shrink-0">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2 bg-theme-base p-0.5 rounded-lg border border-theme-border text-xs font-semibold">
+              <button
+                onClick={() => { setActiveTab('contacts'); setSelectedTag('All'); }}
+                className={`px-3 py-1.5 rounded-md cursor-pointer transition-all flex items-center gap-1.5 ${
+                  activeTab === 'contacts' ? 'bg-theme-card text-theme-primary shadow-xs border border-theme-border/50' : 'text-theme-secondary hover:text-theme-primary'
+                }`}
+              >
+                <User className="w-3.5 h-3.5 text-theme-accent" /> Contacts ({filteredContacts.length})
+              </button>
+              <button
+                onClick={() => { setActiveTab('accounts'); setSelectedTag('All'); }}
+                className={`px-3 py-1.5 rounded-md cursor-pointer transition-all flex items-center gap-1.5 ${
+                  activeTab === 'accounts' ? 'bg-theme-card text-theme-primary shadow-xs border border-theme-border/50' : 'text-theme-secondary hover:text-theme-primary'
+                }`}
+              >
+                <Building2 className="w-3.5 h-3.5 text-theme-accent" /> Accounts ({filteredAccounts.length})
+              </button>
+            </div>
+
+            {/* Quick Actions */}
+            {!isReadOnly && (
+              <div className="flex gap-2">
+                <button
+                  onClick={() => setShowImportModal(true)}
+                  className="p-1.5 rounded-lg border border-theme-border text-theme-secondary hover:bg-theme-base transition-colors cursor-pointer"
+                  title="Bulk CSV Import"
+                >
+                  <Upload className="w-4 h-4" />
+                </button>
+                {activeTab === 'contacts' && (
+                  <button
+                    onClick={() => setShowMergeModal(true)}
+                    className="p-1.5 rounded-lg border border-theme-border text-theme-secondary hover:bg-theme-base transition-colors cursor-pointer"
+                    title="Merge Duplicates"
+                  >
+                    <Shuffle className="w-4 h-4" />
+                  </button>
+                )}
+                <button
+                  onClick={() => activeTab === 'contacts' ? setShowCreateContact(true) : setShowCreateAccount(true)}
+                  className="bg-theme-accent hover:opacity-90 text-white p-1.5 rounded-lg flex items-center justify-center transition-colors shadow-xs cursor-pointer"
+                >
+                  <Plus className="w-4 h-4" />
+                </button>
+              </div>
+            )}
+          </div>
+
+          {/* Search bar & Tag segment filter */}
+          <div className="flex gap-2">
+            <div className="relative flex-1">
+              <Search className="w-3.5 h-3.5 absolute left-3 top-3 text-theme-secondary" />
+              <input
+                type="text"
+                placeholder={activeTab === 'contacts' ? 'Search contacts by name, email, title...' : 'Search accounts by name, domain, industry...'}
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="w-full bg-theme-base text-theme-primary border border-theme-border rounded-lg pl-9 pr-4 py-2 text-xs focus:ring-1 focus:ring-theme-accent focus:outline-none"
+              />
+            </div>
+          </div>
+
+          {/* Tags bar slider */}
+          {availableTags.length > 0 && (
+            <div className="flex gap-1 overflow-x-auto pb-1 scrollbar-none text-[10px]">
+              <button
+                onClick={() => setSelectedTag('All')}
+                className={`px-2.5 py-1 rounded-full border transition-all cursor-pointer font-medium ${
+                  selectedTag === 'All'
+                    ? 'bg-theme-primary text-theme-card border-theme-primary'
+                    : 'bg-theme-base text-theme-secondary border-theme-border hover:bg-theme-base/80'
+                }`}
+              >
+                All Segments
+              </button>
+              {availableTags.map(tag => (
+                <button
+                  key={tag}
+                  onClick={() => setSelectedTag(tag)}
+                  className={`px-2.5 py-1 rounded-full border transition-all cursor-pointer font-medium ${
+                    selectedTag === tag
+                      ? 'bg-theme-accent text-white border-theme-accent'
+                      : 'bg-theme-base text-theme-secondary border-theme-border hover:bg-theme-base/80'
+                  }`}
+                >
+                  #{tag}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* List Content */}
+        <div className="flex-1 overflow-y-auto divide-y divide-theme-border">
+          {activeTab === 'contacts' ? (
+            filteredContacts.length === 0 ? (
+              <div className="p-8 text-center text-xs text-theme-secondary font-sans">
+                No matching contacts scoped to your account role.
+              </div>
+            ) : (
+              filteredContacts.map(c => {
+                const isSelected = c.id === selectedContactId;
+                const companyName = scopedAccounts.find(a => a.id === c.account_id)?.name || 'Unknown Company';
+                const ownerName = users.find(u => u.id === c.owner_id)?.name || 'Unassigned';
+
+                return (
+                  <div
+                    key={c.id}
+                    onClick={() => setSelectedContactId(c.id)}
+                    className={`p-4 cursor-pointer transition-colors text-left relative flex items-center justify-between ${
+                      isSelected ? 'bg-theme-accent/10 border-l-4 border-theme-accent' : 'hover:bg-theme-base/40'
+                    }`}
+                  >
+                    <div className="min-w-0">
+                      <h4 className="text-xs font-bold text-theme-primary flex items-center gap-1.5">
+                        {c.first_name} {c.last_name}
+                        {c.unsubscribed && (
+                          <span className="bg-theme-secondary/15 text-theme-secondary px-1 py-0.2 text-[8px] rounded uppercase font-semibold">Unsubscribed</span>
+                        )}
+                      </h4>
+                      <p className="text-[11px] text-theme-secondary mt-0.5 truncate">{c.title} • <span className="font-semibold text-theme-primary">{companyName}</span></p>
+                      <div className="flex items-center gap-1.5 mt-2 flex-wrap">
+                        <span className="text-[9px] text-theme-secondary font-sans flex items-center gap-0.5">
+                          <User className="w-2.5 h-2.5 text-theme-accent" /> owner: {ownerName}
+                        </span>
+                        {c.tags.map(t => (
+                          <span key={t} className="bg-theme-accent/10 text-theme-accent px-1.5 py-0.5 rounded text-[8px] font-sans">#{t}</span>
+                        ))}
+                      </div>
+                    </div>
+                    <ArrowRight className="w-3.5 h-3.5 text-theme-secondary/50 shrink-0" />
+                  </div>
+                );
+              })
+            )
+          ) : (
+            filteredAccounts.length === 0 ? (
+              <div className="p-8 text-center text-xs text-theme-secondary font-sans">
+                No matching accounts scoped to your account role.
+              </div>
+            ) : (
+              filteredAccounts.map(a => {
+                const isSelected = a.id === selectedAccountId;
+                const ownerName = users.find(u => u.id === a.owner_id)?.name || 'Unassigned';
+
+                return (
+                  <div
+                    key={a.id}
+                    onClick={() => setSelectedAccountId(a.id)}
+                    className={`p-4 cursor-pointer transition-colors text-left relative flex items-center justify-between ${
+                      isSelected ? 'bg-theme-accent/10 border-l-4 border-theme-accent' : 'hover:bg-theme-base/40'
+                    }`}
+                  >
+                    <div className="min-w-0">
+                      <h4 className="text-xs font-bold text-theme-primary">{a.name}</h4>
+                      <p className="text-[11px] text-theme-secondary mt-0.5">{a.industry} • <span className="font-semibold text-theme-primary">{a.size} employees</span></p>
+                      <div className="flex items-center gap-1.5 mt-2 flex-wrap">
+                        <span className="text-[9px] text-theme-accent font-bold font-sans bg-theme-accent/10 px-1.5 py-0.5 rounded">
+                          ARR: ${(a.arr / 1000).toFixed(0)}k
+                        </span>
+                        <span className="text-[9px] text-theme-secondary font-sans flex items-center gap-0.5">
+                          owner: {ownerName}
+                        </span>
+                        {a.tags.map(t => (
+                          <span key={t} className="bg-theme-accent/10 text-theme-accent px-1.5 py-0.5 rounded text-[8px] font-sans">#{t}</span>
+                        ))}
+                      </div>
+                    </div>
+                    <ArrowRight className="w-3.5 h-3.5 text-theme-secondary/50 shrink-0" />
+                  </div>
+                );
+              })
+            )
+          )}
+        </div>
+      </div>
+
+
+      {/* RIGHT COLUMN: DETAILS & TIMELINE PANEL */}
+      <div className="w-1/2 flex flex-col bg-theme-base h-full overflow-hidden">
+        {activeTab === 'contacts' ? (
+          activeContact ? (
+            <div className="flex-1 flex flex-col h-full overflow-hidden">
+              
+              {/* Profile Card Header */}
+              <div className="bg-theme-card p-5 border-b border-theme-border shrink-0">
+                <div className="flex justify-between items-start">
+                  <div className="flex items-center gap-3">
+                    <div className="w-12 h-12 bg-theme-accent/15 text-theme-accent font-bold rounded-full flex items-center justify-center uppercase shadow-xs">
+                      {activeContact.first_name[0]}{activeContact.last_name[0]}
+                    </div>
+                    <div>
+                      <h3 className="text-base font-bold text-theme-primary">{activeContact.first_name} {activeContact.last_name}</h3>
+                      <p className="text-xs text-theme-secondary">{activeContact.title} at <span className="font-bold text-theme-primary">
+                        {scopedAccounts.find(a => a.id === activeContact.account_id)?.name || 'Unassigned'}
+                      </span></p>
+                    </div>
+                  </div>
+
+                  {!isReadOnly && (
+                    <button
+                      onClick={() => {
+                        if (confirm('Are you sure you want to soft-delete this contact? All related audit trails remain.')) {
+                          deleteContact(activeContact.id);
+                          setSelectedContactId(null);
+                        }
+                      }}
+                      className="p-1.5 text-theme-secondary hover:text-theme-accent rounded hover:bg-theme-base transition-all cursor-pointer"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  )}
+                </div>
+
+                <div className="grid grid-cols-2 gap-3 mt-4 text-[11px] text-theme-secondary border-t border-theme-border pt-3 font-sans">
+                  <div className="flex items-center gap-1.5">
+                    <Mail className="w-3.5 h-3.5 text-theme-secondary/80" />
+                    <span className="truncate">{activeContact.email}</span>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <Phone className="w-3.5 h-3.5 text-theme-secondary/80" />
+                    <span>{activeContact.phone}</span>
+                  </div>
+                  {activeContact.linkedin_url && (
+                    <div className="flex items-center gap-1.5">
+                      <Linkedin className="w-3.5 h-3.5 text-theme-accent shrink-0" />
+                      <a href={activeContact.linkedin_url} target="_blank" rel="noreferrer" className="text-theme-accent hover:underline truncate">
+                        LinkedIn Profile
+                      </a>
+                    </div>
+                  )}
+                  <div className="flex items-center gap-1.5">
+                    <User className="w-3.5 h-3.5 text-theme-secondary/80" />
+                    <span>Account Manager: <strong className="text-theme-primary">{users.find(u => u.id === activeContact.owner_id)?.name || 'Unassigned'}</strong></span>
+                  </div>
+                </div>
+
+                {/* Custom Fields defined in Admin */}
+                {customFields.filter(f => f.entity_type === 'contact' && f.is_visible).length > 0 && (
+                  <div className="mt-4 border-t border-theme-border pt-3">
+                    <h5 className="text-[10px] uppercase tracking-wider font-bold text-theme-secondary font-sans">Custom Attributes</h5>
+                    <div className="grid grid-cols-2 gap-3 mt-2 text-[11px]">
+                      {customFields.filter(f => f.entity_type === 'contact' && f.is_visible).map(f => (
+                        <div key={f.id} className="p-2 bg-theme-base/50 rounded border border-theme-border">
+                          <span className="text-theme-secondary/80 block font-sans text-[9px] uppercase">{f.label}</span>
+                          <span className="font-semibold text-theme-primary">
+                            {activeContact.custom_fields[f.key]?.toString() || '—'}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Activity Timeline Section */}
+              <div className="flex-1 flex flex-col min-h-0 bg-theme-base">
+                <div className="p-4 border-b border-theme-border shrink-0 bg-theme-base flex items-center justify-between">
+                  <span className="text-xs font-bold text-theme-primary flex items-center gap-1.5">
+                    <Calendar className="w-4 h-4 text-theme-accent" /> Communication Timeline
+                  </span>
+                </div>
+
+                {/* Timeline Scroll */}
+                <div className="flex-1 overflow-y-auto p-4 space-y-4">
+                  {contactActivities.length === 0 ? (
+                    <p className="text-center text-xs text-theme-secondary/70 py-6 font-sans">No activities logged yet. Write a note below to start the timeline.</p>
+                  ) : (
+                    contactActivities.map(act => (
+                      <div key={act.id} className="flex gap-3 text-left">
+                        <div className="w-8 h-8 rounded-full bg-theme-card border border-theme-border flex items-center justify-center text-theme-secondary shrink-0 shadow-2xs">
+                          {act.type === 'note' && <MessageSquare className="w-4 h-4 text-theme-accent" />}
+                          {act.type === 'email_sent' && <Mail className="w-4 h-4 text-theme-accent" />}
+                          {act.type === 'call' && <Phone className="w-4 h-4 text-theme-accent" />}
+                          {act.type === 'stage_change' && <Shuffle className="w-4 h-4 text-theme-accent" />}
+                          {act.type === 'task_completed' && <Check className="w-4 h-4 text-theme-accent" />}
+                        </div>
+                        <div className="flex-1 bg-theme-card p-3.5 rounded-xl border border-theme-border shadow-2xs">
+                          <div className="flex justify-between items-center">
+                            <h5 className="text-xs font-bold text-theme-primary">{act.title}</h5>
+                            <span className="text-[9px] text-theme-secondary font-sans">
+                              {new Date(act.created_at).toLocaleDateString()} at {new Date(act.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                            </span>
+                          </div>
+                          <p className="text-[11px] text-theme-secondary mt-2 whitespace-pre-wrap leading-relaxed">{act.body}</p>
+                          <div className="text-[9px] text-theme-secondary mt-2 font-sans flex items-center gap-1">
+                            Logged by {users.find(u => u.id === act.user_id)?.name || 'System Agent'}
+                          </div>
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
+
+                {/* Inline Note Composer */}
+                {!isReadOnly && (
+                  <div className="p-3 bg-theme-card border-t border-theme-border shrink-0">
+                    <div className="flex gap-2">
+                      <input
+                        type="text"
+                        placeholder={`Log a follow-up note on ${activeContact.first_name}...`}
+                        value={timelineNote}
+                        onChange={(e) => setTimelineNote(e.target.value)}
+                        onKeyDown={(e) => e.key === 'Enter' && handleAddTimelineNote()}
+                        className="flex-1 bg-theme-base text-theme-primary border border-theme-border rounded-lg px-3 py-2 text-xs focus:ring-1 focus:ring-theme-accent focus:outline-none"
+                      />
+                      <button
+                        onClick={handleAddTimelineNote}
+                        className="bg-theme-accent hover:opacity-90 text-white font-semibold text-xs px-4 py-2 rounded-lg transition-colors cursor-pointer"
+                      >
+                        Log Note
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+            </div>
+          ) : (
+            <div className="p-8 text-center text-xs text-theme-secondary font-sans">
+              Select a contact to inspect full business timeline and attributes.
+            </div>
+          )
+        ) : (
+          /* ACCOUNTS DETAILS VIEW */
+          activeAccount ? (
+            <div className="flex-1 flex flex-col h-full overflow-hidden">
+              <div className="bg-theme-card p-5 border-b border-theme-border shrink-0">
+                <div className="flex justify-between items-start">
+                  <div className="flex items-center gap-3">
+                    <div className="w-12 h-12 bg-theme-base rounded-lg border border-theme-border flex items-center justify-center text-theme-secondary shadow-2xs">
+                      <Building2 className="w-6 h-6 text-theme-accent" />
+                    </div>
+                    <div>
+                      <h3 className="text-base font-bold text-theme-primary">{activeAccount.name}</h3>
+                      <p className="text-xs text-theme-secondary">{activeAccount.industry} • <span className="font-semibold text-theme-primary">{activeAccount.size} employees</span></p>
+                    </div>
+                  </div>
+
+                  {!isReadOnly && (
+                    <button
+                      onClick={() => {
+                        if (confirm('Are you sure you want to soft-delete this account?')) {
+                          deleteAccount(activeAccount.id);
+                          setSelectedAccountId(null);
+                        }
+                      }}
+                      className="p-1.5 text-theme-secondary hover:text-theme-accent rounded hover:bg-theme-base transition-all cursor-pointer"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  )}
+                </div>
+
+                <div className="grid grid-cols-2 gap-3 mt-4 text-[11px] text-theme-secondary border-t border-theme-border pt-3">
+                  <div><strong>Domain Name:</strong> <span className="font-sans text-theme-primary">{activeAccount.domain}</span></div>
+                  <div><strong>Account ARR:</strong> <span className="font-bold text-theme-accent font-sans">${activeAccount.arr.toLocaleString()}</span></div>
+                  <div><strong>Website:</strong> <a href={activeAccount.website} target="_blank" rel="noreferrer" className="text-theme-accent hover:underline">{activeAccount.website}</a></div>
+                  <div><strong>Account Owner:</strong> <span className="font-semibold text-theme-primary">{users.find(u => u.id === activeAccount.owner_id)?.name || 'Unassigned'}</span></div>
+                </div>
+
+                {/* Custom Fields defined in Admin */}
+                {customFields.filter(f => f.entity_type === 'account' && f.is_visible).length > 0 && (
+                  <div className="mt-4 border-t border-theme-border pt-3">
+                    <h5 className="text-[10px] uppercase tracking-wider font-bold text-theme-secondary font-sans">Custom Attributes</h5>
+                    <div className="grid grid-cols-2 gap-3 mt-2 text-[11px]">
+                      {customFields.filter(f => f.entity_type === 'account' && f.is_visible).map(f => (
+                        <div key={f.id} className="p-2 bg-theme-base/50 rounded border border-theme-border">
+                          <span className="text-theme-secondary/80 block font-sans text-[9px] uppercase">{f.label}</span>
+                          <span className="font-semibold text-theme-primary">
+                            {activeAccount.custom_fields[f.key] !== undefined 
+                              ? activeAccount.custom_fields[f.key].toString() 
+                              : '—'}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Linked contacts list inside this Account */}
+              <div className="flex-1 flex flex-col min-h-0 bg-theme-base">
+                <div className="p-4 border-b border-theme-border shrink-0 bg-theme-base">
+                  <h4 className="text-xs font-bold text-theme-primary flex items-center gap-1.5">
+                    <Users2 className="w-4 h-4 text-theme-accent" /> Associated Contacts
+                  </h4>
+                </div>
+
+                <div className="flex-1 overflow-y-auto p-4 space-y-2">
+                  {scopedContacts.filter(c => c.account_id === activeAccount.id).length === 0 ? (
+                    <p className="text-center text-xs text-theme-secondary/70 py-6">No contacts associated with this account</p>
+                  ) : (
+                    scopedContacts.filter(c => c.account_id === activeAccount.id).map(c => (
+                      <div key={c.id} className="bg-theme-card p-3 rounded-lg border border-theme-border flex justify-between items-center text-xs">
+                        <div>
+                          <p className="font-bold text-theme-primary">{c.first_name} {c.last_name}</p>
+                          <p className="text-[10px] text-theme-secondary mt-0.5">{c.title} • {c.email}</p>
+                        </div>
+                        <button 
+                          onClick={() => { setActiveTab('contacts'); setSelectedContactId(c.id); }}
+                          className="text-theme-accent hover:underline font-semibold text-[11px] cursor-pointer bg-transparent border-none"
+                        >
+                          View timeline &rarr;
+                        </button>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div className="p-8 text-center text-xs text-theme-secondary font-sans">
+              Select an account to view nested contacts and contract metrics.
+            </div>
+          )
+        )}
+      </div>
+
+
+      {/* MODAL: CREATE CONTACT */}
+      {showCreateContact && (
+        <div className="fixed inset-0 bg-theme-primary/60 flex items-center justify-center z-50">
+          <div className="bg-theme-card rounded-xl shadow-xl border border-theme-border w-full max-w-lg overflow-hidden">
+            <header className="bg-theme-base px-5 py-4 border-b border-theme-border flex justify-between items-center">
+              <h3 className="text-sm font-bold text-theme-primary">Provision New B2B Contact</h3>
+              <button onClick={() => setShowCreateContact(false)} className="text-theme-secondary hover:text-theme-primary font-bold text-xs cursor-pointer bg-transparent border-none">✕</button>
+            </header>
+            <form onSubmit={handleCreateContactSubmit} className="p-5 space-y-4 text-xs text-left">
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-1">
+                  <label className="block font-semibold text-theme-secondary">First Name *</label>
+                  <input
+                    type="text" required
+                    value={contactForm.first_name}
+                    onChange={(e) => setContactForm({ ...contactForm, first_name: e.target.value })}
+                    className="w-full bg-theme-base text-theme-primary rounded border border-theme-border px-2.5 py-1.5 focus:ring-1 focus:ring-theme-accent focus:outline-none"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="block font-semibold text-theme-secondary">Last Name *</label>
+                  <input
+                    type="text" required
+                    value={contactForm.last_name}
+                    onChange={(e) => setContactForm({ ...contactForm, last_name: e.target.value })}
+                    className="w-full bg-theme-base text-theme-primary rounded border border-theme-border px-2.5 py-1.5 focus:ring-1 focus:ring-theme-accent focus:outline-none"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-1">
+                  <label className="block font-semibold text-theme-secondary">Email Address *</label>
+                  <input
+                    type="email" required
+                    value={contactForm.email}
+                    onChange={(e) => setContactForm({ ...contactForm, email: e.target.value })}
+                    className="w-full bg-theme-base text-theme-primary rounded border border-theme-border px-2.5 py-1.5 focus:ring-1 focus:ring-theme-accent focus:outline-none"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="block font-semibold text-theme-secondary">Phone Number *</label>
+                  <input
+                    type="text" required
+                    value={contactForm.phone}
+                    onChange={(e) => setContactForm({ ...contactForm, phone: e.target.value })}
+                    className="w-full bg-theme-base text-theme-primary rounded border border-theme-border px-2.5 py-1.5 focus:ring-1 focus:ring-theme-accent focus:outline-none"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-1">
+                  <label className="block font-semibold text-theme-secondary">Job Title</label>
+                  <input
+                    type="text"
+                    value={contactForm.title}
+                    onChange={(e) => setContactForm({ ...contactForm, title: e.target.value })}
+                    className="w-full bg-theme-base text-theme-primary rounded border border-theme-border px-2.5 py-1.5 focus:ring-1 focus:ring-theme-accent focus:outline-none"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="block font-semibold text-theme-secondary">LinkedIn URL</label>
+                  <input
+                    type="text"
+                    value={contactForm.linkedin_url}
+                    onChange={(e) => setContactForm({ ...contactForm, linkedin_url: e.target.value })}
+                    className="w-full bg-theme-base text-theme-primary rounded border border-theme-border px-2.5 py-1.5 focus:ring-1 focus:ring-theme-accent focus:outline-none"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-1">
+                  <label className="block font-semibold text-theme-secondary">Associated Company Account</label>
+                  <select
+                    value={contactForm.account_id}
+                    onChange={(e) => setContactForm({ ...contactForm, account_id: e.target.value })}
+                    className="w-full bg-theme-base text-theme-primary rounded border border-theme-border px-2.5 py-1.5 focus:ring-1 focus:ring-theme-accent focus:outline-none"
+                  >
+                    <option value="">-- Select Company --</option>
+                    {scopedAccounts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+                  </select>
+                </div>
+                <div className="space-y-1">
+                  <label className="block font-semibold text-theme-secondary">Account Manager</label>
+                  <select
+                    value={contactForm.owner_id}
+                    onChange={(e) => setContactForm({ ...contactForm, owner_id: e.target.value })}
+                    className="w-full bg-theme-base text-theme-primary rounded border border-theme-border px-2.5 py-1.5 focus:ring-1 focus:ring-theme-accent focus:outline-none"
+                  >
+                    {users.map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
+                  </select>
+                </div>
+              </div>
+
+              <div className="space-y-1">
+                <label className="block font-semibold text-theme-secondary">Segment Tags (comma separated)</label>
+                <input
+                  type="text"
+                  placeholder="Champion, Technical, Mid-Market"
+                  value={contactForm.tags}
+                  onChange={(e) => setContactForm({ ...contactForm, tags: e.target.value })}
+                  className="w-full bg-theme-base text-theme-primary rounded border border-theme-border px-2.5 py-1.5 focus:ring-1 focus:ring-theme-accent focus:outline-none"
+                />
+              </div>
+
+              {/* Dynamic inputs for admin custom fields */}
+              {customFields.filter(f => f.entity_type === 'contact').map(f => (
+                <div key={f.id} className="space-y-1">
+                  <label className="block font-semibold text-theme-secondary">{f.label}</label>
+                  {f.field_type === 'number' ? (
+                    <input
+                      type="number"
+                      onChange={(e) => setContactForm({
+                        ...contactForm,
+                        custom_values: { ...contactForm.custom_values, [f.key]: Number(e.target.value) }
+                      })}
+                      className="w-full bg-theme-base text-theme-primary rounded border border-theme-border px-2.5 py-1.5 focus:ring-1 focus:ring-theme-accent focus:outline-none"
+                    />
+                  ) : (
+                    <input
+                      type="text"
+                      onChange={(e) => setContactForm({
+                        ...contactForm,
+                        custom_values: { ...contactForm.custom_values, [f.key]: e.target.value }
+                      })}
+                      className="w-full bg-theme-base text-theme-primary rounded border border-theme-border px-2.5 py-1.5 focus:ring-1 focus:ring-theme-accent focus:outline-none"
+                    />
+                  )}
+                </div>
+              ))}
+
+              <div className="pt-4 border-t border-theme-border flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setShowCreateContact(false)}
+                  className="px-4 py-2 border border-theme-border hover:bg-theme-base text-theme-primary rounded-lg font-semibold cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="px-4 py-2 bg-theme-accent hover:opacity-90 text-white rounded-lg font-semibold cursor-pointer"
+                >
+                  Save Contact
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+
+      {/* MODAL: CREATE ACCOUNT */}
+      {showCreateAccount && (
+        <div className="fixed inset-0 bg-theme-primary/60 flex items-center justify-center z-50">
+          <div className="bg-theme-card rounded-xl shadow-xl border border-theme-border w-full max-w-lg overflow-hidden">
+            <header className="bg-theme-base px-5 py-4 border-b border-theme-border flex justify-between items-center">
+              <h3 className="text-sm font-bold text-theme-primary">Provision New B2B Account</h3>
+              <button onClick={() => setShowCreateAccount(false)} className="text-theme-secondary hover:text-theme-primary font-bold text-xs cursor-pointer bg-transparent border-none">✕</button>
+            </header>
+            <form onSubmit={handleCreateAccountSubmit} className="p-5 space-y-4 text-xs text-left">
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-1">
+                  <label className="block font-semibold text-theme-secondary">Company Name *</label>
+                  <input
+                    type="text" required
+                    value={accountForm.name}
+                    onChange={(e) => setAccountForm({ ...accountForm, name: e.target.value })}
+                    className="w-full bg-theme-base text-theme-primary rounded border border-theme-border px-2.5 py-1.5 focus:ring-1 focus:ring-theme-accent focus:outline-none"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="block font-semibold text-theme-secondary">Domain *</label>
+                  <input
+                    type="text" required placeholder="e.g. company.com"
+                    value={accountForm.domain}
+                    onChange={(e) => setAccountForm({ ...accountForm, domain: e.target.value })}
+                    className="w-full bg-theme-base text-theme-primary rounded border border-theme-border px-2.5 py-1.5 focus:ring-1 focus:ring-theme-accent focus:outline-none"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-1">
+                  <label className="block font-semibold text-theme-secondary">Industry</label>
+                  <input
+                    type="text"
+                    value={accountForm.industry}
+                    onChange={(e) => setAccountForm({ ...accountForm, industry: e.target.value })}
+                    className="w-full bg-theme-base text-theme-primary rounded border border-theme-border px-2.5 py-1.5 focus:ring-1 focus:ring-theme-accent focus:outline-none"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="block font-semibold text-theme-secondary">Annual Recurring Revenue (ARR)</label>
+                  <input
+                    type="number"
+                    value={accountForm.arr}
+                    onChange={(e) => setAccountForm({ ...accountForm, arr: Number(e.target.value) })}
+                    className="w-full bg-theme-base text-theme-primary rounded border border-theme-border px-2.5 py-1.5 focus:ring-1 focus:ring-theme-accent focus:outline-none"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-1">
+                  <label className="block font-semibold text-theme-secondary">Company Size</label>
+                  <select
+                    value={accountForm.size}
+                    onChange={(e) => setAccountForm({ ...accountForm, size: e.target.value as any })}
+                    className="w-full bg-theme-base text-theme-primary rounded border border-theme-border px-2.5 py-1.5 focus:ring-1 focus:ring-theme-accent focus:outline-none"
+                  >
+                    <option value="1-10">1-10 employees</option>
+                    <option value="11-50">11-50 employees</option>
+                    <option value="51-200">51-200 employees</option>
+                    <option value="201-1000">201-1000 employees</option>
+                    <option value="1000+">1000+ employees</option>
+                  </select>
+                </div>
+                <div className="space-y-1">
+                  <label className="block font-semibold text-theme-secondary">Corporate Website</label>
+                  <input
+                    type="text"
+                    value={accountForm.website}
+                    onChange={(e) => setAccountForm({ ...accountForm, website: e.target.value })}
+                    className="w-full bg-theme-base text-theme-primary rounded border border-theme-border px-2.5 py-1.5 focus:ring-1 focus:ring-theme-accent focus:outline-none"
+                  />
+                </div>
+              </div>
+
+              <div className="space-y-1">
+                <label className="block font-semibold text-theme-secondary">Segment Tags</label>
+                <input
+                  type="text" placeholder="Strategic, US-East"
+                  value={accountForm.tags}
+                  onChange={(e) => setAccountForm({ ...accountForm, tags: e.target.value })}
+                  className="w-full bg-theme-base text-theme-primary rounded border border-theme-border px-2.5 py-1.5 focus:ring-1 focus:ring-theme-accent focus:outline-none"
+                />
+              </div>
+
+              <div className="pt-4 border-t border-theme-border flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setShowCreateAccount(false)}
+                  className="px-4 py-2 border border-theme-border hover:bg-theme-base text-theme-primary rounded-lg font-semibold cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="px-4 py-2 bg-theme-accent hover:opacity-90 text-white rounded-lg font-semibold cursor-pointer"
+                >
+                  Save Account
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+
+      {/* MODAL: BULK CSV IMPORT */}
+      {showImportModal && (
+        <div className="fixed inset-0 bg-theme-primary/60 flex items-center justify-center z-50">
+          <div className="bg-theme-card rounded-xl shadow-xl border border-theme-border w-full max-w-lg overflow-hidden">
+            <header className="bg-theme-base px-5 py-4 border-b border-theme-border flex justify-between items-center">
+              <h3 className="text-sm font-bold text-theme-primary flex items-center gap-1.5">
+                <FileSpreadsheet className="w-4 h-4 text-theme-accent" /> Bulk CSV Data Importer
+              </h3>
+              <button onClick={() => setShowImportModal(false)} className="text-theme-secondary hover:text-theme-primary font-bold text-xs cursor-pointer bg-transparent border-none">✕</button>
+            </header>
+            <div className="p-5 space-y-4 text-xs text-left">
+              <p className="text-theme-secondary leading-normal">
+                Paste raw CSV values here. The importer automatically maps headers and flags probable duplicates using contact email rules.
+              </p>
+              
+              <div className="space-y-1">
+                <label className="block font-semibold text-theme-secondary font-sans">CSV Values Payload</label>
+                <textarea
+                  rows={5}
+                  value={importCsvText}
+                  onChange={(e) => setImportCsvText(e.target.value)}
+                  className="w-full rounded border border-theme-border p-2.5 font-sans text-[11px] focus:ring-1 focus:ring-theme-accent focus:outline-none bg-theme-base text-theme-primary"
+                />
+              </div>
+
+              {/* Header column mapper preview */}
+              <div className="p-3 bg-theme-base rounded border border-theme-border space-y-2">
+                <h4 className="font-bold text-[10px] text-theme-secondary font-sans uppercase tracking-wider">Detected Field Mapping</h4>
+                <div className="grid grid-cols-3 gap-2 text-[10px] text-theme-secondary font-semibold font-sans">
+                  <div className="p-1 bg-theme-card border border-theme-border rounded">First Name &rarr; first_name</div>
+                  <div className="p-1 bg-theme-card border border-theme-border rounded">Last Name &rarr; last_name</div>
+                  <div className="p-1 bg-theme-card border border-theme-border rounded">Email &rarr; email</div>
+                </div>
+              </div>
+
+              <div className="pt-4 border-t border-theme-border flex justify-end gap-2">
+                <button
+                  onClick={() => setShowImportModal(false)}
+                  className="px-4 py-2 border border-theme-border hover:bg-theme-base text-theme-primary rounded-lg font-semibold cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleCsvImport}
+                  disabled={importStatus === 'success'}
+                  className="px-4 py-2 bg-theme-accent hover:opacity-90 text-white rounded-lg font-semibold flex items-center gap-1 cursor-pointer"
+                >
+                  {importStatus === 'success' ? 'Importing...' : 'Start Bulk Import'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+
+      {/* MODAL: MERGE DUPLICATES */}
+      {showMergeModal && (
+        <div className="fixed inset-0 bg-theme-primary/60 flex items-center justify-center z-50">
+          <div className="bg-theme-card rounded-xl shadow-xl border border-theme-border w-full max-w-lg overflow-hidden">
+            <header className="bg-theme-base px-5 py-4 border-b border-theme-border flex justify-between items-center">
+              <h3 className="text-sm font-bold text-theme-primary flex items-center gap-1.5">
+                <Shuffle className="w-4 h-4 text-theme-accent" /> Atomic Record Consolidation (Merge)
+              </h3>
+              <button onClick={() => setShowMergeModal(false)} className="text-theme-secondary hover:text-theme-primary font-bold text-xs cursor-pointer bg-transparent border-none">✕</button>
+            </header>
+            <form onSubmit={handleMergeSubmit} className="p-5 space-y-4 text-xs text-left">
+              <p className="text-theme-secondary leading-normal">
+                Merge duplicate contacts atomically. The timeline activities of the merged contact will be automatically migrated to the destination profile, and the duplicate contact is soft-deleted.
+              </p>
+
+              <div className="space-y-1">
+                <label className="block font-semibold text-theme-secondary">Duplicate Source (Will be Deleted) *</label>
+                <select
+                  required
+                  value={mergeSourceId}
+                  onChange={(e) => setMergeSourceId(e.target.value)}
+                  className="w-full bg-theme-base text-theme-primary rounded border border-theme-border px-2.5 py-1.5 focus:ring-1 focus:ring-theme-accent focus:outline-none"
+                >
+                  <option value="">-- Select Duplicate --</option>
+                  {scopedContacts.map(c => <option key={c.id} value={c.id}>{c.first_name} {c.last_name} ({c.email})</option>)}
+                </select>
+              </div>
+
+              <div className="space-y-1">
+                <label className="block font-semibold text-theme-secondary">Destination Record (Will be Retained) *</label>
+                <select
+                  required
+                  value={mergeTargetId}
+                  onChange={(e) => setMergeTargetId(e.target.value)}
+                  className="w-full bg-theme-base text-theme-primary rounded border border-theme-border px-2.5 py-1.5 focus:ring-1 focus:ring-theme-accent focus:outline-none"
+                >
+                  <option value="">-- Select Destination --</option>
+                  {scopedContacts.map(c => <option key={c.id} value={c.id}>{c.first_name} {c.last_name} ({c.email})</option>)}
+                </select>
+              </div>
+
+              <div className="pt-4 border-t border-theme-border flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setShowMergeModal(false)}
+                  className="px-4 py-2 border border-theme-border hover:bg-theme-base text-theme-primary rounded-lg font-semibold cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={!mergeSourceId || !mergeTargetId || mergeSourceId === mergeTargetId}
+                  className="px-4 py-2 bg-theme-accent hover:opacity-90 text-white rounded-lg font-semibold disabled:opacity-50 cursor-pointer"
+                >
+                  Consolidate Records
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+    </div>
+  );
+}

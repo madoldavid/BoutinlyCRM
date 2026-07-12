@@ -1,0 +1,6 @@
+{
+  "name": "Boutinly B2B CRM",
+  "description": "Boutinly's B2B Customer Relationship Management (CRM) platform with advanced role-based access controls, sales pipelines, interactive Kanban boards, communications tracking, analytics dashboards, and system administration.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
