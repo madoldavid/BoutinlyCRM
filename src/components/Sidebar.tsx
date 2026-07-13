@@ -60,7 +60,7 @@ export default function Sidebar() {
   const handleNotificationClick = (notifId: string, entityType: string) => {
     markNotificationRead(notifId);
     setShowNotifications(false);
-    
+
     // Auto-navigate to appropriate tab
     if (entityType === 'task') {
       setActiveModule('tasks');
@@ -91,49 +91,49 @@ export default function Sidebar() {
   };
 
   return (
-    <aside className="w-64 bg-[#0F172A] text-slate-100 flex flex-col h-screen border-r border-slate-800 shrink-0 select-none">
+    <aside className="w-64 bg-white text-theme-primary flex flex-col h-screen border-r border-theme-border shrink-0 select-none">
       {/* Brand Header */}
-      <div className="p-5 border-b border-slate-800 flex items-center justify-between">
+      <div className="p-5 border-b border-theme-border flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <div className="p-1.5 bg-blue-500/10 rounded text-blue-400">
+          <div className="p-1.5 bg-theme-accent/10 rounded text-theme-accent">
             <ShieldCheck className="w-5 h-5" />
           </div>
           <div>
-            <h1 className="font-semibold text-sm tracking-wide text-white">Boutinly</h1>
-            <span className="text-[10px] text-slate-400 font-sans">Active Workspace</span>
+            <h1 className="font-semibold text-sm tracking-wide text-theme-primary">Boutinly</h1>
+            <span className="text-[10px] text-theme-secondary font-sans">Active Workspace</span>
           </div>
         </div>
-        
+
         {/* In-app Notification Trigger */}
         <div className="relative">
           <button
             onClick={() => setShowNotifications(!showNotifications)}
-            className="p-1.5 hover:bg-slate-800 rounded text-slate-400 hover:text-white transition-colors relative cursor-pointer"
+            className="p-1.5 hover:bg-theme-base rounded text-theme-secondary hover:text-theme-primary transition-colors relative cursor-pointer"
             id="notification-bell-btn"
           >
             <Bell className="w-4 h-4" />
             {unreadNotifications.length > 0 && (
-              <span className="absolute top-0.5 right-0.5 w-2 h-2 bg-blue-500 rounded-full animate-pulse" />
+              <span className="absolute top-0.5 right-0.5 w-2 h-2 bg-theme-accent rounded-full animate-pulse" />
             )}
           </button>
 
           {/* Notifications Dropdown Panel */}
           {showNotifications && (
-            <div className="absolute right-0 mt-2 w-80 bg-white rounded-lg shadow-xl border border-slate-200 text-slate-800 z-50 overflow-hidden">
-              <div className="p-3 bg-slate-50 border-b border-slate-200 flex items-center justify-between">
-                <span className="text-xs font-semibold text-slate-800">Notifications ({unreadNotifications.length})</span>
+            <div className="absolute right-0 mt-2 w-80 bg-white rounded-lg shadow-xl border border-theme-border text-theme-primary z-50 overflow-hidden">
+              <div className="p-3 bg-theme-base border-b border-theme-border flex items-center justify-between">
+                <span className="text-xs font-semibold text-theme-primary">Notifications ({unreadNotifications.length})</span>
                 {unreadNotifications.length > 0 && (
                   <button
                     onClick={clearAllNotifications}
-                    className="text-[10px] font-medium text-blue-600 hover:text-blue-700 flex items-center gap-0.5 cursor-pointer"
+                    className="text-[10px] font-medium text-theme-accent hover:opacity-80 flex items-center gap-0.5 cursor-pointer"
                   >
                     <Check className="w-3 h-3" /> Mark all read
                   </button>
                 )}
               </div>
-              <div className="max-h-64 overflow-y-auto divide-y divide-slate-100">
+              <div className="max-h-64 overflow-y-auto divide-y divide-theme-border">
                 {unreadNotifications.length === 0 ? (
-                  <div className="p-4 text-center text-xs text-slate-500 font-sans">
+                  <div className="p-4 text-center text-xs text-theme-secondary font-sans">
                     No unread notifications
                   </div>
                 ) : (
@@ -141,11 +141,11 @@ export default function Sidebar() {
                     <div
                       key={n.id}
                       onClick={() => handleNotificationClick(n.id, n.entity_type)}
-                      className="p-3 hover:bg-slate-50 cursor-pointer transition-colors text-left"
+                      className="p-3 hover:bg-theme-base cursor-pointer transition-colors text-left"
                     >
-                      <h4 className="text-xs font-semibold text-slate-800">{n.title}</h4>
-                      <p className="text-[11px] text-slate-500 mt-1 leading-normal">{n.body}</p>
-                      <span className="text-[9px] text-slate-400 mt-2 block font-sans">
+                      <h4 className="text-xs font-semibold text-theme-primary">{n.title}</h4>
+                      <p className="text-[11px] text-theme-secondary mt-1 leading-normal">{n.body}</p>
+                      <span className="text-[9px] text-theme-secondary/70 mt-2 block font-sans">
                         {new Date(n.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                       </span>
                     </div>
@@ -158,10 +158,10 @@ export default function Sidebar() {
       </div>
 
       {/* Role Switcher & Profile Widget */}
-      <div className="p-4 border-b border-slate-800 bg-slate-900/50 relative">
+      <div className="p-4 border-b border-theme-border bg-theme-base/50 relative">
         <button
           onClick={() => setShowUserMenu(!showUserMenu)}
-          className="w-full flex items-center justify-between p-2 hover:bg-slate-800 rounded-lg transition-colors text-left cursor-pointer group"
+          className="w-full flex items-center justify-between p-2 hover:bg-theme-base rounded-lg transition-colors text-left cursor-pointer group"
           id="role-switcher-btn"
         >
           <div className="flex items-center gap-2 min-w-0">
@@ -169,26 +169,26 @@ export default function Sidebar() {
               <img
                 src={currentUser.avatar_url}
                 alt={currentUser.name}
-                className="w-8 h-8 rounded-full border border-slate-700 object-cover shrink-0"
+                className="w-8 h-8 rounded-full border border-theme-border object-cover shrink-0"
               />
             ) : (
-              <div className="w-8 h-8 rounded-full border border-slate-700 bg-blue-500/10 flex items-center justify-center text-blue-400 text-xs font-bold shrink-0">
+              <div className="w-8 h-8 rounded-full border border-theme-border bg-theme-accent/10 flex items-center justify-center text-theme-accent text-xs font-bold shrink-0">
                 {currentUser.name.charAt(0)}
               </div>
             )}
             <div className="min-w-0">
-              <p className="text-xs font-medium text-white truncate">{currentUser.name}</p>
-              <p className="text-[10px] text-blue-400 truncate uppercase tracking-wider font-sans font-semibold">
+              <p className="text-xs font-medium text-theme-primary truncate">{currentUser.name}</p>
+              <p className="text-[10px] text-theme-accent truncate uppercase tracking-wider font-sans font-semibold">
                 {currentUser.role.replace('_', ' ')}
               </p>
             </div>
           </div>
-          <ChevronDown className="w-4 h-4 text-slate-400 group-hover:text-white transition-colors shrink-0 ml-1" />
+          <ChevronDown className="w-4 h-4 text-theme-secondary group-hover:text-theme-primary transition-colors shrink-0 ml-1" />
         </button>
 
         {showUserMenu && (
-          <div className="absolute left-4 right-4 mt-2 bg-white rounded-lg shadow-xl border border-slate-200 text-slate-800 z-50 py-1 divide-y divide-slate-100 max-h-80 overflow-y-auto">
-            <div className="px-3 py-2 text-[10px] text-slate-400 font-semibold uppercase tracking-wider">
+          <div className="absolute left-4 right-4 mt-2 bg-white rounded-lg shadow-xl border border-theme-border text-theme-primary z-50 py-1 divide-y divide-theme-border max-h-80 overflow-y-auto">
+            <div className="px-3 py-2 text-[10px] text-theme-secondary font-semibold uppercase tracking-wider">
               Impersonate Role
             </div>
             {users.map(u => (
@@ -198,26 +198,26 @@ export default function Sidebar() {
                   setCurrentUser(u.id);
                   setShowUserMenu(false);
                 }}
-                className={`w-full text-left px-3 py-2 text-xs flex items-center justify-between hover:bg-slate-50 transition-colors cursor-pointer ${
-                  u.id === currentUser.id ? 'bg-slate-50 text-blue-600 font-medium' : 'text-slate-800'
+                className={`w-full text-left px-3 py-2 text-xs flex items-center justify-between hover:bg-theme-base transition-colors cursor-pointer ${
+                  u.id === currentUser.id ? 'bg-theme-base text-theme-accent font-medium' : 'text-theme-primary'
                 }`}
               >
                 <div>
                   <span className="block font-medium">{u.name}</span>
-                  <span className="text-[10px] text-slate-500 uppercase font-sans tracking-wide">
+                  <span className="text-[10px] text-theme-secondary uppercase font-sans tracking-wide">
                     {u.role.replace('_', ' ')}
                   </span>
                 </div>
-                {u.id === currentUser.id && <UserCheck className="w-3.5 h-3.5 text-blue-600" />}
+                {u.id === currentUser.id && <UserCheck className="w-3.5 h-3.5 text-theme-accent" />}
               </button>
             ))}
           </div>
         )}
 
         {/* Dynamic Role Capability Prompt */}
-        <div className="mt-2.5 px-2 py-1.5 bg-slate-800/40 rounded border border-slate-800 flex gap-1.5 items-start">
-          <Info className="w-3.5 h-3.5 text-blue-400 shrink-0 mt-0.5" />
-          <p className="text-[10px] text-slate-400 leading-normal font-sans">
+        <div className="mt-2.5 px-2 py-1.5 bg-theme-base/60 rounded border border-theme-border flex gap-1.5 items-start">
+          <Info className="w-3.5 h-3.5 text-theme-accent shrink-0 mt-0.5" />
+          <p className="text-[10px] text-theme-secondary leading-normal font-sans">
             <strong>Scope Alert:</strong> {roleDescriptions[currentUser.role]}
           </p>
         </div>
@@ -240,17 +240,17 @@ export default function Sidebar() {
               onClick={() => handleModuleClick(item.id)}
               className={`w-full flex items-center gap-3 px-3 py-2.5 text-xs font-medium rounded-lg transition-all cursor-pointer group ${
                 isActive
-                  ? 'bg-blue-600 text-white shadow-sm'
-                  : 'text-slate-300 hover:text-white hover:bg-slate-800/60'
+                  ? 'bg-theme-accent text-white shadow-sm'
+                  : 'text-theme-secondary hover:text-theme-primary hover:bg-theme-base'
               }`}
               id={`nav-${item.id}`}
             >
-              <Icon className={`w-4 h-4 shrink-0 ${isActive ? 'text-white' : 'text-slate-400 group-hover:text-white'}`} />
+              <Icon className={`w-4 h-4 shrink-0 ${isActive ? 'text-white' : 'text-theme-secondary/60 group-hover:text-theme-primary'}`} />
               <span className="truncate">{item.label}</span>
-              
+
               {/* Optional notifications bubble on side menu */}
               {item.id === 'tasks' && tasks.filter(t => t.assigned_to_id === currentUser.id && !t.completed_at && new Date(t.due_at) < new Date()).length > 0 && (
-                <span className="ml-auto bg-blue-500/20 text-blue-300 border border-blue-500/30 px-1.5 py-0.5 text-[9px] rounded-full font-sans font-bold">
+                <span className="ml-auto bg-theme-accent/10 text-theme-accent border border-theme-accent/20 px-1.5 py-0.5 text-[9px] rounded-full font-sans font-bold">
                   {tasks.filter(t => t.assigned_to_id === currentUser.id && !t.completed_at && new Date(t.due_at) < new Date()).length} OVERDUE
                 </span>
               )}
@@ -259,8 +259,8 @@ export default function Sidebar() {
         })}
       </nav>
 
-      {/* Bottom Legal / Footnotes */}
-      <div className="p-4 border-t border-slate-800 bg-slate-900/40 text-[10px] text-slate-400 text-center font-sans">
+      {/* Bottom Footer */}
+      <div className="p-4 border-t border-theme-border bg-theme-base/30 text-[10px] text-theme-secondary text-center font-sans">
         <div>Secure Environment</div>
         <div>boutinly.com</div>
       </div>

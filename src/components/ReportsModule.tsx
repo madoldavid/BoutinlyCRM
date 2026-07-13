@@ -20,15 +20,16 @@ import {
 } from 'lucide-react';
 
 export default function ReportsModule() {
-  const { 
-    currentUser, 
-    getScopedDeals, 
-    getScopedTasks, 
+  const {
+    currentUser,
+    getScopedDeals,
+    getScopedTasks,
     getScopedActivities,
     accounts,
     contacts,
     users,
-    stages
+    stages,
+    activePipelineId
   } = useCRM();
 
   const [activeSubTab, setActiveSubTab] = useState<'dash' | 'health' | 'winloss' | 'builder'>('dash');
@@ -66,12 +67,34 @@ export default function ReportsModule() {
   const totalOpenValue = openDeals.reduce((sum, d) => sum + d.value, 0);
   const totalWonValue = wonDeals.reduce((sum, d) => sum + d.value, 0);
 
-  // Rep Quota Attainment (Dave has a quota of $1,000,000 for Q3 2026)
-  const personalQuota = 1000000;
-  const repQuotaAttainment = (totalWonValue / personalQuota) * 100;
+  // Rep Quota Attainment
+  const personalQuota = currentUser?.custom_fields?.quota
+    ? Number(currentUser.custom_fields.quota)
+    : 1000000;
+  const repQuotaAttainment = personalQuota > 0 ? (totalWonValue / personalQuota) * 100 : 0;
 
   // Render personal or manager views based on role
   const isManagerOrAdmin = [UserRole.SUPER_ADMIN, UserRole.ADMIN, UserRole.MANAGER].includes(currentUser.role);
+
+  // CSV export helper
+  const handleExportCsv = () => {
+    if (reportResult.length === 0) return;
+    const headers = ['Group', 'Volume'];
+    if (reportEntity === 'deal' && reportMetric === 'sum_value') headers.push('Total Value');
+    const rows = reportResult.map(row => {
+      const vals = [row.groupName, String(row.count)];
+      if (reportEntity === 'deal' && reportMetric === 'sum_value') vals.push(String(row.value));
+      return vals.map(v => `"${v}"`).join(',');
+    });
+    const csv = [headers.join(','), ...rows].join('\n');
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `report-${reportEntity}-${new Date().toISOString().slice(0, 10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
 
   // Generate Custom Report Trigger
   const handleGenerateReport = () => {
@@ -318,10 +341,10 @@ export default function ReportsModule() {
                 </div>
 
                 <div className="space-y-3.5 my-4">
-                  {stages.filter(s => s.pipeline_id === 'pipe-enterprise').map(stg => {
+                  {stages.filter(s => s.pipeline_id === activePipelineId).map(stg => {
                     const stgDeals = scopedDeals.filter(d => d.stage_id === stg.id);
                     const totalVal = stgDeals.reduce((sum, d) => sum + d.value, 0);
-                    const maxVal = Math.max(...stages.filter(s => s.pipeline_id === 'pipe-enterprise').map(s => 
+                    const maxVal = Math.max(...stages.filter(s => s.pipeline_id === activePipelineId).map(s =>
                       scopedDeals.filter(d => d.stage_id === s.id).reduce((sum, d) => sum + d.value, 0)
                     )) || 1;
                     const percent = (totalVal / maxVal) * 100;
@@ -430,7 +453,14 @@ export default function ReportsModule() {
 
             {/* Custom Funnel Visualizer (SVG Horizontal bars of decreasing width) */}
             <div className="flex flex-col items-center justify-center py-6 space-y-4 max-w-xl mx-auto">
-              {stages.filter(s => s.pipeline_id === 'pipe-enterprise' && s.type === 'open').map((stg, index) => {
+              {stages.filter(s => s.pipeline_id === activePipelineId && s.type === 'open').length === 0 ? (
+                <div className="text-center py-8 text-xs text-theme-secondary/70 font-sans">
+                  <GitPullRequest className="w-10 h-10 mx-auto mb-2 text-theme-secondary/30" />
+                  <p className="font-semibold text-theme-secondary">No pipeline stages available</p>
+                  <p className="mt-1">Configure your pipeline stages to visualize the deal funnel.</p>
+                </div>
+              ) : (
+                stages.filter(s => s.pipeline_id === activePipelineId && s.type === 'open').map((stg, index) => {
                 const dealsInStgCount = scopedDeals.filter(d => d.stage_id === stg.id).length;
                 const widthPercent = 100 - (index * 15); // Stagger funnel layout
                 
@@ -448,26 +478,55 @@ export default function ReportsModule() {
                     </div>
                   </div>
                 );
-              })}
+              })
+              )}
             </div>
 
             <div className="border-t border-theme-border pt-5">
               <h4 className="text-xs font-bold uppercase font-sans tracking-wider text-theme-secondary mb-3">Health Indicators</h4>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs text-theme-secondary leading-normal">
-                <div className="p-4 bg-theme-accent/5 rounded-lg border border-theme-accent/15 flex gap-3">
-                  <div className="text-theme-accent shrink-0 text-base">⚠️</div>
-                  <div>
-                    <span className="font-semibold block text-theme-primary">Proposal Bottleneck Detected</span>
-                    Solutions Demo stage has 1 deal stagnant for over 14 days. Close attention is recommended on "Globex Next-Gen Turbine Licensing" to avoid deal stall.
-                  </div>
-                </div>
-                <div className="p-4 bg-theme-accent/10 rounded-lg border border-theme-accent/20 flex gap-3">
-                  <div className="text-theme-accent shrink-0 text-base">✅</div>
-                  <div>
-                    <span className="font-semibold block text-theme-primary">Positive Velocity</span>
-                    Contract negotiation stage has transitioned 2 deals successfully into Won states within the last 30 days. No deal loss registered during negotiations.
-                  </div>
-                </div>
+                {(() => {
+                  const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+                  const stagnantDeals = openDeals.filter(d => {
+                    const entered = new Date(d.stage_entered_at);
+                    return entered < new Date(Date.now() - 14 * 24 * 60 * 60 * 1000);
+                  });
+                  const recentlyWon = wonDeals.filter(d => {
+                    const wonAt = d.won_at ? new Date(d.won_at) : null;
+                    return wonAt && wonAt > thirtyDaysAgo;
+                  });
+                  const recentlyLost = lostDeals.filter(d => {
+                    const lostAt = d.lost_at ? new Date(d.lost_at) : null;
+                    return lostAt && lostAt > thirtyDaysAgo;
+                  });
+
+                  return (
+                    <>
+                      {stagnantDeals.length > 0 && (
+                        <div className="p-4 bg-theme-accent/5 rounded-lg border border-theme-accent/15 flex gap-3">
+                          <div className="text-theme-accent shrink-0 text-base">⚠️</div>
+                          <div>
+                            <span className="font-semibold block text-theme-primary">Stagnant Deal{stagnantDeals.length > 1 ? 's' : ''} Detected</span>
+                            {stagnantDeals.length} deal{stagnantDeals.length > 1 ? 's' : ''} stuck in current stage for over 14 days. Review "{stagnantDeals[0].name}"{stagnantDeals.length > 1 ? `and ${stagnantDeals.length - 1} other${stagnantDeals.length > 2 ? 's' : ''}` : ''} to prevent pipeline stall.
+                          </div>
+                        </div>
+                      )}
+                      <div className="p-4 bg-theme-accent/10 rounded-lg border border-theme-accent/20 flex gap-3">
+                        <div className="text-theme-accent shrink-0 text-base">{recentlyWon.length > 0 ? '✅' : '📊'}</div>
+                        <div>
+                          <span className="font-semibold block text-theme-primary">Pipeline Velocity</span>
+                          {recentlyWon.length > 0
+                            ? `${recentlyWon.length} deal${recentlyWon.length > 1 ? 's' : ''} won in last 30 days. `
+                            : 'No deals won in last 30 days. '}
+                          {recentlyLost.length > 0
+                            ? `${recentlyLost.length} deal${recentlyLost.length > 1 ? 's' : ''} lost. `
+                            : 'No recent losses. '}
+                          Total pipeline value: ${totalOpenValue.toLocaleString()}.
+                        </div>
+                      </div>
+                    </>
+                  );
+                })()}
               </div>
             </div>
           </div>
@@ -492,35 +551,36 @@ export default function ReportsModule() {
                 <h4 className="text-xs font-bold uppercase font-sans tracking-wider text-theme-secondary mb-3">Lost Reason Attribution</h4>
                 
                 <div className="space-y-3">
-                  <div>
-                    <div className="flex justify-between text-xs text-theme-secondary font-semibold mb-1">
-                      <span>Competitor Price Undercutting</span>
-                      <span>50%</span>
-                    </div>
-                    <div className="w-full bg-theme-base h-2 rounded-full overflow-hidden">
-                      <div className="bg-theme-accent/70 h-full rounded-full" style={{ width: '50%' }} />
-                    </div>
-                  </div>
-                  
-                  <div>
-                    <div className="flex justify-between text-xs text-theme-secondary font-semibold mb-1">
-                      <span>Feature Deficit</span>
-                      <span>30%</span>
-                    </div>
-                    <div className="w-full bg-theme-base h-2 rounded-full overflow-hidden">
-                      <div className="bg-theme-accent/45 h-full rounded-full" style={{ width: '30%' }} />
-                    </div>
-                  </div>
-
-                  <div>
-                    <div className="flex justify-between text-xs text-theme-secondary font-semibold mb-1">
-                      <span>Executive Sponsor Churn</span>
-                      <span>20%</span>
-                    </div>
-                    <div className="w-full bg-theme-base h-2 rounded-full overflow-hidden">
-                      <div className="bg-theme-secondary/40 h-full rounded-full" style={{ width: '20%' }} />
-                    </div>
-                  </div>
+                  {(() => {
+                    const lostWithReasons = lostDeals.filter(d => d.lost_reason);
+                    if (lostWithReasons.length === 0) {
+                      return <p className="text-xs text-theme-secondary">No lost deal data available yet.</p>;
+                    }
+                    const reasonCounts: Record<string, number> = {};
+                    lostWithReasons.forEach(d => {
+                      const reason = d.lost_reason || 'Unspecified';
+                      reasonCounts[reason] = (reasonCounts[reason] || 0) + 1;
+                    });
+                    const total = lostWithReasons.length;
+                    const opacities = ['bg-theme-accent/70', 'bg-theme-accent/45', 'bg-theme-secondary/40', 'bg-theme-secondary/30'];
+                    return Object.entries(reasonCounts)
+                      .sort(([, a], [, b]) => b - a)
+                      .slice(0, 5)
+                      .map(([reason, count], i) => {
+                        const pct = (count / total) * 100;
+                        return (
+                          <div key={reason}>
+                            <div className="flex justify-between text-xs text-theme-secondary font-semibold mb-1">
+                              <span>{reason}</span>
+                              <span>{pct.toFixed(0)}%</span>
+                            </div>
+                            <div className="w-full bg-theme-base h-2 rounded-full overflow-hidden">
+                              <div className={`${opacities[i] || 'bg-theme-accent/30'} h-full rounded-full`} style={{ width: `${pct}%` }} />
+                            </div>
+                          </div>
+                        );
+                      });
+                  })()}
                 </div>
               </div>
 
@@ -655,7 +715,10 @@ export default function ReportsModule() {
               <div className="bg-theme-card p-5 rounded-xl shadow-xs border border-theme-border space-y-4">
                 <div className="flex justify-between items-center">
                   <h4 className="text-xs font-bold uppercase font-sans tracking-wider text-theme-secondary">Report Output</h4>
-                  <button className="text-xs text-theme-accent hover:opacity-80 font-medium flex items-center gap-1 cursor-pointer">
+                  <button
+                    onClick={handleExportCsv}
+                    className="text-xs text-theme-accent hover:opacity-80 font-medium flex items-center gap-1 cursor-pointer"
+                  >
                     <FileDown className="w-3.5 h-3.5" /> Export as CSV
                   </button>
                 </div>

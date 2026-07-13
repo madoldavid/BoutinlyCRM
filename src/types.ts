@@ -13,6 +13,7 @@ export enum UserRole {
 
 export interface User {
   id: string;
+  organization_id?: string;
   email: string;
   name: string;
   avatar_url?: string;
@@ -21,6 +22,7 @@ export interface User {
   is_active: boolean;
   timezone: string;
   team_id?: string;
+  custom_fields?: Record<string, unknown>;
 }
 
 export interface Team {
@@ -40,6 +42,7 @@ export interface Organization {
 
 export interface Contact {
   id: string;
+  organization_id?: string;
   first_name: string;
   last_name: string;
   email: string;
@@ -56,6 +59,7 @@ export interface Contact {
 
 export interface Account {
   id: string;
+  organization_id?: string;
   name: string;
   domain: string;
   industry: string;
@@ -95,6 +99,7 @@ export interface DealLineItem {
 
 export interface Deal {
   id: string;
+  organization_id?: string;
   name: string;
   pipeline_id: string;
   stage_id: string;
@@ -115,6 +120,7 @@ export interface Deal {
 
 export interface Task {
   id: string;
+  organization_id?: string;
   title: string;
   type: 'call' | 'email' | 'meeting' | 'todo';
   priority: 'low' | 'medium' | 'high';
@@ -129,7 +135,8 @@ export interface Task {
 
 export interface Activity {
   id: string;
-  type: 'call' | 'meeting' | 'email_sent' | 'note' | 'stage_change' | 'task_completed' | 'file_uploaded';
+  organization_id?: string;
+  type: 'call' | 'meeting' | 'email_sent' | 'note' | 'stage_change' | 'task_completed' | 'file_uploaded' | 'deal_closed';
   title: string;
   body: string;
   outcome?: string; // e.g., 'connected', 'voicemail', etc.
@@ -144,6 +151,7 @@ export interface Activity {
 
 export interface Notification {
   id: string;
+  organization_id?: string;
   user_id: string;
   type: string;
   title: string;
@@ -156,6 +164,7 @@ export interface Notification {
 
 export interface CustomFieldDefinition {
   id: string;
+  organization_id?: string;
   entity_type: 'contact' | 'account' | 'deal';
   key: string; // snake_case identifier
   label: string; // Display name
@@ -168,6 +177,7 @@ export interface CustomFieldDefinition {
 
 export interface EmailTemplate {
   id: string;
+  organization_id?: string;
   name: string;
   subject: string;
   body_html: string;
@@ -179,6 +189,7 @@ export interface EmailTemplate {
 
 export interface EmailCampaign {
   id: string;
+  organization_id?: string;
   name: string;
   template_id: string;
   status: 'draft' | 'scheduled' | 'sending' | 'sent' | 'cancelled';
@@ -195,6 +206,7 @@ export interface EmailCampaign {
 
 export interface AuditLog {
   id: string;
+  organization_id?: string;
   user_id?: string;
   user_name: string;
   action: string;

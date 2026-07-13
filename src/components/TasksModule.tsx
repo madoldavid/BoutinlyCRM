@@ -152,13 +152,27 @@ export default function TasksModule() {
     }, 4000);
   };
 
-  // Simulated calendar days for July 2026 (Starts on a Wednesday)
-  const calendarDays = Array.from({ length: 31 }, (_, i) => i + 1);
+  // Dynamic calendar for current month
+  const now = new Date();
+  const currentYear = now.getFullYear();
+  const currentMonth = now.getMonth();
+  const daysInMonth = new Date(currentYear, currentMonth + 1, 0).getDate();
+  const firstDayOfMonth = new Date(currentYear, currentMonth, 1).getDay();
+  const calendarDays = Array.from({ length: daysInMonth }, (_, i) => i + 1);
+  const monthNames = ['January', 'February', 'March', 'April', 'May', 'June',
+    'July', 'August', 'September', 'October', 'November', 'December'];
+  const dayHeaders = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
+  // Rotate dayHeaders so the first column matches the first day of the month
+  const rotatedDayHeaders = [
+    ...dayHeaders.slice(firstDayOfMonth),
+    ...dayHeaders.slice(0, firstDayOfMonth),
+  ];
 
   const getTasksForDay = (dayNum: number) => {
     return scopedTasks.filter(t => {
       const d = new Date(t.due_at);
-      return d.getMonth() === 6 && d.getDate() === dayNum && d.getFullYear() === 2026; // Month 6 is July
+      return d.getMonth() === currentMonth && d.getDate() === dayNum && d.getFullYear() === currentYear;
     });
   };
 
@@ -331,14 +345,14 @@ export default function TasksModule() {
           <div className="flex-1 overflow-y-auto p-4 flex flex-col h-full bg-theme-base text-left">
             <div className="flex justify-between items-center bg-theme-card p-3 border border-theme-border rounded-xl mb-4 shadow-2xs">
               <span className="font-bold text-xs text-theme-primary flex items-center gap-1">
-                <CalendarIcon className="w-4 h-4 text-theme-accent" /> July 2026
+                <CalendarIcon className="w-4 h-4 text-theme-accent" /> {monthNames[currentMonth]} {currentYear}
               </span>
               <span className="text-[10px] text-theme-secondary font-sans">Month Agenda Overview</span>
             </div>
 
             {/* Calendar Grid 7 Columns */}
             <div className="grid grid-cols-7 gap-1.5 text-center text-[10px] font-bold text-theme-secondary font-sans uppercase mb-1">
-              <div>Wed</div><div>Thu</div><div>Fri</div><div>Sat</div><div>Sun</div><div>Mon</div><div>Tue</div>
+              {rotatedDayHeaders.map(d => <div key={d}>{d}</div>)}
             </div>
 
             <div className="grid grid-cols-7 gap-1.5 flex-1">

@@ -1,0 +1,54 @@
+name: CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+
+jobs:
+  check:
+    name: Lint, Test & Build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: boutinly
+          POSTGRES_PASSWORD: ci-test-password
+          POSTGRES_DB: boutinly_crm_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Lint
+        run: npx tsc --noEmit && npx tsc -p tsconfig.server.json --noEmit
+
+      - name: Test
+        run: npx vitest run
+        env:
+          DATABASE_URL: postgres://boutinly:ci-test-password@localhost:5432/boutinly_crm_test
+          JWT_SECRET: ci-test-jwt-secret-at-least-32-chars-long
+          PASSWORD_PEPPER: ci-test-password-pepper
+
+      - name: Build
+        run: npm run build && npm run build:api
+
+      - name: Audit
+        run: npm run audit

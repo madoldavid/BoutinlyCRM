@@ -1,3 +1,4 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
 @import "tailwindcss";
 
 @theme {
@@ -23,21 +24,21 @@
 }
 
 .theme-artisan {
-  --bg-base: #F8FAFC;
+  --bg-base: #FDF8F0;         /* Warm cream */
   --bg-card: #FFFFFF;
-  --text-primary: #1E293B;
-  --text-secondary: #64748B;
-  --accent: #1D4ED8;
-  --border: #E2E8F0;
+  --text-primary: #3D2E1C;    /* Dark walnut */
+  --text-secondary: #8B7355;  /* Warm brown */
+  --accent: #D4842A;          /* Burnished gold */
+  --border: #E8D5C0;          /* Warm tan border */
 }
 
 .theme-operator {
-  --bg-base: #F8FAFC;
+  --bg-base: #F4F6F9;         /* Cool gray-blue */
   --bg-card: #FFFFFF;
-  --text-primary: #1E293B;
-  --text-secondary: #64748B;
-  --accent: #1D4ED8;
-  --border: #E2E8F0;
+  --text-primary: #1A2332;    /* Deep navy */
+  --text-secondary: #5E6F8C;  /* Muted steel */
+  --accent: #3B6FB6;          /* Steel blue */
+  --border: #D8DFE8;          /* Cool gray border */
 }
 
 .theme-heritage {
@@ -45,7 +46,7 @@
   --bg-card: #FFFFFF;
   --text-primary: #1E293B;
   --text-secondary: #64748B;
-  --accent: #1D4ED8;
+  --accent: #1D4ED8;          /* Cobalt blue */
   --border: #E2E8F0;
 }
 
@@ -55,9 +56,6 @@
   transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
   transition-duration: 150ms;
 }
-
-/* Base custom font imports */
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
 
 html, body {
   background-color: var(--bg-base);

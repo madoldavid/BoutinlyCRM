@@ -299,7 +299,14 @@ export default function EmailsModule() {
         {/* SUB VIEW: TEMPLATE LIBRARY */}
         {activeSubView === 'templates' && (
           <div className="flex-1 overflow-y-auto divide-y divide-theme-border bg-theme-card">
-            {emailTemplates.map(tmp => (
+            {emailTemplates.length === 0 ? (
+              <div className="p-8 text-center text-xs text-theme-secondary/70 font-sans">
+                <BookOpen className="w-8 h-8 mx-auto mb-2 text-theme-secondary/40" />
+                <p className="font-semibold text-theme-secondary">No email templates yet</p>
+                <p className="mt-1">Create your first template to get started with email outreach.</p>
+              </div>
+            ) : (
+              emailTemplates.map(tmp => (
               <div key={tmp.id} className="p-4 text-left hover:bg-theme-base/40 transition-colors select-none">
                 <div className="flex justify-between items-start">
                   <div>
@@ -328,7 +335,8 @@ export default function EmailsModule() {
                   ))}
                 </div>
               </div>
-            ))}
+            ))
+            )}
           </div>
         )}
 
@@ -340,7 +348,14 @@ export default function EmailsModule() {
                 {successMessage}
               </div>
             )}
-            {emailCampaigns.map(camp => {
+            {emailCampaigns.length === 0 ? (
+              <div className="p-8 text-center text-xs text-theme-secondary/70 font-sans">
+                <PieChart className="w-8 h-8 mx-auto mb-2 text-theme-secondary/40" />
+                <p className="font-semibold text-theme-secondary">No campaigns sent yet</p>
+                <p className="mt-1">Launch your first bulk email outreach from the compose tab.</p>
+              </div>
+            ) : (
+              emailCampaigns.map(camp => {
               const openRate = camp.total_recipients > 0 ? (camp.opened_count / camp.total_recipients) * 100 : 0;
               const clickRate = camp.total_recipients > 0 ? (camp.clicked_count / camp.total_recipients) * 100 : 0;
               const template = emailTemplates.find(t => t.id === camp.template_id);
@@ -382,7 +397,8 @@ export default function EmailsModule() {
                   </div>
                 </div>
               );
-            })}
+            })
+            )}
           </div>
         )}
 
@@ -403,17 +419,38 @@ export default function EmailsModule() {
             <div className="p-3 bg-theme-base/50 rounded-xl border border-theme-border">
               <Eye className="w-5 h-5 text-theme-accent mx-auto" />
               <span className="text-[10px] text-theme-secondary block uppercase font-sans font-bold mt-1.5">Avg Open Rate</span>
-              <span className="text-sm font-extrabold text-theme-primary font-sans">58%</span>
+              <span className="text-sm font-extrabold text-theme-primary font-sans">
+                {(() => {
+                  const sent = emailCampaigns.filter(c => c.status === 'sent' && c.total_recipients > 0);
+                  if (sent.length === 0) return 'N/A';
+                  const avg = sent.reduce((s, c) => s + (c.opened_count / c.total_recipients) * 100, 0) / sent.length;
+                  return `${avg.toFixed(0)}%`;
+                })()}
+              </span>
             </div>
             <div className="p-3 bg-theme-base/50 rounded-xl border border-theme-border">
               <MousePointerClick className="w-5 h-5 text-theme-accent mx-auto" />
               <span className="text-[10px] text-theme-secondary block uppercase font-sans font-bold mt-1.5">Avg Click Rate</span>
-              <span className="text-sm font-extrabold text-theme-primary font-sans">24%</span>
+              <span className="text-sm font-extrabold text-theme-primary font-sans">
+                {(() => {
+                  const sent = emailCampaigns.filter(c => c.status === 'sent' && c.total_recipients > 0);
+                  if (sent.length === 0) return 'N/A';
+                  const avg = sent.reduce((s, c) => s + (c.clicked_count / c.total_recipients) * 100, 0) / sent.length;
+                  return `${avg.toFixed(0)}%`;
+                })()}
+              </span>
             </div>
             <div className="p-3 bg-theme-base/50 rounded-xl border border-theme-border">
               <XOctagon className="w-5 h-5 text-theme-secondary mx-auto" />
               <span className="text-[10px] text-theme-secondary block uppercase font-sans font-bold mt-1.5">Hard Bounce</span>
-              <span className="text-sm font-extrabold text-theme-primary font-sans">0.8%</span>
+              <span className="text-sm font-extrabold text-theme-primary font-sans">
+                {(() => {
+                  const sent = emailCampaigns.filter(c => c.status === 'sent' && c.total_recipients > 0);
+                  if (sent.length === 0) return 'N/A';
+                  const avg = sent.reduce((s, c) => s + (c.bounced_count / c.total_recipients) * 100, 0) / sent.length;
+                  return `${avg.toFixed(1)}%`;
+                })()}
+              </span>
             </div>
           </div>
         </div>

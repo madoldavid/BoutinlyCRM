@@ -176,7 +176,14 @@ export default function AdminModule() {
         {/* WORKSPACE VIEW: USERS MANAGEMENT */}
         {activeSubView === 'users' && (
           <div className="flex-1 overflow-y-auto divide-y divide-theme-border text-left bg-theme-card">
-            {users.map(u => {
+            {users.length === 0 ? (
+              <div className="p-8 text-center text-xs text-theme-secondary/70 font-sans">
+                <Users className="w-8 h-8 mx-auto mb-2 text-theme-secondary/40" />
+                <p className="font-semibold text-theme-secondary">No users in this workspace</p>
+                <p className="mt-1">Invite team members to start collaborating.</p>
+              </div>
+            ) : (
+              users.map(u => {
               const isSelf = u.id === currentUser.id;
 
               return (
@@ -232,14 +239,22 @@ export default function AdminModule() {
                   </div>
                 </div>
               );
-            })}
+            })
+            )}
           </div>
         )}
 
         {/* WORKSPACE VIEW: CUSTOM FIELD BUILDER */}
         {activeSubView === 'fields' && (
           <div className="flex-1 overflow-y-auto divide-y divide-theme-border text-left bg-theme-card">
-            {customFields.map(cf => (
+            {customFields.length === 0 ? (
+              <div className="p-8 text-center text-xs text-theme-secondary/70 font-sans">
+                <SlidersHorizontal className="w-8 h-8 mx-auto mb-2 text-theme-secondary/40" />
+                <p className="font-semibold text-theme-secondary">No custom fields defined</p>
+                <p className="mt-1">Create attributes to extend your CRM schema for contacts, accounts, and deals.</p>
+              </div>
+            ) : (
+              customFields.map(cf => (
               <div key={cf.id} className="p-4 flex justify-between items-center hover:bg-theme-base/40 transition-colors">
                 <div>
                   <span className="bg-theme-accent/10 text-theme-accent border border-theme-accent/20 px-2 py-0.5 rounded text-[8px] font-bold uppercase font-sans tracking-wider">
@@ -257,7 +272,8 @@ export default function AdminModule() {
                   <Trash2 className="w-4 h-4" />
                 </button>
               </div>
-            ))}
+            ))
+            )}
           </div>
         )}
 
@@ -273,7 +289,7 @@ export default function AdminModule() {
               <div className="p-3 bg-theme-base border border-theme-border rounded-lg space-y-3 text-[11px] font-sans text-theme-primary">
                 <div>
                   <span className="text-theme-secondary block uppercase text-[9px] font-bold">Domain Name</span>
-                  <span className="font-bold">boutinly.com</span>
+                  <span className="font-bold">{currentUser.email.split('@')[1] || 'your-domain.com'}</span>
                 </div>
                 <div className="grid grid-cols-2 gap-4 border-t border-theme-border pt-2">
                   <div>
@@ -325,7 +341,14 @@ export default function AdminModule() {
             </div>
 
             <div className="flex-1 overflow-y-auto divide-y divide-theme-border font-sans text-[10px] text-theme-secondary bg-theme-card">
-              {filteredLogs.map(log => (
+              {filteredLogs.length === 0 ? (
+                <div className="p-8 text-center text-xs text-theme-secondary/70 font-sans">
+                  <FileSearch className="w-8 h-8 mx-auto mb-2 text-theme-secondary/40" />
+                  <p className="font-semibold text-theme-secondary">No audit log entries found</p>
+                  <p className="mt-1">{auditSearch ? 'Try adjusting your search query.' : 'Audit trail entries will appear as actions are performed.'}</p>
+                </div>
+              ) : (
+                filteredLogs.map(log => (
                 <div key={log.id} className="p-3 hover:bg-theme-base/40 transition-colors">
                   <div className="flex justify-between items-start">
                     <span className="text-theme-accent font-bold font-sans uppercase tracking-wide">{log.action}</span>
@@ -344,7 +367,8 @@ export default function AdminModule() {
                     </div>
                   )}
                 </div>
-              ))}
+              ))
+              )}
             </div>
           </div>
         )}

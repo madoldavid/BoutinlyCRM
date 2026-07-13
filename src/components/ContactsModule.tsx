@@ -217,17 +217,36 @@ export default function ContactsModule() {
 
   // Bulk CSV Import
   const handleCsvImport = () => {
+    // CSV line parser that handles quoted fields (e.g., "Smith, John", email@example.com)
+    const parseCsvLine = (line: string): string[] => {
+      const result: string[] = [];
+      let current = '';
+      let inQuotes = false;
+      for (const ch of line) {
+        if (ch === '"') {
+          inQuotes = !inQuotes;
+        } else if (ch === ',' && !inQuotes) {
+          result.push(current.trim());
+          current = '';
+        } else {
+          current += ch;
+        }
+      }
+      result.push(current.trim());
+      return result;
+    };
+
     setImportStatus('success');
     setTimeout(() => {
       const lines = importCsvText.split('\n');
       if (lines.length > 1) {
-        const headers = lines[0].split(',').map(h => h.trim().toLowerCase());
-        
+        const headers = parseCsvLine(lines[0]).map(h => h.trim().toLowerCase().replace(/^"|"$/g, ''));
+
         for (let i = 1; i < lines.length; i++) {
           const line = lines[i].trim();
           if (!line) continue;
-          
-          const values = line.split(',').map(v => v.trim());
+
+          const values = parseCsvLine(line).map(v => v.replace(/^"|"$/g, ''));
           const contactData: any = {
             first_name: '',
             last_name: '',

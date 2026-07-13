@@ -98,7 +98,15 @@ export default function PipelineModule() {
   const activeDeal = scopedDeals.find(d => d.id === selectedDealId) || filteredDeals[0];
 
   // Calculations for Forecast
-  const forecastMonths = ['July 2026', 'August 2026', 'September 2026', 'October 2026'];
+  const forecastMonths = (() => {
+    const months: string[] = [];
+    const now = new Date();
+    for (let i = 0; i < 4; i++) {
+      const d = new Date(now.getFullYear(), now.getMonth() + i, 1);
+      months.push(d.toLocaleDateString('en-US', { month: 'long', year: 'numeric' }));
+    }
+    return months;
+  })();
 
   // Add line item to deal
   const handleAddLineItem = (e: React.FormEvent) => {
@@ -267,7 +275,16 @@ export default function PipelineModule() {
         {/* VIEW: KANBAN BOARD */}
         {viewType === 'kanban' && (
           <div className="flex-1 overflow-x-auto overflow-y-hidden flex bg-theme-base p-3 gap-3.5 scrollbar-thin select-none">
-            {activeStages.map(stg => {
+            {activeStages.length === 0 ? (
+              <div className="flex-1 flex items-center justify-center">
+                <div className="text-center text-xs text-theme-secondary/70 font-sans">
+                  <Layers className="w-10 h-10 mx-auto mb-3 text-theme-secondary/30" />
+                  <p className="font-semibold text-theme-secondary">No pipeline stages configured</p>
+                  <p className="mt-1">Stages will appear here once they are created for this pipeline.</p>
+                </div>
+              </div>
+            ) : (
+              activeStages.map(stg => {
               const dealsInStg = filteredDeals.filter(d => d.stage_id === stg.id);
               const aggregateVal = dealsInStg.reduce((sum, d) => sum + d.value, 0);
 
@@ -350,7 +367,8 @@ export default function PipelineModule() {
                   </div>
                 </div>
               );
-            })}
+            })
+            )}
           </div>
         )}
 
@@ -409,7 +427,14 @@ export default function PipelineModule() {
             </div>
 
             <div className="space-y-4 font-sans text-xs">
-              {forecastMonths.map(month => {
+              {filteredDeals.length === 0 ? (
+                <div className="text-center py-8 text-xs text-theme-secondary/70 font-sans">
+                  <TrendingUp className="w-10 h-10 mx-auto mb-3 text-theme-secondary/30" />
+                  <p className="font-semibold text-theme-secondary">No deals to forecast</p>
+                  <p className="mt-1">Forecast data will populate once deals are created in the pipeline.</p>
+                </div>
+              ) : (
+                forecastMonths.map(month => {
                 const monthDeals = filteredDeals.filter(d => {
                   const dealMonth = new Date(d.close_date).toLocaleString('en-US', { month: 'long', year: 'numeric' });
                   return dealMonth === month;
@@ -443,7 +468,8 @@ export default function PipelineModule() {
                     </div>
                   </div>
                 );
-              })}
+              })
+              )}
             </div>
           </div>
         )}

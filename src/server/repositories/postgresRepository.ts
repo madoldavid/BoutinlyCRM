@@ -1,0 +1,1113 @@
+import { createHash, randomBytes, randomUUID } from 'node:crypto';
+import type {
+  Account,
+  Activity,
+  AuditLog,
+  Contact,
+  CustomFieldDefinition,
+  Deal,
+  EmailCampaign,
+  EmailTemplate,
+  Notification,
+  Organization,
+  Pipeline,
+  Stage,
+  Task,
+  User,
+  UserRole,
+} from '../../types.js';
+import { query } from '../db/connection.js';
+import type { DbRow } from '../db/types.js';
+import { hashPassword, verifyPassword } from '../security/password.js';
+import type {
+  CrmRepository,
+  CrmSnapshot,
+  CreateAccountInput,
+  CreateActivityInput,
+  CreateAuditLogInput,
+  CreateContactInput,
+  CreateCustomFieldInput,
+  CreateDealInput,
+  CreateEmailCampaignInput,
+  CreateEmailTemplateInput,
+  CreateTaskInput,
+  CreateUserInput,
+  PaginationParams,
+  UpdateAccountInput,
+  UpdateContactInput,
+  UpdateDealInput,
+  UpdateTaskInput,
+} from './crmRepository.js';
+
+export class PostgresCrmRepository implements CrmRepository {
+  // ─── Bootstrap (no-op: passwords handled by seed) ────
+
+  async bootstrapDemoPasswords(_password: string, _pepper: string) {
+    // PostgreSQL passwords are set via seed script — nothing to do here
+  }
+
+  // ─── Organization ────────────────────────────────────
+
+  async createOrganization(name: string, slug: string): Promise<Organization> {
+    const result = await query(
+      `INSERT INTO organizations (id, name, slug, plan, ses_domain, fiscal_year_start)
+       VALUES ($1, $2, $3, $4, $5, $6)
+       RETURNING *`,
+      [randomUUID(), name, slug, 'enterprise', `${slug}.boutinly.com`, 1],
+    );
+    return this.rowToOrganization(result.rows[0]);
+  }
+
+  async getOrganizationById(orgId: string): Promise<Organization | null> {
+    const result = await query('SELECT * FROM organizations WHERE id = $1', [orgId]);
+    return result.rows.length > 0 ? this.rowToOrganization(result.rows[0]) : null;
+  }
+
+  async countUsers(): Promise<number> {
+    const result = await query('SELECT count(*) as cnt FROM users');
+    return Number(result.rows[0]?.cnt || 0);
+  }
+
+  // ─── Auth ────────────────────────────────────────────
+
+  async verifyLogin(email: string, password: string) {
+    const pepper = process.env.PASSWORD_PEPPER || 'development-password-pepper';
+    const result = await query(
+      `SELECT id, organization_id, email, name, avatar_url, role, mfa_enabled, is_active, timezone, team_id
+       FROM users WHERE lower(email) = lower($1) AND is_active = true`,
+      [email],
+    );
+
+    if (result.rows.length === 0) return null;
+
+    const row = result.rows[0];
+    const hashResult = await query(
+      'SELECT password_hash FROM users WHERE id = $1',
+      [row.id],
+    );
+
+    const hash = hashResult.rows[0]?.password_hash;
+    if (!hash) return null;
+
+    const ok = await verifyPassword(password, hash, pepper);
+    if (!ok) return null;
+
+    return this.rowToUser(row);
+  }
+
+  async getUserById(userId: string) {
+    const result = await query(
+      `SELECT id, organization_id, email, name, avatar_url, role, mfa_enabled, is_active, timezone, team_id
+       FROM users WHERE id = $1`,
+      [userId],
+    );
+    return result.rows.length > 0 ? this.rowToUser(result.rows[0]) : null;
+  }
+
+  async getUserByEmail(email: string) {
+    const result = await query(
+      `SELECT id, organization_id, email, name, avatar_url, role, mfa_enabled, is_active, timezone, team_id
+       FROM users WHERE lower(email) = lower($1)`,
+      [email],
+    );
+    return result.rows.length > 0 ? this.rowToUser(result.rows[0]) : null;
+  }
+
+  async storePasswordResetToken(userId: string): Promise<string> {
+    const rawToken = randomBytes(32).toString('hex');
+    const hashed = createHash('sha256').update(rawToken).digest('hex');
+    await query(
+      `INSERT INTO password_reset_tokens (user_id, token_hash, expires_at)
+       VALUES ($1, $2, NOW() + INTERVAL '1 hour')`,
+      [userId, hashed],
+    );
+    return rawToken;
+  }
+
+  async consumePasswordResetToken(token: string): Promise<string | null> {
+    const hashed = createHash('sha256').update(token).digest('hex');
+    const result = await query(
+      `DELETE FROM password_reset_tokens
+       WHERE token_hash = $1 AND expires_at > NOW()
+       RETURNING user_id`,
+      [hashed],
+    );
+    return result.rows.length > 0 ? result.rows[0].user_id : null;
+  }
+
+  async updateUserPassword(userId: string, passwordHash: string): Promise<void> {
+    await query(
+      `UPDATE users SET password_hash = $2 WHERE id = $1`,
+      [userId, passwordHash],
+    );
+  }
+
+  async getTotpSecret(userId: string): Promise<string | null> {
+    const result = await query(
+      `SELECT totp_secret FROM users WHERE id = $1`,
+      [userId],
+    );
+    return result.rows[0]?.totp_secret || null;
+  }
+
+  async setTotpSecret(userId: string, secret: string): Promise<void> {
+    await query(
+      `UPDATE users SET totp_secret = $2 WHERE id = $1`,
+      [userId, secret],
+    );
+  }
+
+  async enableMfa(userId: string): Promise<void> {
+    await query(
+      `UPDATE users SET mfa_enabled = true WHERE id = $1`,
+      [userId],
+    );
+  }
+
+  async disableMfa(userId: string): Promise<void> {
+    await query(
+      `UPDATE users SET mfa_enabled = false, totp_secret = NULL WHERE id = $1`,
+      [userId],
+    );
+  }
+
+  // ─── Users ──────────────────────────────────────────
+
+  async listUsers(): Promise<User[]> {
+    const result = await query(
+      `SELECT id, organization_id, email, name, avatar_url, role, mfa_enabled, is_active, timezone, team_id
+       FROM users ORDER BY name`,
+    );
+    return result.rows.map((row: DbRow) => this.rowToUser(row));
+  }
+
+  async addUser(input: CreateUserInput): Promise<User> {
+    const pepper = process.env.PASSWORD_PEPPER || 'development-password-pepper';
+    const demoPassword = process.env.DEMO_PASSWORD || 'ChangeMe123!';
+    const passwordHash = await hashPassword(demoPassword, pepper);
+
+    const result = await query(
+      `INSERT INTO users (id, organization_id, email, name, password_hash, role, is_active, timezone)
+       VALUES ($1, current_setting('app.organization_id'), $2, $3, $4, $5, true, 'UTC')
+       RETURNING id, email, name, avatar_url, role, mfa_enabled, is_active, timezone, team_id`,
+      [randomUUID(), input.email, input.name, passwordHash, input.role],
+    );
+    return this.rowToUser(result.rows[0]);
+  }
+
+  async addUserWithPassword(input: { name: string; email: string; passwordHash: string; role: UserRole; organization_id?: string }): Promise<User> {
+    const result = await query(
+      `INSERT INTO users (id, organization_id, email, name, password_hash, role, is_active, timezone)
+       VALUES ($1, $2, $3, $4, $5, $6, true, 'UTC')
+       RETURNING id, organization_id, email, name, avatar_url, role, mfa_enabled, is_active, timezone, team_id`,
+      [randomUUID(), input.organization_id || null, input.email, input.name, input.passwordHash, input.role],
+    );
+    return this.rowToUser(result.rows[0]);
+  }
+
+  async updateUserRole(userId: string, role: UserRole): Promise<User | null> {
+    const result = await query(
+      `UPDATE users SET role = $2 WHERE id = $1
+       RETURNING id, email, name, avatar_url, role, mfa_enabled, is_active, timezone, team_id`,
+      [userId, role],
+    );
+    return result.rows.length > 0 ? this.rowToUser(result.rows[0]) : null;
+  }
+
+  async toggleUserStatus(userId: string): Promise<User | null> {
+    const result = await query(
+      `UPDATE users SET is_active = NOT is_active WHERE id = $1
+       RETURNING id, email, name, avatar_url, role, mfa_enabled, is_active, timezone, team_id`,
+      [userId],
+    );
+    return result.rows.length > 0 ? this.rowToUser(result.rows[0]) : null;
+  }
+
+  // ─── Contacts ───────────────────────────────────────
+
+  async listContacts(params?: PaginationParams): Promise<Contact[]> {
+    let sql = `SELECT * FROM contacts`;
+    const conditions: string[] = [];
+    const values: unknown[] = [];
+    let paramIdx = 1;
+
+    if (params?.search) {
+      conditions.push(`(first_name ILIKE $${paramIdx} OR last_name ILIKE $${paramIdx} OR email ILIKE $${paramIdx})`);
+      values.push(`%${params.search}%`);
+      paramIdx++;
+    }
+
+    if (conditions.length > 0) {
+      sql += ` WHERE ` + conditions.join(' AND ');
+    }
+
+    sql += ` ORDER BY created_at DESC`;
+
+    if (params?.page && params?.limit) {
+      sql += ` LIMIT $${paramIdx} OFFSET $${paramIdx + 1}`;
+      values.push(params.limit, (params.page - 1) * params.limit);
+    }
+
+    const result = await query(sql, values);
+    return result.rows.map((row: DbRow) => this.rowToContact(row));
+  }
+
+  async getContactById(id: string): Promise<Contact | null> {
+    const result = await query('SELECT * FROM contacts WHERE id = $1', [id]);
+    return result.rows.length > 0 ? this.rowToContact(result.rows[0]) : null;
+  }
+
+  async addContact(input: CreateContactInput): Promise<Contact> {
+    const result = await query(
+      `INSERT INTO contacts (id, organization_id, account_id, owner_id, first_name, last_name, email, phone, title, linkedin_url, tags, custom_fields, unsubscribed)
+       VALUES ($1, current_setting('app.organization_id'), $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+       RETURNING *`,
+      [randomUUID(), input.account_id, input.owner_id, input.first_name, input.last_name, input.email,
+       input.phone || '', input.title || '', input.linkedin_url || '', input.tags || [], JSON.stringify(input.custom_fields || {}), input.unsubscribed || false],
+    );
+    return this.rowToContact(result.rows[0]);
+  }
+
+  async updateContact(id: string, input: UpdateContactInput): Promise<Contact | null> {
+    const fields: string[] = [];
+    const values: unknown[] = [id];
+    let idx = 2;
+
+    const stringFields = ['first_name', 'last_name', 'email', 'phone', 'title', 'linkedin_url'] as const;
+    for (const field of stringFields) {
+      if (input[field] !== undefined) {
+        fields.push(`${field} = $${idx++}`);
+        values.push(input[field]);
+      }
+    }
+
+    if (input.tags !== undefined) {
+      fields.push(`tags = $${idx++}`);
+      values.push(input.tags);
+    }
+    if (input.custom_fields !== undefined) {
+      fields.push(`custom_fields = $${idx++}`);
+      values.push(JSON.stringify(input.custom_fields));
+    }
+    if (input.owner_id !== undefined) {
+      fields.push(`owner_id = $${idx++}`);
+      values.push(input.owner_id);
+    }
+    if (input.account_id !== undefined) {
+      fields.push(`account_id = $${idx++}`);
+      values.push(input.account_id);
+    }
+
+    if (fields.length === 0) return this.getContactById(id);
+
+    fields.push(`updated_at = NOW()`);
+    const result = await query(
+      `UPDATE contacts SET ${fields.join(', ')} WHERE id = $1 RETURNING *`,
+      values,
+    );
+    return result.rows.length > 0 ? this.rowToContact(result.rows[0]) : null;
+  }
+
+  async deleteContact(id: string): Promise<boolean> {
+    const result = await query('DELETE FROM contacts WHERE id = $1', [id]);
+    return (result.rowCount || 0) > 0;
+  }
+
+  async mergeContacts(sourceId: string, targetId: string, finalValues: UpdateContactInput): Promise<Contact | null> {
+    const client = (await import('../db/connection.js')).getClient;
+    const conn = await client();
+
+    try {
+      await conn.query('BEGIN');
+
+      // Reassign activities
+      await conn.query('UPDATE activities SET contact_id = $1 WHERE contact_id = $2', [targetId, sourceId]);
+      // Reassign tasks
+      await conn.query('UPDATE tasks SET contact_id = $1 WHERE contact_id = $2', [targetId, sourceId]);
+
+      // Update target
+      const fields: string[] = [];
+      const values: unknown[] = [targetId];
+      let idx = 2;
+      for (const [key, val] of Object.entries(finalValues)) {
+        if (val !== undefined) {
+          fields.push(`${key} = $${idx++}`);
+          values.push(key === 'custom_fields' ? JSON.stringify(val) : val);
+        }
+      }
+      fields.push(`updated_at = NOW()`);
+
+      if (fields.length > 0) {
+        await conn.query(`UPDATE contacts SET ${fields.join(', ')} WHERE id = $1`, values);
+      }
+
+      // Delete source
+      await conn.query('DELETE FROM contacts WHERE id = $1', [sourceId]);
+
+      await conn.query('COMMIT');
+
+      const result = await conn.query('SELECT * FROM contacts WHERE id = $1', [targetId]);
+      return result.rows.length > 0 ? this.rowToContact(result.rows[0]) : null;
+    } catch (err) {
+      await conn.query('ROLLBACK');
+      throw err;
+    } finally {
+      conn.release();
+    }
+  }
+
+  // ─── Accounts ───────────────────────────────────────
+
+  async listAccounts(params?: PaginationParams): Promise<Account[]> {
+    let sql = `SELECT * FROM accounts`;
+    const conditions: string[] = [];
+    const values: unknown[] = [];
+    let paramIdx = 1;
+
+    if (params?.search) {
+      conditions.push(`(name ILIKE $${paramIdx} OR domain ILIKE $${paramIdx})`);
+      values.push(`%${params.search}%`);
+      paramIdx++;
+    }
+
+    if (conditions.length > 0) sql += ` WHERE ` + conditions.join(' AND ');
+    sql += ` ORDER BY created_at DESC`;
+
+    if (params?.page && params?.limit) {
+      sql += ` LIMIT $${paramIdx} OFFSET $${paramIdx + 1}`;
+      values.push(params.limit, (params.page - 1) * params.limit);
+    }
+
+    const result = await query(sql, values);
+    return result.rows.map((row: DbRow) => this.rowToAccount(row));
+  }
+
+  async getAccountById(id: string): Promise<Account | null> {
+    const result = await query('SELECT * FROM accounts WHERE id = $1', [id]);
+    return result.rows.length > 0 ? this.rowToAccount(result.rows[0]) : null;
+  }
+
+  async addAccount(input: CreateAccountInput): Promise<Account> {
+    const result = await query(
+      `INSERT INTO accounts (id, organization_id, owner_id, name, domain, industry, size, website, arr, tags, custom_fields)
+       VALUES ($1, current_setting('app.organization_id'), $2, $3, $4, $5, $6, $7, $8, $9, $10)
+       RETURNING *`,
+      [randomUUID(), input.owner_id, input.name, input.domain || '', input.industry || '',
+       input.size || '1-10', input.website || '', input.arr || 0, input.tags || [], JSON.stringify(input.custom_fields || {})],
+    );
+    return this.rowToAccount(result.rows[0]);
+  }
+
+  async updateAccount(id: string, input: UpdateAccountInput): Promise<Account | null> {
+    const fields: string[] = [];
+    const values: unknown[] = [id];
+    let idx = 2;
+
+    const stringFields: (keyof UpdateAccountInput)[] = ['name', 'domain', 'industry', 'size', 'website', 'owner_id'];
+    for (const field of stringFields) {
+      if (input[field] !== undefined) {
+        fields.push(`${field} = $${idx++}`);
+        values.push(input[field]);
+      }
+    }
+    if (input.arr !== undefined) { fields.push(`arr = $${idx++}`); values.push(input.arr); }
+    if (input.tags !== undefined) { fields.push(`tags = $${idx++}`); values.push(input.tags); }
+    if (input.custom_fields !== undefined) { fields.push(`custom_fields = $${idx++}`); values.push(JSON.stringify(input.custom_fields)); }
+
+    if (fields.length === 0) return this.getAccountById(id);
+    fields.push(`updated_at = NOW()`);
+
+    const result = await query(
+      `UPDATE accounts SET ${fields.join(', ')} WHERE id = $1 RETURNING *`,
+      values,
+    );
+    return result.rows.length > 0 ? this.rowToAccount(result.rows[0]) : null;
+  }
+
+  async deleteAccount(id: string): Promise<boolean> {
+    const result = await query('DELETE FROM accounts WHERE id = $1', [id]);
+    return (result.rowCount || 0) > 0;
+  }
+
+  // ─── Deals ──────────────────────────────────────────
+
+  async listDeals(params?: { pipeline_id?: string; stage_id?: string; owner_id?: string } & PaginationParams): Promise<Deal[]> {
+    let sql = `SELECT * FROM deals`;
+    const conditions: string[] = [];
+    const values: unknown[] = [];
+    let paramIdx = 1;
+
+    if (params?.pipeline_id) { conditions.push(`pipeline_id = $${paramIdx++}`); values.push(params.pipeline_id); }
+    if (params?.stage_id) { conditions.push(`stage_id = $${paramIdx++}`); values.push(params.stage_id); }
+    if (params?.owner_id) { conditions.push(`owner_id = $${paramIdx++}`); values.push(params.owner_id); }
+    if (params?.search) { conditions.push(`name ILIKE $${paramIdx++}`); values.push(`%${params.search}%`); }
+
+    if (conditions.length > 0) sql += ` WHERE ` + conditions.join(' AND ');
+    sql += ` ORDER BY created_at DESC`;
+
+    if (params?.page && params?.limit) {
+      sql += ` LIMIT $${paramIdx} OFFSET $${paramIdx + 1}`;
+      values.push(params.limit, (params.page - 1) * params.limit);
+    }
+
+    const result = await query(sql, values);
+    return result.rows.map((row: DbRow) => this.rowToDeal(row));
+  }
+
+  async getDealById(id: string): Promise<Deal | null> {
+    const result = await query('SELECT * FROM deals WHERE id = $1', [id]);
+    return result.rows.length > 0 ? this.rowToDeal(result.rows[0]) : null;
+  }
+
+  async addDeal(input: CreateDealInput): Promise<Deal> {
+    const result = await query(
+      `INSERT INTO deals (id, organization_id, pipeline_id, stage_id, account_id, owner_id, name, value, currency, probability, close_date, custom_fields, line_items)
+       VALUES ($1, current_setting('app.organization_id'), $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+       RETURNING *`,
+      [randomUUID(), input.pipeline_id, input.stage_id, input.account_id, input.owner_id,
+       input.name, input.value || 0, input.currency || 'USD', input.probability || null, input.close_date,
+       JSON.stringify(input.custom_fields || {}), JSON.stringify(input.line_items || [])],
+    );
+    return this.rowToDeal(result.rows[0]);
+  }
+
+  async updateDeal(id: string, input: UpdateDealInput): Promise<Deal | null> {
+    const fields: string[] = [];
+    const values: unknown[] = [id];
+    let idx = 2;
+
+    const simpleFields: (keyof UpdateDealInput)[] = ['name', 'value', 'currency', 'probability', 'close_date', 'pipeline_id', 'stage_id', 'account_id', 'owner_id', 'lost_reason'];
+    for (const field of simpleFields) {
+      if (input[field] !== undefined) {
+        fields.push(`${field} = $${idx++}`);
+        values.push(input[field]);
+      }
+    }
+    if (input.custom_fields !== undefined) { fields.push(`custom_fields = $${idx++}`); values.push(JSON.stringify(input.custom_fields)); }
+    if (input.line_items !== undefined) { fields.push(`line_items = $${idx++}`); values.push(JSON.stringify(input.line_items)); }
+
+    if (fields.length === 0) return this.getDealById(id);
+    fields.push(`updated_at = NOW()`);
+
+    const result = await query(
+      `UPDATE deals SET ${fields.join(', ')} WHERE id = $1 RETURNING *`,
+      values,
+    );
+    return result.rows.length > 0 ? this.rowToDeal(result.rows[0]) : null;
+  }
+
+  async deleteDeal(id: string): Promise<boolean> {
+    const result = await query('DELETE FROM deals WHERE id = $1', [id]);
+    return (result.rowCount || 0) > 0;
+  }
+
+  async moveDealStage(id: string, targetStageId: string): Promise<Deal | null> {
+    const stageResult = await query('SELECT * FROM stages WHERE id = $1', [targetStageId]);
+    if (stageResult.rows.length === 0) return null;
+
+    const stage = stageResult.rows[0];
+    const now = new Date().toISOString();
+
+    const updates: Record<string, unknown> = {
+      stage_id: targetStageId,
+      stage_entered_at: now,
+    };
+
+    if (stage.type === 'won') {
+      updates.won_at = now;
+      updates.probability = 100;
+    } else if (stage.type === 'lost') {
+      updates.lost_at = now;
+      updates.probability = 0;
+    } else {
+      updates.probability = stage.probability;
+    }
+
+    return this.updateDeal(id, updates as UpdateDealInput);
+  }
+
+  async closeDeal(id: string, outcome: 'won' | 'lost', reason?: string): Promise<Deal | null> {
+    const deal = await this.getDealById(id);
+    if (!deal) return null;
+
+    // Find the won/lost stage for the deal's pipeline
+    const stageResult = await query(
+      `SELECT id FROM stages WHERE pipeline_id = $1 AND type = $2`,
+      [deal.pipeline_id, outcome],
+    );
+    if (stageResult.rows.length === 0) return null;
+
+    const updates: UpdateDealInput = {};
+    if (outcome === 'lost' && reason) {
+      updates.lost_reason = reason;
+    }
+
+    const moved = await this.moveDealStage(id, stageResult.rows[0].id);
+    if (!moved) return null;
+
+    return this.getDealById(id);
+  }
+
+  // ─── Tasks ──────────────────────────────────────────
+
+  async listTasks(params?: { assigned_to_id?: string; status?: 'open' | 'completed' | 'all' } & PaginationParams): Promise<Task[]> {
+    let sql = `SELECT * FROM tasks`;
+    const conditions: string[] = [];
+    const values: unknown[] = [];
+    let paramIdx = 1;
+
+    if (params?.assigned_to_id) { conditions.push(`assigned_to_id = $${paramIdx++}`); values.push(params.assigned_to_id); }
+    if (params?.status === 'open') conditions.push('completed_at IS NULL');
+    else if (params?.status === 'completed') conditions.push('completed_at IS NOT NULL');
+    if (params?.search) { conditions.push(`title ILIKE $${paramIdx++}`); values.push(`%${params.search}%`); }
+
+    if (conditions.length > 0) sql += ` WHERE ` + conditions.join(' AND ');
+    sql += ` ORDER BY priority DESC, due_at ASC`;
+
+    if (params?.page && params?.limit) {
+      sql += ` LIMIT $${paramIdx} OFFSET $${paramIdx + 1}`;
+      values.push(params.limit, (params.page - 1) * params.limit);
+    }
+
+    const result = await query(sql, values);
+    return result.rows.map((row: DbRow) => this.rowToTask(row));
+  }
+
+  async getTaskById(id: string): Promise<Task | null> {
+    const result = await query('SELECT * FROM tasks WHERE id = $1', [id]);
+    return result.rows.length > 0 ? this.rowToTask(result.rows[0]) : null;
+  }
+
+  async addTask(input: CreateTaskInput): Promise<Task> {
+    const result = await query(
+      `INSERT INTO tasks (id, organization_id, assigned_to_id, created_by_id, contact_id, deal_id, title, type, priority, due_at, recurrence_rule)
+       VALUES ($1, current_setting('app.organization_id'), $2, $3, $4, $5, $6, $7, $8, $9, $10)
+       RETURNING *`,
+      [randomUUID(), input.assigned_to_id, input.created_by_id, input.contact_id || null,
+       input.deal_id || null, input.title, input.type, input.priority || 'medium',
+       input.due_at, input.recurrence_rule || null],
+    );
+    return this.rowToTask(result.rows[0]);
+  }
+
+  async updateTask(id: string, input: UpdateTaskInput): Promise<Task | null> {
+    const fields: string[] = [];
+    const values: unknown[] = [id];
+    let idx = 2;
+
+    const stringFields: (keyof UpdateTaskInput)[] = ['title', 'type', 'priority', 'due_at', 'assigned_to_id', 'contact_id', 'deal_id', 'recurrence_rule'];
+    for (const field of stringFields) {
+      if (input[field] !== undefined) {
+        fields.push(`${field} = $${idx++}`);
+        values.push(input[field]);
+      }
+    }
+    if (input.completed_at !== undefined) { fields.push(`completed_at = $${idx++}`); values.push(input.completed_at); }
+    if (fields.length === 0) return this.getTaskById(id);
+    fields.push(`updated_at = NOW()`);
+
+    const result = await query(
+      `UPDATE tasks SET ${fields.join(', ')} WHERE id = $1 RETURNING *`,
+      values,
+    );
+    return result.rows.length > 0 ? this.rowToTask(result.rows[0]) : null;
+  }
+
+  async completeTask(id: string): Promise<Task | null> {
+    const result = await query(
+      `UPDATE tasks SET completed_at = NOW(), updated_at = NOW() WHERE id = $1 RETURNING *`,
+      [id],
+    );
+    return result.rows.length > 0 ? this.rowToTask(result.rows[0]) : null;
+  }
+
+  async deleteTask(id: string): Promise<boolean> {
+    const result = await query('DELETE FROM tasks WHERE id = $1', [id]);
+    return (result.rowCount || 0) > 0;
+  }
+
+  // ─── Activities ─────────────────────────────────────
+
+  async listActivities(params?: { contact_id?: string; deal_id?: string; user_id?: string } & PaginationParams): Promise<Activity[]> {
+    let sql = `SELECT * FROM activities`;
+    const conditions: string[] = [];
+    const values: unknown[] = [];
+    let paramIdx = 1;
+
+    if (params?.contact_id) { conditions.push(`contact_id = $${paramIdx++}`); values.push(params.contact_id); }
+    if (params?.deal_id) { conditions.push(`deal_id = $${paramIdx++}`); values.push(params.deal_id); }
+    if (params?.user_id) { conditions.push(`user_id = $${paramIdx++}`); values.push(params.user_id); }
+
+    if (conditions.length > 0) sql += ` WHERE ` + conditions.join(' AND ');
+    sql += ` ORDER BY created_at DESC`;
+
+    if (params?.page && params?.limit) {
+      sql += ` LIMIT $${paramIdx} OFFSET $${paramIdx + 1}`;
+      values.push(params.limit, (params.page - 1) * params.limit);
+    }
+
+    const result = await query(sql, values);
+    return result.rows.map((row: DbRow) => this.rowToActivity(row));
+  }
+
+  async addActivity(input: CreateActivityInput): Promise<Activity> {
+    const result = await query(
+      `INSERT INTO activities (id, organization_id, user_id, contact_id, deal_id, task_id, type, title, body, outcome, duration_seconds, metadata)
+       VALUES ($1, current_setting('app.organization_id'), $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+       RETURNING *`,
+      [randomUUID(), input.user_id, input.contact_id || null, input.deal_id || null,
+       input.task_id || null, input.type, input.title, input.body || '',
+       input.outcome || null, input.duration_seconds || null, JSON.stringify(input.metadata || {})],
+    );
+    return this.rowToActivity(result.rows[0]);
+  }
+
+  // ─── Notifications ──────────────────────────────────
+
+  async listNotifications(userId: string): Promise<Notification[]> {
+    const result = await query(
+      `SELECT * FROM notifications WHERE user_id = $1 ORDER BY created_at DESC`,
+      [userId],
+    );
+    return result.rows.map((row: DbRow) => this.rowToNotification(row));
+  }
+
+  async markNotificationRead(id: string): Promise<Notification | null> {
+    const result = await query(
+      `UPDATE notifications SET read_at = NOW() WHERE id = $1 RETURNING *`,
+      [id],
+    );
+    return result.rows.length > 0 ? this.rowToNotification(result.rows[0]) : null;
+  }
+
+  async getNotificationById(id: string): Promise<Notification | null> {
+    const result = await query(`SELECT * FROM notifications WHERE id = $1`, [id]);
+    return result.rows.length > 0 ? this.rowToNotification(result.rows[0]) : null;
+  }
+
+  async markAllNotificationsRead(userId: string): Promise<void> {
+    await query(
+      `UPDATE notifications SET read_at = NOW() WHERE user_id = $1 AND read_at IS NULL`,
+      [userId],
+    );
+  }
+
+  // ─── Email Templates ────────────────────────────────
+
+  async listEmailTemplates(): Promise<EmailTemplate[]> {
+    const result = await query(`SELECT * FROM email_templates ORDER BY created_at DESC`);
+    return result.rows.map((row: DbRow) => this.rowToEmailTemplate(row));
+  }
+
+  async getEmailTemplateById(id: string): Promise<EmailTemplate | null> {
+    const result = await query(`SELECT * FROM email_templates WHERE id = $1`, [id]);
+    return result.rows.length > 0 ? this.rowToEmailTemplate(result.rows[0]) : null;
+  }
+
+  async addEmailTemplate(input: CreateEmailTemplateInput): Promise<EmailTemplate> {
+    const result = await query(
+      `INSERT INTO email_templates (id, organization_id, created_by_id, name, subject, body_html, variables, is_shared, category)
+       VALUES ($1, current_setting('app.organization_id'), $2, $3, $4, $5, $6, $7, $8)
+       RETURNING *`,
+      [randomUUID(), input.created_by_id, input.name, input.subject, input.body_html,
+       input.variables || [], input.is_shared || false, input.category || null],
+    );
+    return this.rowToEmailTemplate(result.rows[0]);
+  }
+
+  // ─── Email Campaigns ────────────────────────────────
+
+  async listEmailCampaigns(): Promise<EmailCampaign[]> {
+    const result = await query(`SELECT * FROM email_campaigns ORDER BY created_at DESC`);
+    return result.rows.map((row: DbRow) => this.rowToEmailCampaign(row));
+  }
+
+  async createEmailCampaign(input: CreateEmailCampaignInput): Promise<EmailCampaign> {
+    const result = await query(
+      `INSERT INTO email_campaigns (id, organization_id, template_id, created_by_id, name, status, scheduled_at, sent_at, total_recipients, delivered_count, opened_count, clicked_count, bounced_count, unsubscribed_count)
+       VALUES ($1, current_setting('app.organization_id'), $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+       RETURNING *`,
+      [randomUUID(), input.template_id, input.created_by_id, input.name, input.status || 'draft',
+       input.scheduled_at || null, input.sent_at || null, input.total_recipients || 0,
+       input.delivered_count || 0, input.opened_count || 0, input.clicked_count || 0,
+       input.bounced_count || 0, input.unsubscribed_count || 0],
+    );
+    return this.rowToEmailCampaign(result.rows[0]);
+  }
+
+  // ─── Custom Fields ──────────────────────────────────
+
+  async listCustomFieldDefinitions(): Promise<CustomFieldDefinition[]> {
+    const result = await query(`SELECT * FROM custom_field_definitions ORDER BY display_order`);
+    return result.rows.map((row: DbRow) => this.rowToCustomField(row));
+  }
+
+  async addCustomFieldDefinition(input: CreateCustomFieldInput): Promise<CustomFieldDefinition> {
+    const result = await query(
+      `INSERT INTO custom_field_definitions (id, organization_id, entity_type, key, label, field_type, options, is_required, is_visible, display_order)
+       VALUES ($1, current_setting('app.organization_id'), $2, $3, $4, $5, $6, $7, $8, $9)
+       RETURNING *`,
+      [randomUUID(), input.entity_type, input.key, input.label, input.field_type,
+       input.options ? JSON.stringify(input.options) : null, input.is_required || false,
+       input.is_visible !== false, input.order || 0],
+    );
+    return this.rowToCustomField(result.rows[0]);
+  }
+
+  async deleteCustomFieldDefinition(id: string): Promise<boolean> {
+    const result = await query('DELETE FROM custom_field_definitions WHERE id = $1', [id]);
+    return (result.rowCount || 0) > 0;
+  }
+
+  // ─── Pipelines & Stages ─────────────────────────────
+
+  async listPipelines(): Promise<Pipeline[]> {
+    const result = await query(`SELECT * FROM pipelines ORDER BY created_at`);
+    return result.rows.map((row: DbRow) => ({
+      id: row.id,
+      name: row.name,
+      is_default: row.is_default,
+      is_archived: row.is_archived,
+    }));
+  }
+
+  async listStages(): Promise<Stage[]> {
+    const result = await query(`SELECT * FROM stages ORDER BY stage_order`);
+    return result.rows.map((row: DbRow) => ({
+      id: row.id,
+      pipeline_id: row.pipeline_id,
+      name: row.name,
+      probability: row.probability,
+      order: row.stage_order,
+      type: row.type,
+    }));
+  }
+
+  async addPipeline(input: { name: string; is_default: boolean }): Promise<Pipeline> {
+    const result = await query(
+      `INSERT INTO pipelines (id, organization_id, name, is_default, is_archived)
+       VALUES ($1, current_setting('app.organization_id'), $2, $3, false)
+       RETURNING id, name, is_default, is_archived`,
+      [randomUUID(), input.name, input.is_default],
+    );
+    return {
+      id: result.rows[0].id,
+      name: result.rows[0].name,
+      is_default: result.rows[0].is_default,
+      is_archived: result.rows[0].is_archived,
+    };
+  }
+
+  async addStage(input: { pipeline_id: string; name: string; probability: number; order: number; type: 'open' | 'won' | 'lost' }): Promise<Stage> {
+    const result = await query(
+      `INSERT INTO stages (id, organization_id, pipeline_id, name, probability, stage_order, type)
+       VALUES ($1, current_setting('app.organization_id'), $2, $3, $4, $5, $6)
+       RETURNING id, pipeline_id, name, probability, stage_order, type`,
+      [randomUUID(), input.pipeline_id, input.name, input.probability, input.order, input.type],
+    );
+    return {
+      id: result.rows[0].id,
+      pipeline_id: result.rows[0].pipeline_id,
+      name: result.rows[0].name,
+      probability: result.rows[0].probability,
+      order: result.rows[0].stage_order,
+      type: result.rows[0].type,
+    };
+  }
+
+  // ─── Audit Logs ─────────────────────────────────────
+
+  async listAuditLogs(params?: PaginationParams): Promise<AuditLog[]> {
+    let sql = `SELECT * FROM audit_logs`;
+    const conditions: string[] = [];
+    const values: unknown[] = [];
+    let paramIdx = 1;
+
+    if (params?.search) {
+      conditions.push(`(action ILIKE $${paramIdx} OR user_name ILIKE $${paramIdx} OR entity_type ILIKE $${paramIdx})`);
+      values.push(`%${params.search}%`);
+      paramIdx++;
+    }
+
+    if (conditions.length > 0) sql += ` WHERE ` + conditions.join(' AND ');
+    sql += ` ORDER BY created_at DESC`;
+
+    if (params?.page && params?.limit) {
+      sql += ` LIMIT $${paramIdx} OFFSET $${paramIdx + 1}`;
+      values.push(params.limit, (params.page - 1) * params.limit);
+    }
+
+    const result = await query(sql, values);
+    return result.rows.map((row: DbRow) => this.rowToAuditLog(row));
+  }
+
+  async addAuditLog(input: CreateAuditLogInput): Promise<AuditLog> {
+    const result = await query(
+      `INSERT INTO audit_logs (id, organization_id, user_id, user_name, action, entity_type, entity_id, diff, ip_address, user_agent)
+       VALUES ($1, current_setting('app.organization_id'), $2, $3, $4, $5, $6, $7, $8, $9)
+       RETURNING *`,
+      [randomUUID(), input.user_id, input.user_name, input.action, input.entity_type,
+       input.entity_id || null, input.diff ? JSON.stringify(input.diff) : null,
+       input.ip_address || '', input.user_agent || ''],
+    );
+    return this.rowToAuditLog(result.rows[0]);
+  }
+
+  // ─── Snapshot ───────────────────────────────────────
+
+  async snapshot(): Promise<CrmSnapshot> {
+    const [users, accounts, contacts, pipelines, stages, deals, tasks, activities, notifications, customFields, emailTemplates, emailCampaigns, auditLogs] = await Promise.all([
+      this.listUsers(),
+      this.listAccounts(),
+      this.listContacts(),
+      this.listPipelines(),
+      this.listStages(),
+      this.listDeals(),
+      this.listTasks(),
+      this.listActivities(),
+      query('SELECT * FROM notifications ORDER BY created_at DESC').then(r => r.rows.map((row: DbRow) => this.rowToNotification(row))),
+      this.listCustomFieldDefinitions(),
+      this.listEmailTemplates(),
+      this.listEmailCampaigns(),
+      this.listAuditLogs(),
+    ]);
+
+    return { users, accounts, contacts, pipelines, stages, deals, tasks, activities, notifications, customFields, emailTemplates, emailCampaigns, auditLogs };
+  }
+
+  // ─── GDPR ───────────────────────────────────────────
+
+  async exportUserData(userId: string): Promise<Record<string, unknown>> {
+    const [contacts, accounts, deals, tasks, activities, notifications] = await Promise.all([
+      query('SELECT * FROM contacts WHERE owner_id = $1', [userId]).then(r => r.rows.map((row: DbRow) => this.rowToContact(row))),
+      query('SELECT * FROM accounts WHERE owner_id = $1', [userId]).then(r => r.rows.map((row: DbRow) => this.rowToAccount(row))),
+      query('SELECT * FROM deals WHERE owner_id = $1', [userId]).then(r => r.rows.map((row: DbRow) => this.rowToDeal(row))),
+      query('SELECT * FROM tasks WHERE assigned_to_id = $1 OR created_by_id = $1', [userId]).then(r => r.rows.map((row: DbRow) => this.rowToTask(row))),
+      query('SELECT * FROM activities WHERE user_id = $1', [userId]).then(r => r.rows.map((row: DbRow) => this.rowToActivity(row))),
+      query('SELECT * FROM notifications WHERE user_id = $1', [userId]).then(r => r.rows.map((row: DbRow) => this.rowToNotification(row))),
+    ]);
+
+    return { contacts, accounts, deals, tasks, activities, notifications };
+  }
+
+  async deleteUserData(userId: string): Promise<void> {
+    // Anonymize activities (keep for audit trail)
+    await query(
+      `UPDATE activities SET user_id = $2, metadata = COALESCE(metadata, '{}'::jsonb) || '{"anonymized": true}'::jsonb WHERE user_id = $1`,
+      [userId, '00000000-0000-0000-0000-000000000000'],
+    );
+
+    // Delete notifications (purely personal data)
+    await query('DELETE FROM notifications WHERE user_id = $1', [userId]);
+
+    // Delete reset tokens (purely personal data)
+    await query('DELETE FROM password_reset_tokens WHERE user_id = $1', [userId]);
+
+    // Soft-delete + anonymize user (preserves FK references to tasks, deals, etc.)
+    await query(
+      `UPDATE users SET is_active = false, email = $2, name = $3, avatar_url = NULL, password_hash = NULL, totp_secret = NULL, mfa_enabled = false WHERE id = $1`,
+      [userId, `deleted-${randomUUID()}@anonymous`, 'Deleted User'],
+    );
+  }
+
+  // ─── Row Mappers ────────────────────────────────────
+
+  private rowToOrganization(row: DbRow): Organization {
+    return {
+      id: row.id,
+      name: row.name,
+      slug: row.slug,
+      plan: row.plan,
+      ses_domain: row.ses_domain,
+      fiscal_year_start: row.fiscal_year_start,
+    };
+  }
+
+  private rowToUser(row: DbRow): User {
+    return {
+      id: row.id,
+      organization_id: row.organization_id,
+      email: row.email,
+      name: row.name,
+      avatar_url: row.avatar_url || undefined,
+      role: row.role,
+      mfa_enabled: row.mfa_enabled,
+      is_active: row.is_active,
+      timezone: row.timezone,
+      team_id: row.team_id || undefined,
+    };
+  }
+
+  private rowToContact(row: DbRow): Contact {
+    return {
+      id: row.id,
+      organization_id: row.organization_id,
+      first_name: row.first_name,
+      last_name: row.last_name,
+      email: row.email,
+      phone: row.phone || '',
+      title: row.title || '',
+      linkedin_url: row.linkedin_url || undefined,
+      account_id: row.account_id,
+      owner_id: row.owner_id,
+      tags: row.tags || [],
+      custom_fields: row.custom_fields || {},
+      unsubscribed: row.unsubscribed || false,
+      created_at: row.created_at instanceof Date ? row.created_at.toISOString() : String(row.created_at),
+    };
+  }
+
+  private rowToAccount(row: DbRow): Account {
+    return {
+      id: row.id,
+      organization_id: row.organization_id,
+      name: row.name,
+      domain: row.domain || '',
+      industry: row.industry || '',
+      size: row.size || '1-10',
+      website: row.website || '',
+      arr: Number(row.arr) || 0,
+      owner_id: row.owner_id,
+      tags: row.tags || [],
+      custom_fields: row.custom_fields || {},
+      created_at: row.created_at instanceof Date ? row.created_at.toISOString() : String(row.created_at),
+    };
+  }
+
+  private rowToDeal(row: DbRow): Deal {
+    return {
+      id: row.id,
+      organization_id: row.organization_id,
+      name: row.name,
+      pipeline_id: row.pipeline_id,
+      stage_id: row.stage_id,
+      account_id: row.account_id,
+      owner_id: row.owner_id,
+      value: Number(row.value) || 0,
+      currency: row.currency || 'USD',
+      probability: row.probability ?? undefined,
+      close_date: row.close_date instanceof Date ? row.close_date.toISOString().split('T')[0] : String(row.close_date).split('T')[0],
+      stage_entered_at: row.stage_entered_at instanceof Date ? row.stage_entered_at.toISOString() : String(row.stage_entered_at),
+      won_at: row.won_at ? (row.won_at instanceof Date ? row.won_at.toISOString() : String(row.won_at)) : undefined,
+      lost_at: row.lost_at ? (row.lost_at instanceof Date ? row.lost_at.toISOString() : String(row.lost_at)) : undefined,
+      lost_reason: row.lost_reason || undefined,
+      custom_fields: row.custom_fields || {},
+      line_items: row.line_items || [],
+      created_at: row.created_at instanceof Date ? row.created_at.toISOString() : String(row.created_at),
+    };
+  }
+
+  private rowToTask(row: DbRow): Task {
+    return {
+      id: row.id,
+      organization_id: row.organization_id,
+      title: row.title,
+      type: row.type,
+      priority: row.priority,
+      due_at: row.due_at instanceof Date ? row.due_at.toISOString() : String(row.due_at),
+      completed_at: row.completed_at ? (row.completed_at instanceof Date ? row.completed_at.toISOString() : String(row.completed_at)) : undefined,
+      assigned_to_id: row.assigned_to_id,
+      created_by_id: row.created_by_id,
+      contact_id: row.contact_id || undefined,
+      deal_id: row.deal_id || undefined,
+      recurrence_rule: row.recurrence_rule || undefined,
+    };
+  }
+
+  private rowToActivity(row: DbRow): Activity {
+    return {
+      id: row.id,
+      organization_id: row.organization_id,
+      type: row.type,
+      title: row.title,
+      body: row.body || '',
+      outcome: row.outcome || undefined,
+      duration_seconds: row.duration_seconds || undefined,
+      user_id: row.user_id,
+      contact_id: row.contact_id || undefined,
+      deal_id: row.deal_id || undefined,
+      task_id: row.task_id || undefined,
+      metadata: row.metadata || undefined,
+      created_at: row.created_at instanceof Date ? row.created_at.toISOString() : String(row.created_at),
+    };
+  }
+
+  private rowToNotification(row: DbRow): Notification {
+    return {
+      id: row.id,
+      organization_id: row.organization_id,
+      user_id: row.user_id,
+      type: row.type,
+      title: row.title,
+      body: row.body,
+      entity_type: row.entity_type,
+      entity_id: row.entity_id,
+      read_at: row.read_at ? (row.read_at instanceof Date ? row.read_at.toISOString() : String(row.read_at)) : undefined,
+      created_at: row.created_at instanceof Date ? row.created_at.toISOString() : String(row.created_at),
+    };
+  }
+
+  private rowToEmailTemplate(row: DbRow): EmailTemplate {
+    return {
+      id: row.id,
+      organization_id: row.organization_id,
+      name: row.name,
+      subject: row.subject,
+      body_html: row.body_html,
+      variables: row.variables || [],
+      is_shared: row.is_shared || false,
+      created_by_id: row.created_by_id,
+      category: row.category || undefined,
+    };
+  }
+
+  private rowToEmailCampaign(row: DbRow): EmailCampaign {
+    return {
+      id: row.id,
+      organization_id: row.organization_id,
+      name: row.name,
+      template_id: row.template_id,
+      status: row.status,
+      scheduled_at: row.scheduled_at ? (row.scheduled_at instanceof Date ? row.scheduled_at.toISOString() : String(row.scheduled_at)) : undefined,
+      sent_at: row.sent_at ? (row.sent_at instanceof Date ? row.sent_at.toISOString() : String(row.sent_at)) : undefined,
+      total_recipients: row.total_recipients || 0,
+      delivered_count: row.delivered_count || 0,
+      opened_count: row.opened_count || 0,
+      clicked_count: row.clicked_count || 0,
+      bounced_count: row.bounced_count || 0,
+      unsubscribed_count: row.unsubscribed_count || 0,
+      created_by_id: row.created_by_id,
+    };
+  }
+
+  private rowToAuditLog(row: DbRow): AuditLog {
+    return {
+      id: row.id,
+      organization_id: row.organization_id,
+      user_id: row.user_id || undefined,
+      user_name: row.user_name,
+      action: row.action,
+      entity_type: row.entity_type,
+      entity_id: row.entity_id || undefined,
+      diff: row.diff || undefined,
+      ip_address: row.ip_address || '',
+      user_agent: row.user_agent || '',
+      created_at: row.created_at instanceof Date ? row.created_at.toISOString() : String(row.created_at),
+    };
+  }
+
+  private rowToCustomField(row: DbRow): CustomFieldDefinition {
+    return {
+      id: row.id,
+      organization_id: row.organization_id,
+      entity_type: row.entity_type,
+      key: row.key,
+      label: row.label,
+      field_type: row.field_type,
+      options: row.options || undefined,
+      is_required: row.is_required || false,
+      is_visible: row.is_visible !== false,
+      order: row.display_order || 0,
+    };
+  }
+}
