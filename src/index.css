@@ -1,68 +1,208 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
 @import "tailwindcss";
 
 @theme {
+  /* Surface & text slots */
   --color-theme-base: var(--bg-base);
   --color-theme-card: var(--bg-card);
+  --color-theme-inset: var(--bg-inset);
+  --color-theme-hover: var(--bg-hover);
   --color-theme-primary: var(--text-primary);
   --color-theme-secondary: var(--text-secondary);
   --color-theme-accent: var(--accent);
+  --color-theme-accent-soft: var(--accent-soft);
   --color-theme-border: var(--border);
-  
+
+  /* Semantic status colors */
+  --color-success: var(--success);
+  --color-success-soft: var(--success-soft);
+  --color-warning: var(--warning);
+  --color-warning-soft: var(--warning-soft);
+  --color-danger: var(--danger);
+  --color-danger-soft: var(--danger-soft);
+  --color-info: var(--info);
+  --color-info-soft: var(--info-soft);
+
   --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
-  --font-mono: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", monospace;
+
+  /* Typography scale — use these instead of arbitrary text-[Npx] */
+  --text-2xs: 11px;
+  --text-2xs--line-height: 1.4;
+  --text-xs: 12px;
+  --text-xs--line-height: 1.45;
+  --text-sm: 12.5px;
+  --text-sm--line-height: 1.5;
+  --text-base: 14px;
+  --text-base--line-height: 1.5;
+  --text-lg: 16px;
+  --text-lg--line-height: 1.45;
+  --text-xl: 20px;
+  --text-xl--line-height: 1.3;
+  --text-2xl: 26px;
+  --text-2xl--line-height: 1.2;
+
+  /* Elevation */
+  --shadow-card: var(--elev-card);
+  --shadow-raised: var(--elev-raised);
+  --shadow-overlay: var(--elev-overlay);
+
+  /* Motion */
+  --ease-out-quart: cubic-bezier(0.25, 1, 0.5, 1);
 }
 
 :root {
-  /* Default Theme: BOUTINLY BRAND */
-  --bg-base: #F8FAFC;         /* Cool Slate Gray */
-  --bg-card: #FFFFFF;         /* Pure White */
-  --text-primary: #1E293B;    /* Dark Charcoal */
-  --text-secondary: #64748B;  /* Soft slate gray */
-  --accent: #1D4ED8;          /* Cobalt Blue */
-  --border: #E2E8F0;          /* Clean border */
+  /* Default Theme: BOUTINLY BRAND (light) */
+  --bg-base: #F8FAFC;
+  --bg-card: #FFFFFF;
+  --bg-inset: #F1F5F9;
+  --bg-hover: #EEF2F7;
+  --text-primary: #0F172A;
+  --text-secondary: #64748B;
+  --accent: #1D4ED8;
+  --accent-soft: rgba(29, 78, 216, 0.08);
+  --border: #E2E8F0;
+
+  --success: #15803D;
+  --success-soft: #ECFDF3;
+  --warning: #B45309;
+  --warning-soft: #FFFBEB;
+  --danger: #DC2626;
+  --danger-soft: #FEF2F2;
+  --info: #0369A1;
+  --info-soft: #F0F9FF;
+
+  --elev-card: 0 1px 2px rgba(15, 23, 42, 0.04), 0 1px 3px rgba(15, 23, 42, 0.06);
+  --elev-raised: 0 4px 12px rgba(15, 23, 42, 0.08), 0 2px 4px rgba(15, 23, 42, 0.05);
+  --elev-overlay: 0 16px 40px rgba(15, 23, 42, 0.16), 0 4px 12px rgba(15, 23, 42, 0.08);
+
+  color-scheme: light;
 }
 
 .theme-artisan {
-  --bg-base: #FDF8F0;         /* Warm cream */
+  --bg-base: #FDF8F0;
   --bg-card: #FFFFFF;
-  --text-primary: #3D2E1C;    /* Dark walnut */
-  --text-secondary: #8B7355;  /* Warm brown */
-  --accent: #D4842A;          /* Burnished gold */
-  --border: #E8D5C0;          /* Warm tan border */
+  --bg-inset: #F8F0E3;
+  --bg-hover: #F5EBDA;
+  --text-primary: #3D2E1C;
+  --text-secondary: #8B7355;
+  --accent: #C1751F;
+  --accent-soft: rgba(212, 132, 42, 0.10);
+  --border: #E8D5C0;
 }
 
 .theme-operator {
-  --bg-base: #F4F6F9;         /* Cool gray-blue */
+  --bg-base: #F4F6F9;
   --bg-card: #FFFFFF;
-  --text-primary: #1A2332;    /* Deep navy */
-  --text-secondary: #5E6F8C;  /* Muted steel */
-  --accent: #3B6FB6;          /* Steel blue */
-  --border: #D8DFE8;          /* Cool gray border */
+  --bg-inset: #EAEEF4;
+  --bg-hover: #E4E9F1;
+  --text-primary: #1A2332;
+  --text-secondary: #5E6F8C;
+  --accent: #3B6FB6;
+  --accent-soft: rgba(59, 111, 182, 0.10);
+  --border: #D8DFE8;
 }
 
 .theme-heritage {
   --bg-base: #F8FAFC;
   --bg-card: #FFFFFF;
+  --bg-inset: #F1F5F9;
+  --bg-hover: #EEF2F7;
   --text-primary: #1E293B;
   --text-secondary: #64748B;
-  --accent: #1D4ED8;          /* Cobalt blue */
+  --accent: #1D4ED8;
+  --accent-soft: rgba(29, 78, 216, 0.08);
   --border: #E2E8F0;
 }
 
-/* Global Transitions for Seamless Theme Changes */
-*, *::before, *::after {
-  transition-property: background-color, border-color, text-decoration-color, fill, stroke;
-  transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
-  transition-duration: 150ms;
+/* Enterprise dark theme */
+.theme-dark {
+  --bg-base: #0B1120;
+  --bg-card: #111927;
+  --bg-inset: #0E1523;
+  --bg-hover: #1A2436;
+  --text-primary: #E6EBF2;
+  --text-secondary: #8B99AE;
+  --accent: #5B8DEF;
+  --accent-soft: rgba(91, 141, 239, 0.14);
+  --border: #223047;
+
+  --success: #34D399;
+  --success-soft: rgba(52, 211, 153, 0.12);
+  --warning: #FBBF24;
+  --warning-soft: rgba(251, 191, 36, 0.12);
+  --danger: #F87171;
+  --danger-soft: rgba(248, 113, 113, 0.12);
+  --info: #38BDF8;
+  --info-soft: rgba(56, 189, 248, 0.12);
+
+  --elev-card: 0 1px 2px rgba(0, 0, 0, 0.3);
+  --elev-raised: 0 4px 12px rgba(0, 0, 0, 0.4);
+  --elev-overlay: 0 16px 40px rgba(0, 0, 0, 0.55);
+
+  color-scheme: dark;
 }
 
 html, body {
   background-color: var(--bg-base);
   color: var(--text-primary);
+  font-feature-settings: "cv02", "cv03", "cv11";
+  -webkit-font-smoothing: antialiased;
 }
 
-/* Highly premium custom styling for scrollbars */
+/* Scoped theme transitions (replaces the old global `*` rule, which caused
+   flash-of-transition on load and made every hover feel laggy) */
+body,
+aside, header, nav, main, section, div[class*="bg-theme"], button, a, input, select, textarea {
+  transition: background-color 150ms var(--ease-out-quart),
+              border-color 150ms var(--ease-out-quart),
+              color 150ms var(--ease-out-quart),
+              box-shadow 150ms var(--ease-out-quart);
+}
+
+/* Accessible focus rings */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+input:focus-visible, select:focus-visible, textarea:focus-visible {
+  outline-offset: 0;
+}
+
+/* Tabular numerals for metrics, money, and table data */
+.tnum, table, [data-metric] {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Overlay entrance animations */
+@keyframes overlay-in {
+  from { opacity: 0; transform: translateY(6px) scale(0.98); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@keyframes fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+.animate-overlay-in {
+  animation: overlay-in 180ms var(--ease-out-quart);
+}
+
+.animate-fade-in {
+  animation: fade-in 150ms ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* Premium scrollbars */
 ::-webkit-scrollbar {
   width: 6px;
   height: 6px;
@@ -79,5 +219,4 @@ html, body {
 
 ::-webkit-scrollbar-thumb:hover {
   background: var(--text-secondary);
-  opacity: 0.5;
 }

@@ -18,7 +18,9 @@ import {
   ShieldCheck,
   ChevronDown,
   UserCheck,
-  Info
+  Info,
+  PanelLeftClose,
+  PanelLeftOpen
 } from 'lucide-react';
 
 export default function Sidebar() {
@@ -38,6 +40,19 @@ export default function Sidebar() {
 
   const [showUserMenu, setShowUserMenu] = useState(false);
   const [showNotifications, setShowNotifications] = useState(false);
+  const [collapsed, setCollapsed] = useState<boolean>(() => {
+    try { return localStorage.getItem('boutinly_sidebar_collapsed') === '1'; } catch { return false; }
+  });
+
+  const toggleCollapsed = () => {
+    setCollapsed(c => {
+      const next = !c;
+      try { localStorage.setItem('boutinly_sidebar_collapsed', next ? '1' : '0'); } catch { /* noop */ }
+      return next;
+    });
+    setShowUserMenu(false);
+    setShowNotifications(false);
+  };
 
   // Get unread notifications for current user
   const unreadNotifications = notifications.filter(
@@ -91,25 +106,29 @@ export default function Sidebar() {
   };
 
   return (
-    <aside className="w-64 bg-white text-theme-primary flex flex-col h-screen border-r border-theme-border shrink-0 select-none">
+    <aside className={`${collapsed ? 'w-16' : 'w-64'} bg-theme-card text-theme-primary flex flex-col h-screen border-r border-theme-border shrink-0 select-none transition-[width] duration-200`}>
       {/* Brand Header */}
-      <div className="p-5 border-b border-theme-border flex items-center justify-between">
+      <div className={`border-b border-theme-border flex items-center ${collapsed ? 'p-3 justify-center' : 'p-5 justify-between'}`}>
         <div className="flex items-center gap-2">
           <div className="p-1.5 bg-theme-accent/10 rounded text-theme-accent">
             <ShieldCheck className="w-5 h-5" />
           </div>
-          <div>
-            <h1 className="font-semibold text-sm tracking-wide text-theme-primary">Boutinly</h1>
-            <span className="text-[10px] text-theme-secondary font-sans">Active Workspace</span>
-          </div>
+          {!collapsed && (
+            <div>
+              <h1 className="font-semibold text-sm tracking-wide text-theme-primary">Boutinly</h1>
+              <span className="text-[10px] text-theme-secondary font-sans">Active Workspace</span>
+            </div>
+          )}
         </div>
-
         {/* In-app Notification Trigger */}
+        {!collapsed && (
         <div className="relative">
           <button
             onClick={() => setShowNotifications(!showNotifications)}
-            className="p-1.5 hover:bg-theme-base rounded text-theme-secondary hover:text-theme-primary transition-colors relative cursor-pointer"
+            className="p-1.5 hover:bg-theme-hover rounded-md text-theme-secondary hover:text-theme-primary transition-colors relative cursor-pointer"
             id="notification-bell-btn"
+            aria-label={`Notifications, ${unreadNotifications.length} unread`}
+            aria-expanded={showNotifications}
           >
             <Bell className="w-4 h-4" />
             {unreadNotifications.length > 0 && (
@@ -119,8 +138,8 @@ export default function Sidebar() {
 
           {/* Notifications Dropdown Panel */}
           {showNotifications && (
-            <div className="absolute right-0 mt-2 w-80 bg-white rounded-lg shadow-xl border border-theme-border text-theme-primary z-50 overflow-hidden">
-              <div className="p-3 bg-theme-base border-b border-theme-border flex items-center justify-between">
+            <div className="absolute right-0 mt-2 w-80 bg-theme-card rounded-[10px] shadow-overlay border border-theme-border text-theme-primary z-50 overflow-hidden animate-overlay-in">
+              <div className="p-3 bg-theme-inset border-b border-theme-border flex items-center justify-between">
                 <span className="text-xs font-semibold text-theme-primary">Notifications ({unreadNotifications.length})</span>
                 {unreadNotifications.length > 0 && (
                   <button
@@ -155,14 +174,16 @@ export default function Sidebar() {
             </div>
           )}
         </div>
+        )}
       </div>
 
       {/* Role Switcher & Profile Widget */}
-      <div className="p-4 border-b border-theme-border bg-theme-base/50 relative">
+      <div className={`border-b border-theme-border bg-theme-base/50 relative ${collapsed ? 'p-2' : 'p-4'}`}>
         <button
-          onClick={() => setShowUserMenu(!showUserMenu)}
-          className="w-full flex items-center justify-between p-2 hover:bg-theme-base rounded-lg transition-colors text-left cursor-pointer group"
+          onClick={() => (collapsed ? toggleCollapsed() : setShowUserMenu(!showUserMenu))}
+          className={`w-full flex items-center p-2 hover:bg-theme-base rounded-lg transition-colors text-left cursor-pointer group ${collapsed ? 'justify-center' : 'justify-between'}`}
           id="role-switcher-btn"
+          title={collapsed ? `${currentUser.name} — expand sidebar` : undefined}
         >
           <div className="flex items-center gap-2 min-w-0">
             {currentUser.avatar_url ? (
@@ -176,18 +197,20 @@ export default function Sidebar() {
                 {currentUser.name.charAt(0)}
               </div>
             )}
-            <div className="min-w-0">
-              <p className="text-xs font-medium text-theme-primary truncate">{currentUser.name}</p>
-              <p className="text-[10px] text-theme-accent truncate uppercase tracking-wider font-sans font-semibold">
-                {currentUser.role.replace('_', ' ')}
-              </p>
-            </div>
+            {!collapsed && (
+              <div className="min-w-0">
+                <p className="text-xs font-medium text-theme-primary truncate">{currentUser.name}</p>
+                <p className="text-[10px] text-theme-accent truncate uppercase tracking-wider font-sans font-semibold">
+                  {currentUser.role.replace('_', ' ')}
+                </p>
+              </div>
+            )}
           </div>
-          <ChevronDown className="w-4 h-4 text-theme-secondary group-hover:text-theme-primary transition-colors shrink-0 ml-1" />
+          {!collapsed && <ChevronDown className="w-4 h-4 text-theme-secondary group-hover:text-theme-primary transition-colors shrink-0 ml-1" />}
         </button>
 
         {showUserMenu && (
-          <div className="absolute left-4 right-4 mt-2 bg-white rounded-lg shadow-xl border border-theme-border text-theme-primary z-50 py-1 divide-y divide-theme-border max-h-80 overflow-y-auto">
+          <div className="absolute left-4 right-4 mt-2 bg-theme-card rounded-[10px] shadow-overlay border border-theme-border text-theme-primary z-50 py-1 divide-y divide-theme-border max-h-80 overflow-y-auto animate-overlay-in">
             <div className="px-3 py-2 text-[10px] text-theme-secondary font-semibold uppercase tracking-wider">
               Impersonate Role
             </div>
@@ -215,12 +238,14 @@ export default function Sidebar() {
         )}
 
         {/* Dynamic Role Capability Prompt */}
+        {!collapsed && (
         <div className="mt-2.5 px-2 py-1.5 bg-theme-base/60 rounded border border-theme-border flex gap-1.5 items-start">
           <Info className="w-3.5 h-3.5 text-theme-accent shrink-0 mt-0.5" />
           <p className="text-[10px] text-theme-secondary leading-normal font-sans">
             <strong>Scope Alert:</strong> {roleDescriptions[currentUser.role]}
           </p>
         </div>
+        )}
       </div>
 
       {/* Navigation Modules */}
@@ -238,19 +263,26 @@ export default function Sidebar() {
             <button
               key={item.id}
               onClick={() => handleModuleClick(item.id)}
-              className={`w-full flex items-center gap-3 px-3 py-2.5 text-xs font-medium rounded-lg transition-all cursor-pointer group ${
+              className={`relative w-full flex items-center py-2.5 text-xs font-medium rounded-lg transition-all cursor-pointer group ${
+                collapsed ? 'justify-center px-0' : 'gap-3 px-3'
+              } ${
                 isActive
-                  ? 'bg-theme-accent text-white shadow-sm'
-                  : 'text-theme-secondary hover:text-theme-primary hover:bg-theme-base'
+                  ? 'bg-theme-accent-soft text-theme-accent'
+                  : 'text-theme-secondary hover:text-theme-primary hover:bg-theme-hover'
               }`}
               id={`nav-${item.id}`}
+              aria-current={isActive ? 'page' : undefined}
+              title={collapsed ? item.label : undefined}
             >
-              <Icon className={`w-4 h-4 shrink-0 ${isActive ? 'text-white' : 'text-theme-secondary/60 group-hover:text-theme-primary'}`} />
-              <span className="truncate">{item.label}</span>
+              {isActive && (
+                <span className="absolute left-0 top-1/2 -translate-y-1/2 w-0.5 h-4 bg-theme-accent rounded-full" aria-hidden="true" />
+              )}
+              <Icon className={`w-4 h-4 shrink-0 ${isActive ? 'text-theme-accent' : 'text-theme-secondary/60 group-hover:text-theme-primary'}`} />
+              {!collapsed && <span className="truncate">{item.label}</span>}
 
               {/* Optional notifications bubble on side menu */}
-              {item.id === 'tasks' && tasks.filter(t => t.assigned_to_id === currentUser.id && !t.completed_at && new Date(t.due_at) < new Date()).length > 0 && (
-                <span className="ml-auto bg-theme-accent/10 text-theme-accent border border-theme-accent/20 px-1.5 py-0.5 text-[9px] rounded-full font-sans font-bold">
+              {!collapsed && item.id === 'tasks' && tasks.filter(t => t.assigned_to_id === currentUser.id && !t.completed_at && new Date(t.due_at) < new Date()).length > 0 && (
+                <span className="ml-auto bg-danger-soft text-danger px-1.5 py-0.5 text-[9px] rounded-full font-sans font-bold tnum">
                   {tasks.filter(t => t.assigned_to_id === currentUser.id && !t.completed_at && new Date(t.due_at) < new Date()).length} OVERDUE
                 </span>
               )}
@@ -259,10 +291,50 @@ export default function Sidebar() {
         })}
       </nav>
 
-      {/* Bottom Footer */}
-      <div className="p-4 border-t border-theme-border bg-theme-base/30 text-[10px] text-theme-secondary text-center font-sans">
-        <div>Secure Environment</div>
-        <div>boutinly.com</div>
+      {/* Theme Switcher & Footer */}
+      <div className={`border-t border-theme-border bg-theme-base/30 space-y-3 ${collapsed ? 'p-2' : 'p-4'}`}>
+        <button
+          onClick={toggleCollapsed}
+          className={`w-full flex items-center gap-2 py-2 text-xs font-medium text-theme-secondary hover:text-theme-primary hover:bg-theme-hover rounded-lg transition-colors cursor-pointer ${collapsed ? 'justify-center px-0' : 'px-3'}`}
+          aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+          title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+        >
+          {collapsed ? <PanelLeftOpen className="w-4 h-4" /> : <PanelLeftClose className="w-4 h-4" />}
+          {!collapsed && <span>Collapse</span>}
+        </button>
+        {!collapsed && (
+        <div className="flex items-center justify-between px-1">
+          <span className="text-[10px] text-theme-secondary font-semibold uppercase tracking-wider font-sans">Theme</span>
+          <div className="flex items-center gap-1.5" role="radiogroup" aria-label="Color theme">
+            {[
+              { id: 'heritage', swatch: '#1D4ED8', label: 'Heritage (light blue)' },
+              { id: 'artisan', swatch: '#C1751F', label: 'Artisan (warm)' },
+              { id: 'operator', swatch: '#3B6FB6', label: 'Operator (steel)' },
+              { id: 'dark', swatch: '#0B1120', label: 'Dark' },
+            ].map(t => (
+              <button
+                key={t.id}
+                onClick={() => setActiveTheme(t.id)}
+                role="radio"
+                aria-checked={activeTheme === t.id}
+                aria-label={t.label}
+                title={t.label}
+                className={`w-4.5 h-4.5 rounded-full border-2 cursor-pointer transition-all ${
+                  activeTheme === t.id
+                    ? 'border-theme-accent scale-110'
+                    : 'border-theme-border hover:border-theme-secondary'
+                }`}
+                style={{ backgroundColor: t.swatch }}
+              />
+            ))}
+          </div>
+        </div>
+        )}
+        {!collapsed && (
+        <div className="text-[10px] text-theme-secondary text-center font-sans">
+          Secure Environment &middot; boutinly.com
+        </div>
+        )}
       </div>
     </aside>
   );

@@ -18,6 +18,7 @@ import {
   Sparkles,
   RefreshCw
 } from 'lucide-react';
+import { FunnelChart, DonutChart, TrendLine } from './ui/charts';
 
 export default function ReportsModule() {
   const {
@@ -75,6 +76,32 @@ export default function ReportsModule() {
 
   // Render personal or manager views based on role
   const isManagerOrAdmin = [UserRole.SUPER_ADMIN, UserRole.ADMIN, UserRole.MANAGER].includes(currentUser.role);
+
+  // Won revenue by month (trailing 6 months) for trend chart
+  const trendData = (() => {
+    const now = new Date();
+    const months: { label: string; value: number }[] = [];
+    for (let i = 5; i >= 0; i--) {
+      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      const next = new Date(now.getFullYear(), now.getMonth() - i + 1, 1);
+      const value = wonDeals
+        .filter(deal => {
+          const t = new Date(deal.won_at || deal.close_date).getTime();
+          return t >= d.getTime() && t < next.getTime();
+        })
+        .reduce((sum, deal) => sum + deal.value, 0);
+      months.push({ label: d.toLocaleDateString('en-US', { month: 'short' }), value });
+    }
+    return months;
+  })();
+
+  // Open pipeline value by stage for funnel chart
+  const activeStagesForChart = stages.filter(s => s.pipeline_id === activePipelineId);
+  const funnelData = activeStagesForChart.map(stg => ({
+    label: stg.name,
+    value: scopedDeals.filter(d => d.stage_id === stg.id).reduce((sum, d) => sum + d.value, 0),
+    color: stg.type === 'won' ? 'var(--success)' : stg.type === 'lost' ? 'var(--text-secondary)' : undefined,
+  }));
 
   // CSV export helper
   const handleExportCsv = () => {
@@ -340,33 +367,39 @@ export default function ReportsModule() {
                   <BarChart3 className="w-4 h-4 text-theme-secondary" />
                 </div>
 
-                <div className="space-y-3.5 my-4">
-                  {stages.filter(s => s.pipeline_id === activePipelineId).map(stg => {
-                    const stgDeals = scopedDeals.filter(d => d.stage_id === stg.id);
-                    const totalVal = stgDeals.reduce((sum, d) => sum + d.value, 0);
-                    const maxVal = Math.max(...stages.filter(s => s.pipeline_id === activePipelineId).map(s =>
-                      scopedDeals.filter(d => d.stage_id === s.id).reduce((sum, d) => sum + d.value, 0)
-                    )) || 1;
-                    const percent = (totalVal / maxVal) * 100;
-
-                    return (
-                      <div key={stg.id} className="space-y-1">
-                        <div className="flex justify-between items-center text-xs">
-                          <span className="font-semibold text-theme-secondary">{stg.name} <span className="text-[10px] text-theme-secondary/70 font-sans">({stgDeals.length} deals)</span></span>
-                          <span className="font-bold text-theme-primary">${totalVal.toLocaleString()}</span>
-                        </div>
-                        <div className="w-full bg-theme-base rounded-full h-3 overflow-hidden">
-                          <div 
-                            className={`h-full rounded-full transition-all duration-1000 ${
-                              stg.type === 'won' ? 'bg-theme-accent' : stg.type === 'lost' ? 'bg-theme-secondary/30' : 'bg-theme-accent/80'
-                            }`}
-                            style={{ width: `${percent}%` }}
-                          />
-                        </div>
-                      </div>
-                    );
-                  })}
+                <div className="my-4">
+                  <FunnelChart data={funnelData} money />
                 </div>
+              </div>
+            </div>
+
+            {/* Revenue trend + Win/Loss composition */}
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+              <div className="bg-theme-card p-5 rounded-xl shadow-xs border border-theme-border lg:col-span-2">
+                <div className="mb-4">
+                  <h4 className="text-xs font-bold uppercase font-sans tracking-wider text-theme-secondary">Closed Won Revenue Trend</h4>
+                  <p className="text-[11px] text-theme-secondary mt-0.5">Trailing 6 months, RBAC-scoped</p>
+                </div>
+                <TrendLine
+                  points={trendData.map(m => m.value)}
+                  labels={trendData.map(m => m.label)}
+                  money
+                />
+              </div>
+
+              <div className="bg-theme-card p-5 rounded-xl shadow-xs border border-theme-border">
+                <div className="mb-4">
+                  <h4 className="text-xs font-bold uppercase font-sans tracking-wider text-theme-secondary">Deal Outcomes</h4>
+                  <p className="text-[11px] text-theme-secondary mt-0.5">Composition of all scoped deals</p>
+                </div>
+                <DonutChart
+                  centerLabel="Deals"
+                  data={[
+                    { label: 'Open', value: openDeals.length, color: 'var(--accent)' },
+                    { label: 'Won', value: wonDeals.length, color: 'var(--success)' },
+                    { label: 'Lost', value: lostDeals.length, color: 'var(--danger)' },
+                  ]}
+                />
               </div>
             </div>
 

@@ -6,6 +6,7 @@
 import React, { useState } from 'react';
 import { useCRM } from '../store';
 import { Deal, UserRole, DealLineItem } from '../types';
+import { toast } from './ui';
 import {
   Briefcase,
   Layers,
@@ -48,6 +49,10 @@ export default function PipelineModule() {
   
   // Selection / Drawer
   const [selectedDealId, setSelectedDealId] = useState<string | null>(null);
+
+  // Kanban drag-and-drop state
+  const [dragDealId, setDragDealId] = useState<string | null>(null);
+  const [dragOverStageId, setDragOverStageId] = useState<string | null>(null);
 
   // Modals
   const [showCreateDeal, setShowCreateDeal] = useState(false);
@@ -289,7 +294,32 @@ export default function PipelineModule() {
               const aggregateVal = dealsInStg.reduce((sum, d) => sum + d.value, 0);
 
               return (
-                <div key={stg.id} className="w-64 bg-theme-base/40 rounded-xl flex flex-col shrink-0 h-full border border-theme-border/60">
+                <div
+                  key={stg.id}
+                  onDragOver={(e) => {
+                    if (!dragDealId) return;
+                    e.preventDefault();
+                    e.dataTransfer.dropEffect = 'move';
+                    if (dragOverStageId !== stg.id) setDragOverStageId(stg.id);
+                  }}
+                  onDrop={(e) => {
+                    e.preventDefault();
+                    if (dragDealId) {
+                      const dragged = filteredDeals.find(d => d.id === dragDealId);
+                      if (dragged && dragged.stage_id !== stg.id) {
+                        moveDealStage(dragDealId, stg.id);
+                        toast.success('Deal moved', `“${dragged.name}” → ${stg.name}`);
+                      }
+                    }
+                    setDragDealId(null);
+                    setDragOverStageId(null);
+                  }}
+                  className={`w-64 rounded-xl flex flex-col shrink-0 h-full border transition-colors ${
+                    dragDealId && dragOverStageId === stg.id
+                      ? 'border-theme-accent bg-theme-accent-soft'
+                      : 'border-theme-border/60 bg-theme-base/40'
+                  }`}
+                >
                   {/* Column Header */}
                   <div className="p-3 border-b border-theme-border shrink-0 flex items-center justify-between bg-theme-card rounded-t-xl">
                     <div className="text-left">
@@ -313,9 +343,21 @@ export default function PipelineModule() {
                         <div
                           key={deal.id}
                           onClick={() => setSelectedDealId(deal.id)}
+                          draggable={!isReadOnly}
+                          onDragStart={(e) => {
+                            e.dataTransfer.effectAllowed = 'move';
+                            e.dataTransfer.setData('text/plain', deal.id);
+                            setDragDealId(deal.id);
+                          }}
+                          onDragEnd={() => {
+                            setDragDealId(null);
+                            setDragOverStageId(null);
+                          }}
                           className={`bg-theme-card p-3.5 rounded-xl border transition-all text-left cursor-pointer relative group ${
+                            deal.id === dragDealId ? 'opacity-40 rotate-1 shadow-raised' : ''
+                          } ${
                             deal.id === selectedDealId ? 'border-theme-accent ring-1 ring-theme-accent' : 'border-theme-border hover:border-theme-accent/50'
-                          }`}
+                          } ${!isReadOnly ? 'active:cursor-grabbing' : ''}`}
                         >
                           {/* Stalled deal notification alert */}
                           {isDealStalled && (
