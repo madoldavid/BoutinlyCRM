@@ -3,9 +3,11 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useCRM } from '../store';
 import { UserRole } from '../types';
+import type { Pipeline, Stage } from '../types';
+import { apiClient } from '../apiClient';
 import {
   Users,
   SlidersHorizontal,
@@ -19,7 +21,17 @@ import {
   Check,
   Cpu,
   Trash2,
-  Info
+  Info,
+  KeyRound,
+  QrCode,
+  ShieldOff,
+  Download,
+  AlertTriangle,
+  Layers,
+  GripVertical,
+  X,
+  ArrowUp,
+  ArrowDown
 } from 'lucide-react';
 
 export default function AdminModule() {
@@ -33,9 +45,11 @@ export default function AdminModule() {
     addCustomFieldDefinition,
     deleteCustomFieldDefinition,
     auditLogs,
+    pipelines,
+    stages,
   } = useCRM();
 
-  const [activeSubView, setActiveSubView] = useState<'users' | 'fields' | 'domain' | 'audit'>('users');
+  const [activeSubView, setActiveSubView] = useState<'users' | 'fields' | 'domain' | 'audit' | 'pipelines'>('users');
   const [showInviteModal, setShowInviteModal] = useState(false);
   const [inviteForm, setInviteForm] = useState({
     name: '',
@@ -57,6 +71,126 @@ export default function AdminModule() {
 
   // Domain state
   const [domainVerified, setDomainVerified] = useState(false);
+
+  // MFA state
+  const [mfaSetupData, setMfaSetupData] = useState<{ secret: string; uri: string } | null>(null);
+  const [mfaVerifyCode, setMfaVerifyCode] = useState('');
+  const [mfaSetupLoading, setMfaSetupLoading] = useState(false);
+  const [mfaDisablePassword, setMfaDisablePassword] = useState('');
+  const [showMfaDisable, setShowMfaDisable] = useState(false);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+
+  // GDPR state
+  const [gdprExporting, setGdprExporting] = useState(false);
+  const [gdprDeletePassword, setGdprDeletePassword] = useState('');
+  const [showGdprDelete, setShowGdprDelete] = useState(false);
+  const [gdprLoading, setGdprLoading] = useState(false);
+
+  // Pipeline management state
+  const [showPipelineModal, setShowPipelineModal] = useState(false);
+  const [pipelineForm, setPipelineForm] = useState({ name: '', is_default: false });
+  const [expandedPipeline, setExpandedPipeline] = useState<string | null>(null);
+  const [showStageModal, setShowStageModal] = useState(false);
+  const [stageForm, setStageForm] = useState({
+    pipeline_id: '',
+    name: '',
+    probability: 50,
+    order: 1,
+    type: 'open' as 'open' | 'won' | 'lost',
+  });
+
+  // Render QR code when MFA setup data changes
+  useEffect(() => {
+    if (mfaSetupData?.uri && canvasRef.current) {
+      const canvas = canvasRef.current;
+      // Simple QR renderer using the Google Charts API as a fallback
+      // In production use a proper QR library
+      const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(mfaSetupData.uri)}`;
+      const img = new Image();
+      img.onload = () => {
+        canvas.width = 200;
+        canvas.height = 200;
+        canvas.getContext('2d')!.drawImage(img, 0, 0, 200, 200);
+      };
+      img.src = qrUrl;
+    }
+  }, [mfaSetupData]);
+
+  // MFA handlers
+  const handleMfaSetup = async () => {
+    setMfaSetupLoading(true);
+    try {
+      const data = await apiClient.mfaSetup();
+      setMfaSetupData(data);
+    } catch (err: any) {
+      alert(err.message || 'Failed to setup MFA');
+    } finally {
+      setMfaSetupLoading(false);
+    }
+  };
+
+  const handleMfaVerify = async () => {
+    if (mfaVerifyCode.length !== 6) return;
+    setMfaSetupLoading(true);
+    try {
+      await apiClient.mfaVerify(mfaVerifyCode);
+      alert('MFA has been enabled successfully.');
+      setMfaSetupData(null);
+      setMfaVerifyCode('');
+    } catch (err: any) {
+      alert(err.message || 'MFA verification failed');
+    } finally {
+      setMfaSetupLoading(false);
+    }
+  };
+
+  const handleMfaDisable = async () => {
+    if (!mfaDisablePassword) return;
+    setMfaSetupLoading(true);
+    try {
+      await apiClient.mfaDisable(mfaDisablePassword);
+      alert('MFA has been disabled.');
+      setShowMfaDisable(false);
+      setMfaDisablePassword('');
+    } catch (err: any) {
+      alert(err.message || 'Failed to disable MFA');
+    } finally {
+      setMfaSetupLoading(false);
+    }
+  };
+
+  // GDPR handlers
+  const handleGdprExport = async () => {
+    setGdprExporting(true);
+    try {
+      const data = await apiClient.exportUserData();
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `boutinly-gdpr-export-${new Date().toISOString().split('T')[0]}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (err: any) {
+      alert(err.message || 'GDPR export failed');
+    } finally {
+      setGdprExporting(false);
+    }
+  };
+
+  const handleGdprDelete = async () => {
+    if (!gdprDeletePassword) return;
+    setGdprLoading(true);
+    try {
+      await apiClient.deleteUserData(gdprDeletePassword);
+      alert('Your account and data have been deleted. You will be logged out.');
+      window.location.reload();
+    } catch (err: any) {
+      alert(err.message || 'Account deletion failed');
+    } finally {
+      setGdprLoading(false);
+    }
+  };
 
   // Invite handler
   const handleInviteSubmit = (e: React.FormEvent) => {
@@ -132,6 +266,14 @@ export default function AdminModule() {
                 }`}
               >
                 <SlidersHorizontal className="w-3.5 h-3.5 text-theme-accent" /> Custom Fields
+              </button>
+              <button
+                onClick={() => setActiveSubView('pipelines')}
+                className={`px-3 py-1.5 rounded-md cursor-pointer transition-all flex items-center gap-1.5 ${
+                  activeSubView === 'pipelines' ? 'bg-theme-card text-theme-primary shadow-xs border border-theme-border/50' : 'text-theme-secondary hover:text-theme-primary'
+                }`}
+              >
+                <Layers className="w-3.5 h-3.5 text-theme-accent" /> Pipelines
               </button>
               <button
                 onClick={() => setActiveSubView('domain')}
@@ -373,19 +515,56 @@ export default function AdminModule() {
           </div>
         )}
 
+        {/* WORKSPACE VIEW: PIPELINE & STAGE MANAGEMENT */}
+        {activeSubView === 'pipelines' && (
+          <div className="flex-1 overflow-y-auto p-4 space-y-4 text-left bg-theme-base">
+            <h4 className="text-xs font-bold uppercase tracking-wider text-theme-secondary">Sales Pipelines</h4>
+            {pipelines.length === 0 ? (
+              <div className="text-center py-8 text-xs text-theme-secondary">
+                <Layers className="w-8 h-8 mx-auto mb-2 text-theme-secondary/40" />
+                <p>No pipelines configured</p>
+              </div>
+            ) : (
+              pipelines.map(p => (
+                <div key={p.id} className="bg-theme-card border border-theme-border rounded-xl overflow-hidden">
+                  <div className="p-3 flex items-center justify-between cursor-pointer"
+                    onClick={() => setExpandedPipeline(expandedPipeline === p.id ? null : p.id)}>
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs font-semibold text-theme-primary">{p.name}</span>
+                      {p.is_default && <span className="text-[9px] bg-theme-accent/10 text-theme-accent px-1.5 py-0.5 rounded font-bold">DEFAULT</span>}
+                      {p.is_archived && <span className="text-[9px] bg-theme-inset text-theme-secondary px-1.5 py-0.5 rounded">ARCHIVED</span>}
+                    </div>
+                    <span className="text-2xs text-theme-secondary">{stages.filter(s => s.pipeline_id === p.id).length} stages</span>
+                  </div>
+                  {expandedPipeline === p.id && (
+                    <div className="border-t border-theme-border bg-theme-base/50 p-3 space-y-2">
+                      <div className="flex items-center justify-between">
+                        <span className="text-[10px] font-semibold uppercase tracking-wider text-theme-secondary">Stages</span>
+                        <button onClick={() => { setStageForm({ pipeline_id: p.id, name: '', probability: 50, order: stages.filter(s => s.pipeline_id === p.id).length + 1, type: 'open' }); setShowStageModal(true); }}
+                          className="text-[10px] text-theme-accent hover:opacity-80 font-semibold cursor-pointer bg-transparent border-none flex items-center gap-1"><Plus className="w-3 h-3" /> Add Stage</button>
+                      </div>
+                      {stages.filter(s => s.pipeline_id === p.id).sort((a, b) => a.order - b.order).map(s => (
+                        <div key={s.id} className="flex items-center gap-2 bg-theme-card border border-theme-border rounded-lg p-2">
+                          <span className="text-xs text-theme-primary font-medium flex-1">{s.name}</span>
+                          <span className="text-2xs text-theme-secondary">{s.probability}% · {s.type}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ))
+            )}
+          </div>
+        )}
+
       </div>
 
-
-      {/* RIGHT COLUMN: SECURITY STATUS & GOVERNANCE */}
+      {/* RIGHT COLUMN: SECURITY, MFA & GDPR */}
       <div className="w-1/2 p-5 overflow-y-auto bg-theme-base text-left space-y-6 select-none">
         <div className="bg-theme-card p-5 rounded-xl border border-theme-border shadow-2xs space-y-4">
           <h4 className="text-xs font-bold uppercase font-sans tracking-wider text-theme-secondary flex items-center gap-1.5">
             <ShieldCheck className="w-4 h-4 text-theme-accent" /> Workspace Governance & Security
           </h4>
-          <p className="text-xs text-theme-secondary leading-normal">
-            Workspace access rules, security configurations, and active protection.
-          </p>
-
           <div className="space-y-3 font-sans text-[11px] text-theme-secondary">
             <div className="p-3 bg-theme-base rounded-lg border border-theme-border flex justify-between items-center">
               <span>Tenant Security Status</span>
@@ -399,6 +578,94 @@ export default function AdminModule() {
               <span>Compliance Framework</span>
               <span className="text-theme-accent font-bold uppercase">OWASP Compliant</span>
             </div>
+          </div>
+        </div>
+
+        {/* MFA Security */}
+        <div className="bg-theme-card p-5 rounded-xl border border-theme-border space-y-4">
+          <h4 className="text-xs font-bold uppercase font-sans tracking-wider text-theme-secondary flex items-center gap-1.5">
+            <KeyRound className="w-4 h-4 text-theme-accent" /> Two-Factor Authentication
+          </h4>
+          {!mfaSetupData ? (
+            <div className="space-y-3">
+              <p className="text-xs text-theme-secondary">Add an extra layer of security to your account with TOTP-based two-factor authentication.</p>
+              {currentUser.mfa_enabled ? (
+                <>
+                  <div className="p-3 bg-success-soft border border-success/20 rounded-lg flex items-center gap-2">
+                    <Check className="w-4 h-4 text-success" />
+                    <span className="text-xs text-success font-semibold">MFA is enabled on your account.</span>
+                  </div>
+                  {!showMfaDisable ? (
+                    <button onClick={() => setShowMfaDisable(true)} className="text-xs text-danger hover:opacity-80 font-semibold cursor-pointer bg-transparent border-none flex items-center gap-1">
+                      <ShieldOff className="w-3.5 h-3.5" /> Disable MFA
+                    </button>
+                  ) : (
+                    <div className="space-y-2 p-3 bg-theme-base border border-theme-border rounded-lg">
+                      <label className="text-[10px] text-theme-secondary font-semibold block">Enter your password to disable MFA</label>
+                      <input type="password" value={mfaDisablePassword} onChange={e => setMfaDisablePassword(e.target.value)}
+                        className="w-full bg-theme-card border border-theme-border rounded px-2.5 py-1.5 text-xs" placeholder="Password" />
+                      <div className="flex gap-2">
+                        <button onClick={() => { setShowMfaDisable(false); setMfaDisablePassword(''); }} className="text-xs border border-theme-border rounded px-3 py-1 cursor-pointer">Cancel</button>
+                        <button onClick={handleMfaDisable} disabled={mfaSetupLoading || !mfaDisablePassword}
+                          className="text-xs bg-danger text-white rounded px-3 py-1 cursor-pointer disabled:opacity-50">{mfaSetupLoading ? '…' : 'Disable MFA'}</button>
+                      </div>
+                    </div>
+                  )}
+                </>
+              ) : (
+                <button onClick={handleMfaSetup} disabled={mfaSetupLoading}
+                  className="bg-theme-accent hover:opacity-90 text-white px-4 py-2 rounded-lg text-xs font-semibold cursor-pointer disabled:opacity-50 flex items-center gap-1.5">
+                  <QrCode className="w-3.5 h-3.5" /> {mfaSetupLoading ? 'Loading…' : 'Setup MFA'}
+                </button>
+              )}
+            </div>
+          ) : (
+            <div className="space-y-3">
+              <p className="text-xs text-theme-secondary">Scan this QR code with your authenticator app, then enter the 6-digit code to verify.</p>
+              <div className="flex justify-center">
+                <canvas ref={canvasRef} className="border border-theme-border rounded-lg bg-white p-2" />
+              </div>
+              <p className="text-[10px] text-theme-secondary text-center break-all font-mono select-all">{mfaSetupData.secret}</p>
+              <div className="flex gap-2">
+                <input type="text" value={mfaVerifyCode} onChange={e => setMfaVerifyCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                  maxLength={6} placeholder="000000"
+                  className="flex-1 bg-theme-card border border-theme-border rounded px-3 py-2 text-center text-lg tracking-[0.5em] font-mono" />
+                <button onClick={handleMfaVerify} disabled={mfaVerifyCode.length !== 6 || mfaSetupLoading}
+                  className="bg-theme-accent hover:opacity-90 text-white px-4 py-2 rounded-lg text-xs font-semibold cursor-pointer disabled:opacity-50">Verify</button>
+              </div>
+              <button onClick={() => { setMfaSetupData(null); setMfaVerifyCode(''); }} className="text-xs text-theme-secondary hover:text-theme-primary cursor-pointer bg-transparent border-none">Cancel</button>
+            </div>
+          )}
+        </div>
+
+        {/* GDPR Data Controls */}
+        <div className="bg-theme-card p-5 rounded-xl border border-theme-border space-y-4">
+          <h4 className="text-xs font-bold uppercase font-sans tracking-wider text-theme-secondary flex items-center gap-1.5">
+            <Download className="w-4 h-4 text-theme-accent" /> Data Privacy (GDPR)
+          </h4>
+          <p className="text-xs text-theme-secondary">Export all your personal data or permanently delete your account and associated data.</p>
+          <div className="space-y-2">
+            <button onClick={handleGdprExport} disabled={gdprExporting}
+              className="w-full bg-theme-base hover:bg-theme-hover border border-theme-border text-theme-primary px-4 py-2 rounded-lg text-xs font-semibold cursor-pointer disabled:opacity-50 flex items-center justify-center gap-1.5">
+              <Download className="w-3.5 h-3.5" /> {gdprExporting ? 'Exporting…' : 'Export My Data (Art. 20)'}
+            </button>
+            {!showGdprDelete ? (
+              <button onClick={() => setShowGdprDelete(true)}
+                className="w-full bg-danger-soft hover:bg-danger/10 border border-danger/20 text-danger px-4 py-2 rounded-lg text-xs font-semibold cursor-pointer flex items-center justify-center gap-1.5">
+                <AlertTriangle className="w-3.5 h-3.5" /> Delete My Account (Art. 17)
+              </button>
+            ) : (
+              <div className="space-y-2 p-3 bg-danger-soft border border-danger/20 rounded-lg">
+                <p className="text-[10px] text-danger font-semibold">This action is irreversible. All your personal data will be anonymized.</p>
+                <input type="password" value={gdprDeletePassword} onChange={e => setGdprDeletePassword(e.target.value)}
+                  className="w-full bg-theme-card border border-theme-border rounded px-2.5 py-1.5 text-xs" placeholder="Enter password to confirm" />
+                <div className="flex gap-2">
+                  <button onClick={() => { setShowGdprDelete(false); setGdprDeletePassword(''); }} className="text-xs border border-theme-border rounded px-3 py-1 cursor-pointer">Cancel</button>
+                  <button onClick={handleGdprDelete} disabled={gdprLoading || !gdprDeletePassword}
+                    className="text-xs bg-danger text-white rounded px-3 py-1 cursor-pointer disabled:opacity-50">{gdprLoading ? 'Deleting…' : 'Permanently Delete'}</button>
+                </div>
+              </div>
+            )}
           </div>
         </div>
 

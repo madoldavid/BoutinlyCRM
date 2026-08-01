@@ -246,7 +246,8 @@ export class InMemoryCrmRepository implements CrmRepository {
   }
 
   async countUsers(): Promise<number> {
-    return this.users.length;
+    // Only count users with actual password hashes (exclude seed data without passwords)
+    return this.users.filter(u => this.passwordHashes.has(u.id)).length;
   }
 
   // ─── Auth ────────────────────────────────────────────

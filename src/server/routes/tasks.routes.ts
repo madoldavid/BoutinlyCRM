@@ -92,6 +92,7 @@ export function registerTasksRoutes(
 
   app.post('/api/tasks/:id/complete', authenticate(config), asyncHandler<AuthenticatedRequest>(async (req, res) => {
     requireWriteAccess(req);
+    const note = (req.body as any)?.note as string | undefined;
     const task = await repository.completeTask(req.params.id);
     if (!task) throw new ApiError(404, 'Task not found.', 'not_found');
 
@@ -101,7 +102,7 @@ export function registerTasksRoutes(
       action: 'task.completed',
       entity_type: 'task',
       entity_id: task.id,
-      diff: { title: task.title },
+      diff: { title: task.title, note: note || null },
       ip_address: String(req.ip || ''),
       user_agent: String(req.get('user-agent') || ''),
     });
@@ -109,7 +110,7 @@ export function registerTasksRoutes(
     await repository.addActivity({
       type: 'task_completed',
       title: `Completed Task: ${task.title}`,
-      body: `Task of type "${task.type}" was marked as completed.`,
+      body: note || `Task of type "${task.type}" was marked as completed.`,
       user_id: req.principal.userId,
       contact_id: task.contact_id,
       deal_id: task.deal_id,

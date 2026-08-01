@@ -6,22 +6,33 @@ import { randomUUID } from 'node:crypto';
 import type { AppConfig } from './config.js';
 import { runWithTenant } from './db/connection.js';
 import type { EmailService } from './email/service.js';
-import { ApiError, asyncHandler, errorHandler, notFoundHandler } from './errors.js';
+import { ApiError, asyncHandler, createErrorHandler, notFoundHandler } from './errors.js';
 import type { AppLogger } from './logger.js';
+import { metricsMiddleware, metricsEndpoint } from './observability/metrics.js';
+import { traceMiddleware } from './observability/tracing.js';
+import type { FileService } from './storage/service.js';
 import type { CrmRepository } from './repositories/crmRepository.js';
 import { scopeSnapshot } from './repositories/scope.js';
 import { authenticate } from './security/rbac.js';
 import type { AuthenticatedRequest } from './security/rbac.js';
 import { authLimiter, bootstrapLimiter, globalLimiter } from './security/rateLimiter.js';
+import { csrfProtection, parseCookies } from './security/csrf.js';
+import type { KeyManager } from './security/jwks.js';
+import type { AccountLockoutService } from './security/lockout.js';
+import type { TokenBlocklist } from './security/tokenBlocklist.js';
 import { registerAccountsRoutes } from './routes/accounts.routes.js';
 import { registerActivitiesRoutes } from './routes/activities.routes.js';
 import { registerAdminRoutes } from './routes/admin.routes.js';
 import { registerAuthRoutes } from './routes/auth.routes.js';
+import { registerCalendarRoutes } from './routes/calendar.routes.js';
 import { registerContactsRoutes } from './routes/contacts.routes.js';
 import { registerDealsRoutes } from './routes/deals.routes.js';
 import { registerEmailRoutes } from './routes/email.routes.js';
+import { registerFilesRoutes } from './routes/files.routes.js';
 import { registerGdprRoutes } from './routes/gdpr.routes.js';
 import { registerNotificationsRoutes } from './routes/notifications.routes.js';
+import { registerOidcRoutes } from './routes/oidc.routes.js';
+import { registerReportsRoutes } from './routes/reports.routes.js';
 import { registerTasksRoutes } from './routes/tasks.routes.js';
 
 interface CreateAppOptions {
@@ -29,9 +40,13 @@ interface CreateAppOptions {
   logger: AppLogger;
   repository: CrmRepository;
   emailService: EmailService;
+  fileService: FileService;
+  lockoutService: AccountLockoutService;
+  keyManager: KeyManager;
+  tokenBlocklist: TokenBlocklist;
 }
 
-export function createApp({ config, logger, repository, emailService }: CreateAppOptions) {
+export function createApp({ config, logger, repository, emailService, fileService, lockoutService, keyManager, tokenBlocklist }: CreateAppOptions) {
   const app = express();
 
   app.disable('x-powered-by');
@@ -90,17 +105,37 @@ export function createApp({ config, logger, repository, emailService }: CreateAp
     credentials: true,
   }));
 
+  // Cookie parser (minimal — no dependency needed)
+  app.use((req, _res, next) => {
+    (req as any).cookies = parseCookies(req);
+    next();
+  });
+
+  // CSRF protection (double-submit cookie pattern)
+  app.use(csrfProtection());
+
   // Global rate limiter
-  app.use(globalLimiter);
+  app.use(globalLimiter.middleware);
   app.use(pinoHttp({ logger }));
 
   // Request ID tracing
+  app.use(traceMiddleware(logger));
+  app.use(metricsMiddleware());
+
   app.use((req, _res, next) => {
     (req as any).requestId = req.header('x-request-id') || randomUUID();
     next();
   });
 
   const startTime = Date.now();
+
+  // JWKS endpoint — public key discovery for token verification
+  app.get('/.well-known/jwks.json', (_req, res) => {
+    res.json(keyManager.getJwks());
+  });
+
+  // Prometheus metrics endpoint
+  app.get('/metrics', (_req, res) => metricsEndpoint(_req, res));
 
   // Liveness probe — lightweight, no DB dependency
   app.get('/api/health', (_req, res) => {
@@ -165,28 +200,32 @@ export function createApp({ config, logger, repository, emailService }: CreateAp
   });
 
   // Bootstrap - returns full scoped CRM snapshot for initial app load
-  app.get('/api/crm/bootstrap', bootstrapLimiter, authenticate(config), asyncHandler<AuthenticatedRequest>(async (req, res) => {
+  app.get('/api/crm/bootstrap', bootstrapLimiter.middleware, authenticate(config), asyncHandler<AuthenticatedRequest>(async (req, res) => {
     const snapshot = await repository.snapshot();
     res.json(scopeSnapshot(snapshot, req.principal));
   }));
 
   // Apply auth rate limiter to all auth routes
-  app.use('/api/auth', authLimiter);
+  app.use('/api/auth', authLimiter.middleware);
 
   // Register all route modules
-  registerAuthRoutes(app, config, repository, emailService);
+  registerAuthRoutes(app, config, repository, emailService, lockoutService, keyManager, tokenBlocklist);
+  registerOidcRoutes(app, config, repository, logger);
   registerContactsRoutes(app, config, repository);
   registerAccountsRoutes(app, config, repository);
   registerDealsRoutes(app, config, repository);
   registerTasksRoutes(app, config, repository);
   registerActivitiesRoutes(app, config, repository);
   registerNotificationsRoutes(app, config, repository);
+  registerReportsRoutes(app, config, repository);
   registerEmailRoutes(app, config, repository, emailService);
+  registerFilesRoutes(app, config, repository, fileService);
   registerGdprRoutes(app, config, repository);
   registerAdminRoutes(app, config, repository);
+  registerCalendarRoutes(app, config, repository, logger);
 
   app.use(notFoundHandler);
-  app.use(errorHandler);
+  app.use(createErrorHandler(logger));
 
   return app;
 }

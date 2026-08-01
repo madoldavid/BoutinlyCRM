@@ -76,6 +76,24 @@ export class ApiError extends Error {
   }
 }
 
+// ─── CSRF token helpers ────────────────────────────────
+
+const CSRF_COOKIE_NAME = '__Host-boutinly-csrf';
+const CSRF_HEADER_NAME = 'x-csrf-token';
+
+function getCsrfToken(): string | null {
+  // Check document.cookie for the CSRF cookie (try both prefixed and bare names)
+  const cookieNames = [CSRF_COOKIE_NAME, 'boutinly-csrf', '__Host-boutinly-csrf'];
+  try {
+    const cookies = document.cookie.split(';');
+    for (const c of cookies) {
+      const [name, ...rest] = c.trim().split('=');
+      if (cookieNames.includes(name)) return decodeURIComponent(rest.join('='));
+    }
+  } catch { /* ignore */ }
+  return null;
+}
+
 // ─── Token management ──────────────────────────────────
 
 const TOKEN_KEY = 'boutinly_token';
@@ -209,6 +227,13 @@ export class ApiClient {
     return res;
   }
 
+  async logout(): Promise<void> {
+    await this.request<{ ok: boolean }>('/api/auth/logout', { method: 'POST' }).catch(() => {});
+    this.setToken(null);
+    this.setRefreshToken(null);
+    sessionStorage.removeItem('current_user');
+  }
+
   async getMe(): Promise<User> {
     return this.request<User>('/api/auth/me');
   }
@@ -314,7 +339,7 @@ export class ApiClient {
   async moveDealStage(id: string, targetStageId: string): Promise<Deal> {
     const res = await this.request<{ deal: Deal }>(`/api/deals/${id}/move-stage`, {
       method: 'POST',
-      body: JSON.stringify({ targetStageId }),
+      body: JSON.stringify({ target_stage_id: targetStageId }),
     });
     return res.deal;
   }
@@ -522,15 +547,37 @@ export class ApiClient {
       headers['Authorization'] = `Bearer ${this.token}`;
     }
 
+    // Add CSRF token for mutating methods
+    const method = ((init.method || 'GET') as string).toUpperCase();
+    if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(method)) {
+      const csrfToken = getCsrfToken();
+      if (csrfToken) headers[CSRF_HEADER_NAME] = csrfToken;
+    }
+
     const response = await fetch(`${this.baseUrl}${path}`, {
       ...init,
       headers: { ...headers, ...(init.headers as Record<string, string> | undefined) },
     });
 
+    // Capture CSRF token from response header
+    const csrfHeader = response.headers.get('X-CSRF-Token');
+    if (csrfHeader) {
+      try {
+        const secure = window.location.protocol === 'https:' ? '; Secure' : '';
+        // Use the bare cookie name matching the dev server (without __Host-)
+        document.cookie = `boutinly-csrf=${encodeURIComponent(csrfHeader)}; path=/; SameSite=Strict${secure}; max-age=86400`;
+      } catch { /* cookie may be blocked */ }
+    }
+
     if (response.status === 401 && authenticated && this.refreshToken) {
       try {
         await this.refresh();
         headers['Authorization'] = `Bearer ${this.token}`;
+        // Re-add CSRF for retry
+        if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(method)) {
+          const csrfToken = getCsrfToken();
+          if (csrfToken) headers[CSRF_HEADER_NAME] = csrfToken;
+        }
         const retryResponse = await fetch(`${this.baseUrl}${path}`, {
           ...init,
           headers: { ...headers, ...(init.headers as Record<string, string> | undefined) },

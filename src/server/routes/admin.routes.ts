@@ -154,4 +154,98 @@ export function registerAdminRoutes(
     const stages = await repository.listStages();
     res.json({ stages });
   }));
+
+  // ─── SES Domain Configuration ─────────────────────
+
+  // Get SES configuration status
+  app.get('/api/admin/ses/status', authenticate(config), authorize(adminRoles), asyncHandler(async (_req, res) => {
+    const provider = process.env.EMAIL_PROVIDER || 'console';
+    const region = process.env.SES_REGION || '';
+    const domain = process.env.EMAIL_FROM?.split('@')[1] || '';
+    const fromAddress = process.env.EMAIL_FROM || '';
+
+    // Try to check actual SES verification status if credentials are configured
+    let verificationStatus: string | null = null;
+    let dkimTokens: string[] = [];
+
+    if (provider === 'ses' && process.env.SES_ACCESS_KEY_ID && process.env.SES_SECRET_ACCESS_KEY) {
+      try {
+        const { SESClient, GetIdentityVerificationAttributesCommand } = await import('@aws-sdk/client-ses');
+        const client = new SESClient({
+          region: region || 'us-east-1',
+          credentials: {
+            accessKeyId: process.env.SES_ACCESS_KEY_ID,
+            secretAccessKey: process.env.SES_SECRET_ACCESS_KEY,
+          },
+        });
+        const attr = await client.send(new GetIdentityVerificationAttributesCommand({
+          Identities: [domain],
+        })) as any;
+        const status = attr.VerificationAttributes?.[domain]?.VerificationStatus || 'NotStarted';
+        verificationStatus = status;
+      } catch {
+        verificationStatus = 'unavailable';
+      }
+    }
+
+    res.json({
+      provider,
+      region,
+      domain,
+      from_address: fromAddress,
+      verification_status: verificationStatus || provider === 'console' ? 'not_applicable' : 'not_configured',
+      dkim_tokens: dkimTokens,
+      is_configured: provider === 'ses' && !!process.env.SES_ACCESS_KEY_ID,
+    });
+  }));
+
+  // Initiate domain verification (triggers SES VerifyDomainIdentity)
+  app.post('/api/admin/ses/verify-domain', authenticate(config), authorize(adminRoles), asyncHandler<AuthenticatedRequest>(async (req, res) => {
+    const { domain } = req.body as { domain?: string };
+    const targetDomain = domain || process.env.EMAIL_FROM?.split('@')[1];
+
+    if (!targetDomain) {
+      throw new ApiError(400, 'Domain is required for SES verification.', 'invalid_domain');
+    }
+
+    if (!process.env.SES_ACCESS_KEY_ID || !process.env.SES_SECRET_ACCESS_KEY) {
+      throw new ApiError(400, 'SES credentials (SES_ACCESS_KEY_ID, SES_SECRET_ACCESS_KEY) must be configured before verifying a domain.', 'ses_not_configured');
+    }
+
+    try {
+      const region = process.env.SES_REGION || 'us-east-1';
+      const { SESClient, VerifyDomainIdentityCommand } = await import('@aws-sdk/client-ses');
+      const client = new SESClient({
+        region,
+        credentials: {
+          accessKeyId: process.env.SES_ACCESS_KEY_ID,
+          secretAccessKey: process.env.SES_SECRET_ACCESS_KEY,
+        },
+      });
+      const result = await client.send(new VerifyDomainIdentityCommand({
+        Domain: targetDomain,
+      })) as any;
+
+      const dkimTokens: string[] = result.DkimTokens || [];
+
+      await repository.addAuditLog({
+        user_id: req.principal.userId,
+        user_name: req.principal.email,
+        action: 'ses.domain_verification_initiated',
+        entity_type: 'organization',
+        diff: { domain: targetDomain, region },
+        ip_address: String(req.ip || ''),
+        user_agent: String(req.get('user-agent') || ''),
+      });
+
+      res.json({
+        domain: targetDomain,
+        verification_token: result.VerificationToken || '',
+        dkim_tokens: dkimTokens,
+        message: 'Domain verification initiated. Add the returned TXT record and DKIM CNAME records to your DNS.',
+      });
+    } catch (err) {
+      throw new ApiError(502, `SES verification failed: ${err instanceof Error ? err.message : 'Unknown error'}`, 'ses_error');
+    }
+  }));
 }

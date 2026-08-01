@@ -96,7 +96,7 @@ export const createDealSchema = z.object({
 export const updateDealSchema = createDealSchema.partial();
 
 export const moveDealStageSchema = z.object({
-  targetStageId: z.string().min(1),
+  target_stage_id: z.string().min(1),
 });
 
 export const closeDealSchema = z.object({

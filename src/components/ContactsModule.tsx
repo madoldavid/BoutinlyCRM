@@ -6,6 +6,7 @@
 import React, { useState } from 'react';
 import { useCRM } from '../store';
 import { Contact, Account, UserRole } from '../types';
+import { DataTable, type DataTableColumn } from './ui/DataTable';
 import {
   Search,
   Plus,
@@ -22,7 +23,9 @@ import {
   FileSpreadsheet,
   Shuffle,
   Users2,
-  Check
+  Check,
+  List,
+  LayoutGrid
 } from 'lucide-react';
 
 export default function ContactsModule() {
@@ -43,6 +46,7 @@ export default function ContactsModule() {
   } = useCRM();
 
   const [activeTab, setActiveTab] = useState<'contacts' | 'accounts'>('contacts');
+  const [viewMode, setViewMode] = useState<'cards' | 'table'>('cards');
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedTag, setSelectedTag] = useState<string>('All');
   
@@ -308,6 +312,15 @@ export default function ContactsModule() {
 
   const isReadOnly = currentUser.role === UserRole.VIEWER;
 
+  const contactColumns: DataTableColumn<Contact>[] = [
+    { key: 'name', header: 'Name', render: (c) => `${c.first_name} ${c.last_name}` },
+    { key: 'email', header: 'Email', render: (c) => c.email },
+    { key: 'title', header: 'Title', render: (c) => c.title || '—' },
+    { key: 'phone', header: 'Phone', render: (c) => c.phone || '—' },
+    { key: 'account', header: 'Company', render: (c) => scopedAccounts.find(a => a.id === c.account_id)?.name || '—' },
+    { key: 'tags', header: 'Tags', render: (c) => c.tags?.join(', ') || '—' },
+  ];
+
   return (
     <div className="flex-1 flex overflow-hidden bg-theme-base text-theme-primary">
       
@@ -334,6 +347,16 @@ export default function ContactsModule() {
               >
                 <Building2 className="w-3.5 h-3.5 text-theme-accent" /> Accounts ({filteredAccounts.length})
               </button>
+            </div>
+
+            {/* View Toggle */}
+            <div className="flex items-center gap-0.5 bg-theme-base border border-theme-border rounded-lg p-0.5 mr-2">
+              <button onClick={() => setViewMode('cards')}
+                className={`p-1 rounded cursor-pointer ${viewMode === 'cards' ? 'bg-theme-card text-theme-primary shadow-xs' : 'text-theme-secondary hover:text-theme-primary'}`}
+                title="Card view"><LayoutGrid className="w-3.5 h-3.5" /></button>
+              <button onClick={() => setViewMode('table')}
+                className={`p-1 rounded cursor-pointer ${viewMode === 'table' ? 'bg-theme-card text-theme-primary shadow-xs' : 'text-theme-secondary hover:text-theme-primary'}`}
+                title="Table view"><List className="w-3.5 h-3.5" /></button>
             </div>
 
             {/* Quick Actions */}
@@ -416,6 +439,14 @@ export default function ContactsModule() {
               <div className="p-8 text-center text-xs text-theme-secondary font-sans">
                 No matching contacts scoped to your account role.
               </div>
+            ) : viewMode === 'table' ? (
+              <DataTable
+                columns={contactColumns}
+                data={filteredContacts as any}
+                rowKey={(c: any) => c.id}
+                pageSize={25}
+                density="compact"
+              />
             ) : (
               filteredContacts.map(c => {
                 const isSelected = c.id === selectedContactId;

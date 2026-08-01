@@ -3,8 +3,10 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import type { User, UserRole, Account, Contact, Pipeline, Stage, Deal, Task, Activity, Notification, CustomFieldDefinition, EmailTemplate, EmailCampaign, AuditLog } from './types';
+import { runtimeConfig } from './runtimeConfig';
+import { toast } from './components/ui/toast';
 import {
   INITIAL_USERS,
   INITIAL_ACCOUNTS,
@@ -114,6 +116,24 @@ const CRMContext = createContext<CRMContextType | undefined>(undefined);
 
 const LOCAL_STORAGE_KEY_PREFIX = 'b2b_crm_v3_blank_';
 
+// Secure storage helpers — respect runtime config
+const storageEnabled = !runtimeConfig.disableLocalStorage;
+
+function safeGetItem(key: string): string | null {
+  if (!storageEnabled) return null;
+  try { return localStorage.getItem(key); } catch { return null; }
+}
+
+function safeSetItem(key: string, value: string): void {
+  if (!storageEnabled) return;
+  try { localStorage.setItem(key, value); } catch { /* full or unavailable */ }
+}
+
+function safeRemoveItem(key: string): void {
+  if (!storageEnabled) return;
+  try { localStorage.removeItem(key); } catch { /* ignore */ }
+}
+
 // ─── Provider ──────────────────────────────────────────
 
 export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -135,14 +155,14 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [activePipelineId, setActivePipelineId] = useState<string>('');
   const initialPipelineSelectedRef = useRef(false);
   const [activeTheme, setActiveThemeState] = useState<string>(() => {
-    return localStorage.getItem(LOCAL_STORAGE_KEY_PREFIX + 'active_theme') || 'heritage';
+    return safeGetItem(LOCAL_STORAGE_KEY_PREFIX + 'active_theme') || 'heritage';
   });
 
   // ─── Data state (initialized from localStorage fallback or initial data) ──
 
   function loadFromStorage<T>(key: string, fallback: T): T {
     try {
-      const saved = localStorage.getItem(LOCAL_STORAGE_KEY_PREFIX + key);
+      const saved = safeGetItem(LOCAL_STORAGE_KEY_PREFIX + key);
       if (saved) {
         const parsed = JSON.parse(saved);
         if (Array.isArray(parsed) && parsed.length > 0) return parsed as T;
@@ -230,26 +250,25 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   }, [isAuthenticated]);
 
   function persistToLocalStorage(snapshot: Awaited<ReturnType<typeof apiClient.bootstrapCrm>>) {
-    try {
-      localStorage.setItem(LOCAL_STORAGE_KEY_PREFIX + 'users', JSON.stringify(snapshot.users));
-      localStorage.setItem(LOCAL_STORAGE_KEY_PREFIX + 'accounts', JSON.stringify(snapshot.accounts));
-      localStorage.setItem(LOCAL_STORAGE_KEY_PREFIX + 'contacts', JSON.stringify(snapshot.contacts));
-      localStorage.setItem(LOCAL_STORAGE_KEY_PREFIX + 'deals', JSON.stringify(snapshot.deals));
-      localStorage.setItem(LOCAL_STORAGE_KEY_PREFIX + 'tasks', JSON.stringify(snapshot.tasks));
-      localStorage.setItem(LOCAL_STORAGE_KEY_PREFIX + 'activities', JSON.stringify(snapshot.activities));
-      localStorage.setItem(LOCAL_STORAGE_KEY_PREFIX + 'notifications', JSON.stringify(snapshot.notifications));
-      localStorage.setItem(LOCAL_STORAGE_KEY_PREFIX + 'custom_fields', JSON.stringify(snapshot.customFields));
-      localStorage.setItem(LOCAL_STORAGE_KEY_PREFIX + 'email_templates', JSON.stringify(snapshot.emailTemplates));
-      localStorage.setItem(LOCAL_STORAGE_KEY_PREFIX + 'email_campaigns', JSON.stringify(snapshot.emailCampaigns));
-      localStorage.setItem(LOCAL_STORAGE_KEY_PREFIX + 'audit_logs', JSON.stringify(snapshot.auditLogs));
-    } catch { /* localStorage may be full or unavailable */ }
+    const set = safeSetItem;
+    set(LOCAL_STORAGE_KEY_PREFIX + 'users', JSON.stringify(snapshot.users));
+    set(LOCAL_STORAGE_KEY_PREFIX + 'accounts', JSON.stringify(snapshot.accounts));
+    set(LOCAL_STORAGE_KEY_PREFIX + 'contacts', JSON.stringify(snapshot.contacts));
+    set(LOCAL_STORAGE_KEY_PREFIX + 'deals', JSON.stringify(snapshot.deals));
+    set(LOCAL_STORAGE_KEY_PREFIX + 'tasks', JSON.stringify(snapshot.tasks));
+    set(LOCAL_STORAGE_KEY_PREFIX + 'activities', JSON.stringify(snapshot.activities));
+    set(LOCAL_STORAGE_KEY_PREFIX + 'notifications', JSON.stringify(snapshot.notifications));
+    set(LOCAL_STORAGE_KEY_PREFIX + 'custom_fields', JSON.stringify(snapshot.customFields));
+    set(LOCAL_STORAGE_KEY_PREFIX + 'email_templates', JSON.stringify(snapshot.emailTemplates));
+    set(LOCAL_STORAGE_KEY_PREFIX + 'email_campaigns', JSON.stringify(snapshot.emailCampaigns));
+    set(LOCAL_STORAGE_KEY_PREFIX + 'audit_logs', JSON.stringify(snapshot.auditLogs));
   }
 
   // ─── Theme ─────────────────────────────────────────
 
   const setActiveTheme = useCallback((theme: string) => {
     setActiveThemeState(theme);
-    localStorage.setItem(LOCAL_STORAGE_KEY_PREFIX + 'active_theme', theme);
+    safeSetItem(LOCAL_STORAGE_KEY_PREFIX + 'active_theme', theme);
   }, []);
 
   useEffect(() => {
@@ -288,9 +307,7 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       'users', 'accounts', 'contacts', 'deals', 'tasks', 'activities',
       'notifications', 'custom_fields', 'email_templates', 'email_campaigns', 'audit_logs',
     ];
-    keysToRemove.forEach(k => {
-      try { localStorage.removeItem(LOCAL_STORAGE_KEY_PREFIX + k); } catch { /* ignore */ }
-    });
+    keysToRemove.forEach(k => safeRemoveItem(LOCAL_STORAGE_KEY_PREFIX + k));
     setCurrentUserState(null);
     setUsers([]);
     setAccounts([]);
@@ -321,45 +338,51 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   // ─── Scoping helpers ───────────────────────────────
 
-  const getCurrentUserTeamIds = useCallback(() => {
+  const teamIds = useMemo(() => {
     if (!currentUser?.team_id) return [currentUser?.id].filter(Boolean) as string[];
     return users.filter(u => u.team_id === currentUser.team_id).map(u => u.id);
   }, [currentUser, users]);
 
-  const getScopedContacts = useCallback(() => {
+  const scopedContacts = useMemo(() => {
     if (!currentUser) return contacts;
     if (currentUser.role === 'sales_rep' as UserRole) return contacts.filter(c => c.owner_id === currentUser.id);
-    if (currentUser.role === 'manager' as UserRole) return contacts.filter(c => getCurrentUserTeamIds().includes(c.owner_id));
+    if (currentUser.role === 'manager' as UserRole) return contacts.filter(c => teamIds.includes(c.owner_id));
     return contacts;
-  }, [currentUser, contacts, getCurrentUserTeamIds]);
+  }, [currentUser, contacts, teamIds]);
 
-  const getScopedAccounts = useCallback(() => {
+  const scopedAccounts = useMemo(() => {
     if (!currentUser) return accounts;
     if (currentUser.role === 'sales_rep' as UserRole) return accounts.filter(a => a.owner_id === currentUser.id);
-    if (currentUser.role === 'manager' as UserRole) return accounts.filter(a => getCurrentUserTeamIds().includes(a.owner_id));
+    if (currentUser.role === 'manager' as UserRole) return accounts.filter(a => teamIds.includes(a.owner_id));
     return accounts;
-  }, [currentUser, accounts, getCurrentUserTeamIds]);
+  }, [currentUser, accounts, teamIds]);
 
-  const getScopedDeals = useCallback(() => {
+  const scopedDeals = useMemo(() => {
     if (!currentUser) return deals;
     if (currentUser.role === 'sales_rep' as UserRole) return deals.filter(d => d.owner_id === currentUser.id);
-    if (currentUser.role === 'manager' as UserRole) return deals.filter(d => getCurrentUserTeamIds().includes(d.owner_id));
+    if (currentUser.role === 'manager' as UserRole) return deals.filter(d => teamIds.includes(d.owner_id));
     return deals;
-  }, [currentUser, deals, getCurrentUserTeamIds]);
+  }, [currentUser, deals, teamIds]);
 
-  const getScopedTasks = useCallback(() => {
+  const scopedTasks = useMemo(() => {
     if (!currentUser) return tasks;
     if (currentUser.role === 'sales_rep' as UserRole) return tasks.filter(t => t.assigned_to_id === currentUser.id);
-    if (currentUser.role === 'manager' as UserRole) return tasks.filter(t => getCurrentUserTeamIds().includes(t.assigned_to_id));
+    if (currentUser.role === 'manager' as UserRole) return tasks.filter(t => teamIds.includes(t.assigned_to_id));
     return tasks;
-  }, [currentUser, tasks, getCurrentUserTeamIds]);
+  }, [currentUser, tasks, teamIds]);
 
-  const getScopedActivities = useCallback(() => {
+  const scopedActivities = useMemo(() => {
     if (!currentUser) return activities;
     if (currentUser.role === 'sales_rep' as UserRole) return activities.filter(a => a.user_id === currentUser.id);
-    if (currentUser.role === 'manager' as UserRole) return activities.filter(a => getCurrentUserTeamIds().includes(a.user_id));
+    if (currentUser.role === 'manager' as UserRole) return activities.filter(a => teamIds.includes(a.user_id));
     return activities;
-  }, [currentUser, activities, getCurrentUserTeamIds]);
+  }, [currentUser, activities, teamIds]);
+
+  const getScopedContacts = useCallback(() => scopedContacts, [scopedContacts]);
+  const getScopedAccounts = useCallback(() => scopedAccounts, [scopedAccounts]);
+  const getScopedDeals = useCallback(() => scopedDeals, [scopedDeals]);
+  const getScopedTasks = useCallback(() => scopedTasks, [scopedTasks]);
+  const getScopedActivities = useCallback(() => scopedActivities, [scopedActivities]);
 
   // ─── Contact CRUD ──────────────────────────────────
 
@@ -367,6 +390,7 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     try {
       const created = await apiClient.createContact(contactData as Record<string, unknown>);
       setContacts(prev => [created, ...prev]);
+      toast.success('Contact created', `${contactData.first_name} ${contactData.last_name}`);
     } catch {
       // Fallback: local-only
       const newContact: Contact = {
@@ -382,6 +406,7 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     try {
       const updated = await apiClient.updateContact(id, updatedData as Record<string, unknown>);
       setContacts(prev => prev.map(c => c.id === id ? updated : c));
+      toast.success('Contact updated');
     } catch {
       setContacts(prev => prev.map(c => c.id === id ? { ...c, ...updatedData } : c));
     }
@@ -390,7 +415,8 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const deleteContact = useCallback(async (id: string) => {
     try {
       await apiClient.deleteContact(id);
-    } catch { /* proceed with local deletion */ }
+      toast.success('Contact deleted');
+    } catch { toast.error('Failed to delete contact'); /* proceed with local deletion */ }
     setContacts(prev => prev.filter(c => c.id !== id));
   }, []);
 
@@ -410,6 +436,7 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     try {
       const created = await apiClient.createAccount(accountData as Record<string, unknown>);
       setAccounts(prev => [created, ...prev]);
+      toast.success('Account created', accountData.name);
     } catch {
       const newAccount: Account = {
         ...accountData,
@@ -440,6 +467,7 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     try {
       const created = await apiClient.createDeal(dealData as Record<string, unknown>);
       setDeals(prev => [created, ...prev]);
+      toast.success('Deal created', `${dealData.name} — $${dealData.value.toLocaleString()}`);
     } catch {
       const newDeal: Deal = {
         ...dealData,

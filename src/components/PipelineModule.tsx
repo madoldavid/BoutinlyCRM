@@ -6,6 +6,8 @@
 import React, { useState } from 'react';
 import { useCRM } from '../store';
 import { Deal, UserRole, DealLineItem } from '../types';
+import { toast } from './ui';
+import KanbanBoard from './ui/KanbanBoard';
 import {
   Briefcase,
   Layers,
@@ -48,6 +50,10 @@ export default function PipelineModule() {
   
   // Selection / Drawer
   const [selectedDealId, setSelectedDealId] = useState<string | null>(null);
+
+  // Kanban drag-and-drop state
+  const [dragDealId, setDragDealId] = useState<string | null>(null);
+  const [dragOverStageId, setDragOverStageId] = useState<string | null>(null);
 
   // Modals
   const [showCreateDeal, setShowCreateDeal] = useState(false);
@@ -274,148 +280,47 @@ export default function PipelineModule() {
 
         {/* VIEW: KANBAN BOARD */}
         {viewType === 'kanban' && (
-          <div className="flex-1 overflow-x-auto overflow-y-hidden flex bg-theme-base p-3 gap-3.5 scrollbar-thin select-none">
-            {activeStages.length === 0 ? (
-              <div className="flex-1 flex items-center justify-center">
-                <div className="text-center text-xs text-theme-secondary/70 font-sans">
-                  <Layers className="w-10 h-10 mx-auto mb-3 text-theme-secondary/30" />
-                  <p className="font-semibold text-theme-secondary">No pipeline stages configured</p>
-                  <p className="mt-1">Stages will appear here once they are created for this pipeline.</p>
-                </div>
-              </div>
-            ) : (
-              activeStages.map(stg => {
+          <KanbanBoard
+            columns={activeStages.map(stg => {
               const dealsInStg = filteredDeals.filter(d => d.stage_id === stg.id);
-              const aggregateVal = dealsInStg.reduce((sum, d) => sum + d.value, 0);
-
-              return (
-                <div key={stg.id} className="w-64 bg-theme-base/40 rounded-xl flex flex-col shrink-0 h-full border border-theme-border/60">
-                  {/* Column Header */}
-                  <div className="p-3 border-b border-theme-border shrink-0 flex items-center justify-between bg-theme-card rounded-t-xl">
-                    <div className="text-left">
-                      <h4 className="text-xs font-bold text-theme-primary tracking-tight">{stg.name}</h4>
-                      <span className="text-[10px] text-theme-secondary font-sans font-bold mt-0.5 block">${(aggregateVal / 1000).toFixed(0)}k • {stg.probability}%</span>
-                    </div>
-                    <span className="bg-theme-base text-theme-secondary px-2 py-0.5 rounded-full text-[10px] font-sans font-bold border border-theme-border">
-                      {dealsInStg.length}
-                    </span>
-                  </div>
-
-                  {/* Column Cards scroll list */}
-                  <div className="flex-1 overflow-y-auto p-2 space-y-2.5">
-                    {dealsInStg.map(deal => {
-                      const company = accounts.find(a => a.id === deal.account_id);
-                      const rep = users.find(u => u.id === deal.owner_id);
-                      const isStgOpen = stg.type === 'open';
-                      const isDealStalled = isStalled(deal);
-
-                      return (
-                        <div
-                          key={deal.id}
-                          onClick={() => setSelectedDealId(deal.id)}
-                          className={`bg-theme-card p-3.5 rounded-xl border transition-all text-left cursor-pointer relative group ${
-                            deal.id === selectedDealId ? 'border-theme-accent ring-1 ring-theme-accent' : 'border-theme-border hover:border-theme-accent/50'
-                          }`}
-                        >
-                          {/* Stalled deal notification alert */}
-                          {isDealStalled && (
-                            <div className="bg-theme-accent/5 text-theme-secondary p-1.5 rounded mb-2 flex items-center gap-1 text-[9px] border border-theme-accent/15 font-semibold">
-                              <ShieldAlert className="w-3 h-3 text-theme-accent shrink-0" />
-                              Stagnant in stage &gt; 14 days
-                            </div>
-                          )}
-
-                          <h5 className="text-xs font-bold text-theme-primary leading-tight group-hover:text-theme-accent transition-colors">
-                            {deal.name}
-                          </h5>
-                          
-                          <p className="text-[10px] text-theme-secondary mt-1 flex items-center gap-1">
-                            <Building className="w-3 h-3 text-theme-secondary/80" /> {company?.name || 'Unassigned'}
-                          </p>
-
-                          <div className="flex items-center justify-between mt-4">
-                            <span className="font-bold text-theme-primary text-xs font-sans">
-                              ${deal.value.toLocaleString()}
-                            </span>
-                            
-                            <div className="flex items-center gap-1.5">
-                              <div className="w-5.5 h-5.5 rounded-full border border-theme-border bg-theme-accent/10 flex items-center justify-center text-theme-accent text-[9px] font-bold uppercase" title={`owner: ${rep?.name || 'Unassigned'}`}>
-                                {rep?.name ? rep.name.split(' ').map(n => n[0]).join('') : 'U'}
-                              </div>
-                              
-                              {/* Quick Move Trigger (arrows) */}
-                              {!isReadOnly && isStgOpen && (
-                                <button
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    const nextIdx = activeStages.findIndex(s => s.id === stg.id) + 1;
-                                    if (nextIdx < activeStages.length) {
-                                      moveDealStage(deal.id, activeStages[nextIdx].id);
-                                    }
-                                  }}
-                                  className="p-1 hover:bg-theme-base rounded text-theme-secondary hover:text-theme-accent transition-colors cursor-pointer bg-transparent border-none"
-                                  title="Advance Stage"
-                                >
-                                  <ArrowRight className="w-3.5 h-3.5" />
-                                </button>
-                              )}
-                            </div>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              );
-            })
-            )}
-          </div>
-        )}
-
-        {/* VIEW: DEALS GRID (LIST) */}
-        {viewType === 'list' && (
-          <div className="flex-1 overflow-y-auto divide-y divide-theme-border bg-theme-card">
-            {filteredDeals.length === 0 ? (
-              <p className="p-8 text-center text-xs text-theme-secondary/70 font-sans">No pipeline deals matched search filters.</p>
-            ) : (
-              filteredDeals.map(d => {
-                const stageName = stages.find(s => s.id === d.stage_id)?.name || 'Unknown';
-                const companyName = accounts.find(a => a.id === d.account_id)?.name || 'Unknown';
-                const ownerName = users.find(u => u.id === d.owner_id)?.name || 'Unassigned';
-                const isSelected = d.id === selectedDealId;
-
-                return (
-                  <div
-                    key={d.id}
-                    onClick={() => setSelectedDealId(d.id)}
-                    className={`p-4 cursor-pointer transition-colors text-left relative flex items-center justify-between ${
-                      isSelected ? 'bg-theme-accent/10 border-l-4 border-theme-accent text-theme-primary' : 'hover:bg-theme-base/40 text-theme-secondary'
-                    }`}
-                  >
-                    <div className="min-w-0">
-                      <h4 className="text-xs font-bold text-theme-primary flex items-center gap-1.5 truncate">
-                        {d.name}
-                        {isStalled(d) && (
-                          <span className="bg-theme-accent/5 text-theme-secondary border border-theme-accent/15 px-1.5 py-0.2 rounded text-[8px] font-semibold uppercase">Stalled</span>
-                        )}
-                      </h4>
-                      <p className="text-[11px] text-theme-secondary mt-0.5">{companyName} • <strong className="text-theme-secondary font-semibold">{stageName}</strong></p>
-                      
-                      <div className="flex items-center gap-1.5 mt-2 text-[9px] text-theme-secondary/70 font-sans">
-                        <span>Owner: {ownerName}</span>
-                        <span>•</span>
-                        <span>Close date: {new Date(d.close_date).toLocaleDateString()}</span>
-                      </div>
-                    </div>
-                    
-                    <span className="text-xs font-bold text-theme-primary font-sans shrink-0">
-                      ${d.value.toLocaleString()}
-                    </span>
-                  </div>
-                );
-              })
-            )}
-          </div>
+              return {
+                id: stg.id,
+                title: stg.name,
+                count: dealsInStg.length,
+                totalValue: dealsInStg.reduce((sum, d) => sum + d.value, 0),
+                color: stg.type === 'won' ? 'var(--success)' : stg.type === 'lost' ? 'var(--danger)' : undefined,
+                cards: dealsInStg.map(deal => ({
+                  id: deal.id,
+                  title: deal.name,
+                  value: deal.value,
+                  currency: deal.currency,
+                  owner: users.find(u => u.id === deal.owner_id)?.name || '',
+                  closeDate: deal.close_date,
+                  meta: { deal },
+                })),
+              };
+            })}
+            onCardMove={async (cardId, _fromId, toStageId) => {
+              if (isReadOnly) return;
+              const deal = filteredDeals.find(d => d.id === cardId);
+              if (!deal) return;
+              const toStage = activeStages.find(s => s.id === toStageId);
+              if (!toStage) return;
+              if (toStage.type === 'won') {
+                await closeDeal(cardId, 'won');
+                toast.success('Deal Won!', '"' + deal.name + '" has been closed as Won.');
+              } else if (toStage.type === 'lost') {
+                await closeDeal(cardId, 'lost');
+                toast.success('Deal Lost', '"' + deal.name + '" has been closed as Lost.');
+              } else {
+                await moveDealStage(cardId, toStageId);
+                toast.success('Deal moved', '"' + deal.name + '" → ' + toStage.name);
+              }
+              setDragDealId(null);
+              setDragOverStageId(null);
+            }}
+            loading={false}
+          />
         )}
 
         {/* VIEW: REVENUE FORECASTING */}

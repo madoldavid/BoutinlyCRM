@@ -8,14 +8,14 @@ import { authenticate, type AuthenticatedRequest } from '../security/rbac.js';
 import { hashPassword } from '../security/password.js';
 import { issueToken, issueMfaChallengeToken, verifyMfaChallengeToken, verifyRefreshToken, issueRefreshToken, ACCESS_TOKEN_TTL } from '../security/token.js';
 import { generateTotpSecret, generateTotpUri, verifyTotp } from '../security/totp.js';
-import { forgotPasswordSchema, loginSchema, resetPasswordSchema, signupSchema } from '../validation/schemas.js';
+import type { AccountLockoutService } from '../security/lockout.js';
+import type { KeyManager } from '../security/jwks.js';
+import type { TokenBlocklist } from '../security/tokenBlocklist.js';
+import { generateJti } from '../security/tokenBlocklist.js';
+import { forgotPasswordSchema, loginSchema, refreshTokenSchema, resetPasswordSchema, signupSchema } from '../validation/schemas.js';
 import { runWithTenant } from '../db/connection.js';
 import type { User } from '../../types.js';
 import { UserRole } from '../../types.js';
-
-const refreshSchema = z.object({
-  refresh_token: z.string().min(1),
-});
 
 const mfaChallengeSchema = z.object({
   mfa_token: z.string().min(1),
@@ -49,6 +49,9 @@ export function registerAuthRoutes(
   config: AppConfig,
   repository: CrmRepository,
   emailService: EmailService,
+  lockoutService: AccountLockoutService,
+  keyManager: KeyManager,
+  tokenBlocklist: TokenBlocklist,
 ) {
   app.post('/api/auth/signup', asyncHandler(async (req, res) => {
     // Only allow signup when no users exist (first-user self-registration)
@@ -107,7 +110,7 @@ export function registerAuthRoutes(
       });
 
       const principal = makePrincipal(user);
-      const token = issueToken(principal, config.JWT_SECRET, ACCESS_TOKEN_TTL);
+      const token = issueToken(principal, config.JWT_SECRET, ACCESS_TOKEN_TTL, generateJti());
       const refreshToken = issueRefreshToken(principal, config.JWT_SECRET);
 
       return { token, refresh_token: refreshToken, user };
@@ -122,8 +125,25 @@ export function registerAuthRoutes(
     }
 
     const body = loginSchema.parse(req.body);
+
+    // Check account lockout
+    const lockoutKey = `login:${body.email.toLowerCase()}`;
+    const ipKey = `login:ip:${req.ip || 'unknown'}`;
+
+    if (lockoutService.isLocked(lockoutKey) || lockoutService.isLocked(ipKey)) {
+      const remaining = Math.max(
+        lockoutService.remainingLockoutSeconds(lockoutKey),
+        lockoutService.remainingLockoutSeconds(ipKey)
+      );
+      throw new ApiError(429, `Account temporarily locked. Try again in ${remaining}s.`, 'account_locked');
+    }
+
     const user = await repository.verifyLogin(body.email, body.password);
     if (!user) {
+      // Record failed attempt
+      const result = lockoutService.recordFailure(lockoutKey);
+      lockoutService.recordFailure(ipKey);
+
       // Log failed login attempt for security auditing
       repository.addAuditLog({
         action: 'login_failed',
@@ -131,10 +151,18 @@ export function registerAuthRoutes(
         user_name: body.email,
         ip_address: req.ip || 'unknown',
         user_agent: req.headers['user-agent'] || 'unknown',
-        diff: { email: body.email },
-      }).catch(() => { /* fire-and-forget, don't block error response */ });
+        diff: { email: body.email, remaining_attempts: result.remainingAttempts },
+      }).catch(() => { /* fire-and-forget */ });
+
+      if (result.locked) {
+        throw new ApiError(429, `Account locked after too many failed attempts. Try again in 15 minutes.`, 'account_locked');
+      }
       throw new ApiError(401, 'Invalid email or password.', 'invalid_credentials');
     }
+
+    // Reset lockout on successful login
+    lockoutService.reset(lockoutKey);
+    lockoutService.reset(ipKey);
 
     const principal = makePrincipal(user);
 
@@ -145,7 +173,7 @@ export function registerAuthRoutes(
       return;
     }
 
-    const token = issueToken(principal, config.JWT_SECRET, ACCESS_TOKEN_TTL);
+    const token = issueToken(principal, config.JWT_SECRET, ACCESS_TOKEN_TTL, generateJti());
     const refreshToken = issueRefreshToken(principal, config.JWT_SECRET);
 
     res.json({ token, refresh_token: refreshToken, user });
@@ -166,7 +194,7 @@ export function registerAuthRoutes(
     }
 
     const newPrincipal = makePrincipal(user);
-    const token = issueToken(newPrincipal, config.JWT_SECRET, ACCESS_TOKEN_TTL);
+    const token = issueToken(newPrincipal, config.JWT_SECRET, ACCESS_TOKEN_TTL, generateJti());
     const refreshToken = issueRefreshToken(newPrincipal, config.JWT_SECRET);
 
     res.json({ token, refresh_token: refreshToken, user });
@@ -245,8 +273,8 @@ export function registerAuthRoutes(
   }));
 
   app.post('/api/auth/refresh', asyncHandler(async (req, res) => {
-    const body = refreshSchema.parse(req.body);
-    const principal = verifyRefreshToken(body.refresh_token, config.JWT_SECRET);
+    const body = refreshTokenSchema.parse(req.body);
+    const principal = verifyRefreshToken(body.refreshToken, config.JWT_SECRET);
 
     // Verify user still exists and is active
     const user = await repository.getUserById(principal.userId);
@@ -255,7 +283,7 @@ export function registerAuthRoutes(
     }
 
     const newPrincipal = makePrincipal(user);
-    const token = issueToken(newPrincipal, config.JWT_SECRET, ACCESS_TOKEN_TTL);
+    const token = issueToken(newPrincipal, config.JWT_SECRET, ACCESS_TOKEN_TTL, generateJti());
     const refreshToken = issueRefreshToken(newPrincipal, config.JWT_SECRET);
 
     res.json({ token, refresh_token: refreshToken });
@@ -265,5 +293,85 @@ export function registerAuthRoutes(
     const user = await repository.getUserById(req.principal.userId);
     if (!user) throw new ApiError(404, 'Authenticated user no longer exists.', 'user_not_found');
     res.json(user);
+  }));
+
+  // Logout — adds current access token to blocklist
+  app.post('/api/auth/logout', authenticate(config), asyncHandler<AuthenticatedRequest>(async (req, res) => {
+    const raw = req.header('authorization');
+    if (raw?.startsWith('Bearer ')) {
+      const token = raw.slice('Bearer '.length);
+      // Extract JTI from token payload
+      try {
+        const parts = token.split('.');
+        if (parts.length === 3) {
+          const payload = JSON.parse(Buffer.from(parts[1], 'base64url').toString());
+          if (payload.jti) {
+            const ttl = Math.max(0, payload.exp - Math.floor(Date.now() / 1000));
+            tokenBlocklist.add(payload.jti, req.principal.userId, ttl, 'access');
+          }
+        }
+      } catch { /* best effort */ }
+    }
+
+    await repository.addAuditLog({
+      user_id: req.principal.userId,
+      user_name: req.principal.email,
+      action: 'user.logout',
+      entity_type: 'user',
+      entity_id: req.principal.userId,
+      diff: {},
+      ip_address: String(req.ip || ''),
+      user_agent: String(req.get('user-agent') || ''),
+    });
+
+    res.json({ ok: true, message: 'Logged out successfully.' });
+  }));
+
+  // Admin: unlock a locked account
+  app.post('/api/auth/admin/unlock', authenticate(config), asyncHandler<AuthenticatedRequest>(async (req, res) => {
+    if (![UserRole.SUPER_ADMIN, UserRole.ADMIN].includes(req.principal.role)) {
+      throw new ApiError(403, 'Admin access required.', 'forbidden');
+    }
+    const { email } = req.body as { email?: string };
+    if (!email) throw new ApiError(400, 'Email is required.', 'invalid_request');
+
+    const lockoutKey = `login:${email.toLowerCase()}`;
+    const unlocked = lockoutService.unlock(lockoutKey);
+
+    await repository.addAuditLog({
+      user_id: req.principal.userId,
+      user_name: req.principal.email,
+      action: unlocked ? 'account.unlocked' : 'account.unlock_not_needed',
+      entity_type: 'user',
+      diff: { email },
+      ip_address: String(req.ip || ''),
+      user_agent: String(req.get('user-agent') || ''),
+    });
+
+    res.json({ ok: true, was_locked: unlocked, message: unlocked ? 'Account unlocked.' : 'Account was not locked.' });
+  }));
+
+  // Admin: force-revoke all tokens for a user
+  app.post('/api/auth/admin/revoke-tokens', authenticate(config), asyncHandler<AuthenticatedRequest>(async (req, res) => {
+    if (![UserRole.SUPER_ADMIN, UserRole.ADMIN].includes(req.principal.role)) {
+      throw new ApiError(403, 'Admin access required.', 'forbidden');
+    }
+    const { user_id } = req.body as { user_id?: string };
+    if (!user_id) throw new ApiError(400, 'user_id is required.', 'invalid_request');
+
+    const count = tokenBlocklist.revokeAllForUser(user_id);
+
+    await repository.addAuditLog({
+      user_id: req.principal.userId,
+      user_name: req.principal.email,
+      action: 'tokens.revoked',
+      entity_type: 'user',
+      entity_id: user_id,
+      diff: { revoked_count: count },
+      ip_address: String(req.ip || ''),
+      user_agent: String(req.get('user-agent') || ''),
+    });
+
+    res.json({ ok: true, revoked_count: count, message: `Revoked ${count} active tokens for user.` });
   }));
 }

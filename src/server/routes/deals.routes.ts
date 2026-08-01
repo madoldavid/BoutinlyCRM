@@ -135,11 +135,11 @@ export function registerDealsRoutes(
     const body = moveDealStageSchema.parse(req.body);
     const snapshot = await repository.snapshot();
     const fromStage = snapshot.stages.find(s => s.id === snapshot.deals.find(d => d.id === req.params.id)?.stage_id);
-    const toStage = snapshot.stages.find(s => s.id === body.targetStageId);
+    const toStage = snapshot.stages.find(s => s.id === body.target_stage_id);
 
     if (!toStage) throw new ApiError(400, 'Target stage not found.', 'invalid_stage');
 
-    const deal = await repository.moveDealStage(req.params.id, body.targetStageId);
+    const deal = await repository.moveDealStage(req.params.id, body.target_stage_id);
     if (!deal) throw new ApiError(404, 'Deal not found.', 'not_found');
 
     await repository.addAuditLog({

@@ -4,6 +4,7 @@ import { ApiError, asyncHandler } from '../errors.js';
 import type { CrmRepository } from '../repositories/crmRepository.js';
 import { scopeSnapshot } from '../repositories/scope.js';
 import { authenticate, canAccessOwner, requireWriteAccess, type AuthenticatedRequest } from '../security/rbac.js';
+import { parseCsv } from '../services/csvParser.js';
 import {
   createContactSchema,
   mergeContactsSchema,
@@ -134,5 +135,98 @@ export function registerContactsRoutes(
     });
 
     res.json({ contact: result });
+  }));
+
+  // Bulk CSV import
+  app.post('/api/contacts/import', authenticate(config), asyncHandler<AuthenticatedRequest>(async (req, res) => {
+    requireWriteAccess(req);
+
+    const csvData = req.body.csv as string | undefined;
+    const defaultOwnerId = (req.body.owner_id as string) || req.principal.userId;
+
+    if (!csvData || typeof csvData !== 'string') {
+      throw new ApiError(400, 'Missing CSV data. Send as JSON: { csv: "header1,header2\\nvalue1,value2" }', 'missing_csv');
+    }
+
+    const { headers, rows } = parseCsv(csvData);
+    if (headers.length === 0) {
+      throw new ApiError(400, 'CSV file is empty or missing a header row.', 'empty_csv');
+    }
+
+    // Validate we have at least first_name, last_name, email columns
+    const requiredColumns = ['first_name', 'last_name', 'email'];
+    const missingColumns = requiredColumns.filter(c => !headers.some(h => h.toLowerCase() === c));
+    if (missingColumns.length > 0) {
+      throw new ApiError(400, `CSV is missing required columns: ${missingColumns.join(', ')}. Found: ${headers.join(', ')}`, 'missing_columns');
+    }
+
+    const owner = await repository.getUserById(defaultOwnerId);
+    if (!owner) throw new ApiError(400, 'Owner user does not exist.', 'invalid_owner');
+
+    const results: { imported: number; skipped: number; errors: { row: number; message: string }[] } = {
+      imported: 0,
+      skipped: 0,
+      errors: [],
+    };
+
+    for (let i = 0; i < rows.length; i++) {
+      const row = rows[i];
+      const rowNum = i + 2; // +2 for 1-indexed + header row
+
+      const email = (row.email || row['email'] || '').trim();
+      const firstName = (row.first_name || row['first_name'] || '').trim();
+      const lastName = (row.last_name || row['last_name'] || '').trim();
+
+      if (!email || !firstName || !lastName) {
+        results.errors.push({ row: rowNum, message: 'Missing required field(s): first_name, last_name, or email' });
+        results.skipped++;
+        continue;
+      }
+
+      // Check for duplicate email among existing contacts (not users)
+      const existingContacts = await repository.listContacts({ search: email, page: 1, limit: 1 }).catch(() => []);
+      if (existingContacts.length > 0 && existingContacts[0].email.toLowerCase() === email.toLowerCase()) {
+        results.errors.push({ row: rowNum, message: `Contact with email ${email} already exists. Skipping.` });
+        results.skipped++;
+        continue;
+      }
+
+      try {
+        await repository.addContact({
+          first_name: firstName,
+          last_name: lastName,
+          email,
+          phone: (row.phone || '').trim(),
+          title: (row.title || '').trim(),
+          linkedin_url: (row.linkedin_url || row.linkedin || '').trim() || undefined,
+          account_id: (row.account_id || req.body.account_id || '').trim() || (req.body.account_id as string) || '',
+          owner_id: defaultOwnerId,
+          tags: (row.tags || '').split(';').map((t: string) => t.trim()).filter(Boolean),
+          custom_fields: {},
+          unsubscribed: false,
+        });
+        results.imported++;
+      } catch (err) {
+        results.errors.push({ row: rowNum, message: err instanceof Error ? err.message : 'Unknown error' });
+        results.skipped++;
+      }
+    }
+
+    await repository.addAuditLog({
+      user_id: req.principal.userId,
+      user_name: req.principal.email,
+      action: 'contact.imported',
+      entity_type: 'contact',
+      diff: { imported: results.imported, skipped: results.skipped, errors: results.errors.length },
+      ip_address: String(req.ip || ''),
+      user_agent: String(req.get('user-agent') || ''),
+    });
+
+    res.status(results.imported > 0 ? 201 : 200).json({
+      imported: results.imported,
+      skipped: results.skipped,
+      total_rows: rows.length,
+      errors: results.errors,
+    });
   }));
 }
