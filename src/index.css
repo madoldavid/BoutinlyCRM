@@ -1,4 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Geist:wght@300..700&family=Urbanist:wght@500..800&family=JetBrains+Mono:wght@400;500&display=swap');
 @import "tailwindcss";
 
 @theme {
@@ -10,6 +10,7 @@
   --color-theme-primary: var(--text-primary);
   --color-theme-secondary: var(--text-secondary);
   --color-theme-accent: var(--accent);
+  --color-theme-pulse: var(--accent-pulse);
   --color-theme-accent-soft: var(--accent-soft);
   --color-theme-border: var(--border);
 
@@ -23,7 +24,8 @@
   --color-info: var(--info);
   --color-info-soft: var(--info-soft);
 
-  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-sans: "Geist", ui-sans-serif, system-ui, sans-serif;
+  --font-display: "Urbanist", "Geist", ui-sans-serif, system-ui, sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", monospace;
 
   /* Typography scale — use these instead of arbitrary text-[Npx] */
@@ -47,34 +49,38 @@
   --shadow-raised: var(--elev-raised);
   --shadow-overlay: var(--elev-overlay);
 
-  /* Motion */
-  --ease-out-quart: cubic-bezier(0.25, 1, 0.5, 1);
+  /* Motion — boutinly.com "premium" easing */
+  --ease-out-quart: cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 :root {
-  /* Default Theme: BOUTINLY BRAND (light) */
-  --bg-base: #F8FAFC;
+  /* Default Theme: BOUTINLY BRAND LIGHT
+     Derived from boutinly.com tokens: charcoal #141418, cream #f4f4f2,
+     cobalt #1a2e6b, pulse #3e63dd. */
+  --bg-base: #F7F7F5;
   --bg-card: #FFFFFF;
-  --bg-inset: #F1F5F9;
-  --bg-hover: #EEF2F7;
-  --text-primary: #0F172A;
-  --text-secondary: #64748B;
-  --accent: #1D4ED8;
-  --accent-soft: rgba(29, 78, 216, 0.08);
-  --border: #E2E8F0;
+  --bg-inset: #EFEFEC;
+  --bg-hover: #EAEAE6;
+  --text-primary: #141418;
+  --text-secondary: #6B6B74;
+  --accent: #1A2E6B;
+  --accent-pulse: #3E63DD;
+  --accent-soft: rgba(26, 46, 107, 0.08);
+  --border: #E4E4E0;
 
   --success: #15803D;
   --success-soft: #ECFDF3;
   --warning: #B45309;
   --warning-soft: #FFFBEB;
-  --danger: #DC2626;
-  --danger-soft: #FEF2F2;
-  --info: #0369A1;
-  --info-soft: #F0F9FF;
+  --danger: #CB234A;
+  --danger-soft: #FDF2F5;
+  --info: #3E63DD;
+  --info-soft: #EFF3FD;
 
-  --elev-card: 0 1px 2px rgba(15, 23, 42, 0.04), 0 1px 3px rgba(15, 23, 42, 0.06);
-  --elev-raised: 0 4px 12px rgba(15, 23, 42, 0.08), 0 2px 4px rgba(15, 23, 42, 0.05);
-  --elev-overlay: 0 16px 40px rgba(15, 23, 42, 0.16), 0 4px 12px rgba(15, 23, 42, 0.08);
+  --elev-card: 0 1px 2px rgba(20, 20, 24, 0.04), 0 1px 3px rgba(20, 20, 24, 0.06);
+  --elev-raised: 0 4px 12px rgba(20, 20, 24, 0.08), 0 2px 4px rgba(20, 20, 24, 0.05);
+  --elev-overlay: 0 24px 60px -28px rgba(0, 0, 0, 0.4), 0 4px 12px rgba(20, 20, 24, 0.08);
+  --shadow-glow: 0 0 20px rgba(62, 99, 221, 0.10);
 
   color-scheme: light;
 }
@@ -103,42 +109,46 @@
   --border: #D8DFE8;
 }
 
+/* Heritage = the Boutinly brand light theme (inherits :root exactly) */
 .theme-heritage {
-  --bg-base: #F8FAFC;
+  --bg-base: #F7F7F5;
   --bg-card: #FFFFFF;
-  --bg-inset: #F1F5F9;
-  --bg-hover: #EEF2F7;
-  --text-primary: #1E293B;
-  --text-secondary: #64748B;
-  --accent: #1D4ED8;
-  --accent-soft: rgba(29, 78, 216, 0.08);
-  --border: #E2E8F0;
+  --bg-inset: #EFEFEC;
+  --bg-hover: #EAEAE6;
+  --text-primary: #141418;
+  --text-secondary: #6B6B74;
+  --accent: #1A2E6B;
+  --accent-pulse: #3E63DD;
+  --accent-soft: rgba(26, 46, 107, 0.08);
+  --border: #E4E4E0;
 }
 
-/* Enterprise dark theme */
+/* BOUTINLY BRAND DARK — mirrors boutinly.com exactly */
 .theme-dark {
-  --bg-base: #0B1120;
-  --bg-card: #111927;
-  --bg-inset: #0E1523;
-  --bg-hover: #1A2436;
-  --text-primary: #E6EBF2;
-  --text-secondary: #8B99AE;
-  --accent: #5B8DEF;
-  --accent-soft: rgba(91, 141, 239, 0.14);
-  --border: #223047;
+  --bg-base: #141418;
+  --bg-card: #1C1C24;
+  --bg-inset: #1A1A22;
+  --bg-hover: #24242E;
+  --text-primary: #F4F4F2;
+  --text-secondary: rgba(244, 244, 242, 0.55);
+  --accent: #3E63DD;
+  --accent-pulse: #3E63DD;
+  --accent-soft: rgba(62, 99, 221, 0.16);
+  --border: rgba(244, 244, 242, 0.10);
 
   --success: #34D399;
   --success-soft: rgba(52, 211, 153, 0.12);
   --warning: #FBBF24;
   --warning-soft: rgba(251, 191, 36, 0.12);
-  --danger: #F87171;
-  --danger-soft: rgba(248, 113, 113, 0.12);
-  --info: #38BDF8;
-  --info-soft: rgba(56, 189, 248, 0.12);
+  --danger: #E5537A;
+  --danger-soft: rgba(203, 35, 74, 0.16);
+  --info: #7C96EA;
+  --info-soft: rgba(62, 99, 221, 0.14);
 
-  --elev-card: 0 1px 2px rgba(0, 0, 0, 0.3);
-  --elev-raised: 0 4px 12px rgba(0, 0, 0, 0.4);
-  --elev-overlay: 0 16px 40px rgba(0, 0, 0, 0.55);
+  --elev-card: 0 1px 2px rgba(0, 0, 0, 0.35);
+  --elev-raised: 0 4px 12px rgba(0, 0, 0, 0.45), 0 0 20px rgba(62, 99, 221, 0.06);
+  --elev-overlay: 0 24px 60px -28px rgba(0, 0, 0, 0.85), 0 0 20px rgba(62, 99, 221, 0.08);
+  --shadow-glow: 0 0 20px rgba(62, 99, 221, 0.16);
 
   color-scheme: dark;
 }
@@ -146,8 +156,13 @@
 html, body {
   background-color: var(--bg-base);
   color: var(--text-primary);
-  font-feature-settings: "cv02", "cv03", "cv11";
   -webkit-font-smoothing: antialiased;
+}
+
+/* Brand display typography — Urbanist for headings, tight tracking (boutinly.com) */
+h1, h2, h3, .font-display {
+  font-family: var(--font-display);
+  letter-spacing: -0.02em;
 }
 
 /* Scoped theme transitions (replaces the old global `*` rule, which caused
@@ -226,15 +241,15 @@ input:focus-visible, select:focus-visible, textarea:focus-visible {
   }
 }
 
-/* Login brand panel — always renders in dark palette */
+/* Login brand panel — always renders in the Boutinly dark palette */
 .login-brand-panel {
-  --brand-bg: #0B1120;
-  --brand-surface: rgba(91, 141, 239, 0.12);
-  --brand-accent: #5B8DEF;
-  --brand-text: #E6EBF2;
-  --brand-muted: #8B99AE;
-  --brand-glow-1: rgba(91, 141, 239, 0.25);
-  --brand-glow-2: rgba(29, 78, 216, 0.2);
+  --brand-bg: #141418;
+  --brand-surface: rgba(62, 99, 221, 0.12);
+  --brand-accent: #3E63DD;
+  --brand-text: #F4F4F2;
+  --brand-muted: rgba(244, 244, 242, 0.55);
+  --brand-glow-1: rgba(62, 99, 221, 0.28);
+  --brand-glow-2: rgba(26, 46, 107, 0.45);
 }
 
 /* Responsive tables → card list on mobile */

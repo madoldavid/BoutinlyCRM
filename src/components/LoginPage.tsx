@@ -275,21 +275,29 @@ export default function LoginPage({ onLoginSuccess }: LoginPageProps) {
             <ShieldCheck className="w-6 h-6" style={{ color: 'var(--brand-accent)' }} />
           </div>
           <div>
-            <h1 className="font-semibold text-base tracking-wide" style={{ color: 'var(--brand-text)' }}>Boutinly</h1>
+            <h1 className="font-display font-extrabold text-lg tracking-tight" style={{ color: 'var(--brand-text)' }}>Boutinly</h1>
             <span className="text-2xs" style={{ color: 'var(--brand-muted)' }}>Enterprise CRM</span>
           </div>
         </div>
 
         {/* Value proposition */}
-        <div className="relative max-w-sm">
-          <h2 className="text-2xl font-semibold leading-snug" style={{ color: 'var(--brand-text)' }}>
-            The revenue platform built for serious sales teams.
+        <div className="relative max-w-md">
+          <h2 className="font-display font-extrabold text-[34px] leading-[1.12] tracking-[-0.03em]" style={{ color: 'var(--brand-text)' }}>
+            Your pipeline.
+            <br />
+            Your data.
+            <br />
+            <span style={{ color: 'var(--brand-accent)' }}>Your rules.</span>
           </h2>
+          <p className="mt-4 text-sm leading-relaxed" style={{ color: 'var(--brand-muted)' }}>
+            The sovereign CRM for serious sales teams. Built around how your
+            team already works &mdash; not the other way around.
+          </p>
           <div className="mt-8 space-y-5">
             {[
-              { icon: <BarChart3 className="w-4 h-4" />, title: 'Pipeline intelligence', body: 'Forecasting, win/loss analytics, and custom reporting out of the box.' },
-              { icon: <Users className="w-4 h-4" />, title: 'Team-scoped access', body: 'Role-based permissions with tenant isolation and full audit trails.' },
-              { icon: <Lock className="w-4 h-4" />, title: 'Enterprise security', body: 'MFA, session revocation, and encrypted credentials as standard.' },
+              { icon: <BarChart3 className="w-4 h-4" />, title: 'Pipeline intelligence', body: 'Explainable deal scoring, forecasting, and win/loss analytics — every recommendation shows its reasoning.' },
+              { icon: <Lock className="w-4 h-4" />, title: 'Your data stays home', body: 'Tenant isolation, encrypted credentials, and a full audit trail. Nothing leaves your control.' },
+              { icon: <Users className="w-4 h-4" />, title: 'Zero learning curve', body: 'Role-scoped views, keyboard-first workflows, and a command palette your reps already know how to use.' },
             ].map(f => (
               <div key={f.title} className="flex gap-3">
                 <span
@@ -308,7 +316,7 @@ export default function LoginPage({ onLoginSuccess }: LoginPageProps) {
         </div>
 
         <p className="relative text-2xs" style={{ color: 'var(--brand-muted)' }}>
-          Secured with HMAC-SHA256 &middot; boutinly.com
+          We keep your sovereignty in the age of AI &middot; boutinly.com
         </p>
       </div>
 
@@ -321,7 +329,7 @@ export default function LoginPage({ onLoginSuccess }: LoginPageProps) {
             <div className="w-12 h-12 bg-theme-accent-soft rounded-xl flex items-center justify-center mx-auto mb-3">
               <ShieldCheck className="w-6 h-6 text-theme-accent" />
             </div>
-            <h1 className="text-lg font-semibold text-theme-primary font-sans">Boutinly CRM</h1>
+            <h1 className="text-lg font-extrabold text-theme-primary font-display tracking-tight">Boutinly CRM</h1>
           </div>
 
           {/* Heading */}
@@ -331,7 +339,7 @@ export default function LoginPage({ onLoginSuccess }: LoginPageProps) {
                 <KeyRound className="w-5 h-5 text-theme-accent" />
               </div>
             )}
-            <h2 className="text-xl font-semibold text-theme-primary font-sans">{modeMeta[mode].title}</h2>
+            <h2 className="text-xl font-bold text-theme-primary font-display tracking-tight">{modeMeta[mode].title}</h2>
             <p className="text-xs text-theme-secondary mt-1">{modeMeta[mode].subtitle}</p>
           </div>
 

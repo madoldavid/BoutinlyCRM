@@ -118,8 +118,8 @@ export default function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
           </div>
           {!collapsed && (
             <div>
-              <h1 className="font-semibold text-sm tracking-wide text-theme-primary">Boutinly</h1>
-              <span className="text-[10px] text-theme-secondary font-sans">Active Workspace</span>
+              <h1 className="font-display font-extrabold text-sm tracking-tight text-theme-primary">Boutinly</h1>
+              <span className="text-[10px] text-theme-secondary font-sans">Sovereign CRM</span>
             </div>
           )}
         </div>
@@ -311,10 +311,10 @@ export default function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
           <span className="text-[10px] text-theme-secondary font-semibold uppercase tracking-wider font-sans">Theme</span>
           <div className="flex items-center gap-1.5" role="radiogroup" aria-label="Color theme">
             {[
-              { id: 'heritage', swatch: '#1D4ED8', label: 'Heritage (light blue)' },
+              { id: 'dark', swatch: '#141418', label: 'Boutinly Dark (brand)' },
+              { id: 'heritage', swatch: '#1A2E6B', label: 'Boutinly Light' },
               { id: 'artisan', swatch: '#C1751F', label: 'Artisan (warm)' },
               { id: 'operator', swatch: '#3B6FB6', label: 'Operator (steel)' },
-              { id: 'dark', swatch: '#0B1120', label: 'Dark' },
             ].map(t => (
               <button
                 key={t.id}

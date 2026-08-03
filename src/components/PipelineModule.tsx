@@ -476,6 +476,7 @@ export default function PipelineModule() {
             </div>
             <div className="flex-1 px-4 pb-4 overflow-auto min-h-0">
               <DataTable
+                tableId="deals"
                 data={filteredDeals as unknown as Record<string, unknown>[]}
                 rowKey={d => String(d.id)}
                 showDensityToggle

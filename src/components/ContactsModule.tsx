@@ -7,6 +7,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { useCRM } from '../store';
 import { Contact, Account, UserRole } from '../types';
 import { DataTable, type DataTableColumn } from './ui/DataTable';
+import { useSavedViews, ViewSwitcher, type SavedView } from './ui/SavedViews';
 import { ConfirmDialog, toast } from './ui';
 import { NEW_RECORD_EVENT, SELECT_ENTITY_EVENT, type SelectEntityDetail } from './GlobalShortcuts';
 import { exportCsv } from '../utils/exportCsv';
@@ -55,6 +56,28 @@ export default function ContactsModule() {
   const [viewMode, setViewMode] = useState<'cards' | 'table'>('cards');
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedTag, setSelectedTag] = useState<string>('All');
+
+  // ─── Saved views (G-FE-01, client layer) ───────────
+  interface ContactsViewFilters {
+    activeTab: 'contacts' | 'accounts';
+    viewMode: 'cards' | 'table';
+    searchQuery: string;
+    selectedTag: string;
+  }
+  const { views, saveView, deleteView, setDefaultView, defaultView } = useSavedViews<ContactsViewFilters>('contacts');
+
+  const applyView = (view: SavedView<ContactsViewFilters>) => {
+    setActiveTab(view.filters.activeTab);
+    setViewMode(view.filters.viewMode);
+    setSearchQuery(view.filters.searchQuery);
+    setSelectedTag(view.filters.selectedTag);
+  };
+
+  // Apply the default view once on mount
+  useEffect(() => {
+    if (defaultView) applyView(defaultView);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   
   // Selection
   const [selectedContactId, setSelectedContactId] = useState<string | null>(null);
@@ -457,7 +480,7 @@ export default function ContactsModule() {
             )}
           </div>
 
-          {/* Search bar & Tag segment filter */}
+          {/* Search bar, saved views & Tag segment filter */}
           <div className="flex gap-2">
             <div className="relative flex-1">
               <Search className="w-3.5 h-3.5 absolute left-3 top-3 text-theme-secondary" />
@@ -469,6 +492,16 @@ export default function ContactsModule() {
                 className="w-full bg-theme-base text-theme-primary border border-theme-border rounded-lg pl-9 pr-4 py-2 text-xs focus:ring-1 focus:ring-theme-accent focus:outline-none"
               />
             </div>
+            <ViewSwitcher
+              views={views}
+              onApply={applyView}
+              onSaveCurrent={name => {
+                saveView(name, { activeTab, viewMode, searchQuery, selectedTag });
+                toast.success(`View "${name}" saved.`);
+              }}
+              onDelete={deleteView}
+              onSetDefault={setDefaultView}
+            />
           </div>
 
           {/* Tags bar slider */}
@@ -558,6 +591,7 @@ export default function ContactsModule() {
               </div>
             ) : viewMode === 'table' ? (
               <DataTable
+                tableId="contacts"
                 columns={contactColumns}
                 data={filteredContacts as any}
                 rowKey={(c: any) => c.id}

@@ -155,7 +155,7 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [activePipelineId, setActivePipelineId] = useState<string>('');
   const initialPipelineSelectedRef = useRef(false);
   const [activeTheme, setActiveThemeState] = useState<string>(() => {
-    return safeGetItem(LOCAL_STORAGE_KEY_PREFIX + 'active_theme') || 'heritage';
+    return safeGetItem(LOCAL_STORAGE_KEY_PREFIX + 'active_theme') || 'dark';
   });
 
   // ─── Data state (initialized from localStorage fallback or initial data) ──
