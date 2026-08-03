@@ -123,12 +123,13 @@ export function verifyTokenWithKeys(token: string, keyManager: KeyManager): Prin
 
 // ─── Refresh tokens ──────────────────────────────────
 
-const REFRESH_TTL = 7 * 24 * 60 * 60; // 7 days
+/** Default refresh TTL (7 days) — override via REFRESH_TOKEN_TTL_SECONDS (G-SEC-08). */
+export const REFRESH_TOKEN_TTL = 7 * 24 * 60 * 60;
 
-export function issueRefreshToken(principal: Principal, secret: string) {
+export function issueRefreshToken(principal: Principal, secret: string, ttlSeconds: number = REFRESH_TOKEN_TTL) {
   const now = Math.floor(Date.now() / 1000);
   const header = base64Url(JSON.stringify({ alg: 'HS256', typ: 'JWT' }));
-  const payload = base64Url(JSON.stringify({ ...principal, type: 'refresh', iat: now, exp: now + REFRESH_TTL }));
+  const payload = base64Url(JSON.stringify({ ...principal, type: 'refresh', iat: now, exp: now + ttlSeconds }));
   const signature = sign(`${header}.${payload}`, secret);
   return `${header}.${payload}.${signature}`;
 }

@@ -240,6 +240,12 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         } else {
           setApiError('Failed to connect to API server. Using offline data.');
         }
+        // Offline fallback: auto-select the default pipeline so the board renders
+        if (pipelines.length > 0 && !initialPipelineSelectedRef.current) {
+          const defaultPipeline = pipelines.find(p => p.is_default) || pipelines[0];
+          setActivePipelineId(defaultPipeline.id);
+          initialPipelineSelectedRef.current = true;
+        }
       } finally {
         if (!cancelled) setInitialLoading(false);
       }

@@ -3,11 +3,21 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useCRM } from '../store';
 import { Deal, UserRole, DealLineItem } from '../types';
-import { toast } from './ui';
+import { toast, ConfirmDialog } from './ui';
+import { DataTable, type DataTableColumn } from './ui/DataTable';
 import KanbanBoard from './ui/KanbanBoard';
+import { NEW_RECORD_EVENT, SELECT_ENTITY_EVENT, type SelectEntityDetail } from './GlobalShortcuts';
+import { exportCsv } from '../utils/exportCsv';
+import {
+  scoreDeal,
+  forecastConfidence,
+  GRADE_META,
+  type DealScore,
+  type InsightContext,
+} from '../ai/insights';
 import {
   Briefcase,
   Layers,
@@ -23,7 +33,14 @@ import {
   FileText,
   ShoppingBag,
   Package,
-  Search
+  Search,
+  Download,
+  Sparkles,
+  GripVertical,
+  DollarSign,
+  User,
+  Calendar,
+  AlertTriangle
 } from 'lucide-react';
 
 export default function PipelineModule() {
@@ -42,7 +59,52 @@ export default function PipelineModule() {
     customFields,
     activePipelineId,
     setActivePipelineId,
+    activities,
+    tasks,
   } = useCRM();
+
+  // "n" shortcut → open create-deal modal
+  useEffect(() => {
+    const onNewRecord = () => setShowCreateDeal(true);
+    window.addEventListener(NEW_RECORD_EVENT, onNewRecord);
+    return () => window.removeEventListener(NEW_RECORD_EVENT, onNewRecord);
+  }, []);
+
+  // Deep-link from AI next-best-action → select the deal
+  useEffect(() => {
+    const onSelect = (e: Event) => {
+      const detail = (e as CustomEvent<SelectEntityDetail>).detail;
+      if (!detail || detail.module !== 'deals') return;
+      setSelectedDealId(detail.entityId);
+    };
+    window.addEventListener(SELECT_ENTITY_EVENT, onSelect);
+    return () => window.removeEventListener(SELECT_ENTITY_EVENT, onSelect);
+  }, []);
+
+  // Delete confirmation
+  const [confirmDeleteDealId, setConfirmDeleteDealId] = useState<string | null>(null);
+
+  const scopedDeals = getScopedDeals();
+  const activeStages = stages.filter(s => s.pipeline_id === activePipelineId);
+
+  // ─── Boutinly Intelligence: per-deal explainable scores ───
+  const insightContext = useMemo<InsightContext>(() => ({
+    deals: scopedDeals,
+    stages,
+    contacts: [], // contacts not needed for deal scoring
+    accounts,
+    tasks,
+    activities,
+    users,
+    currentUserId: currentUser?.id ?? '',
+    currentUserRole: currentUser?.role ?? UserRole.VIEWER,
+  }), [scopedDeals, stages, accounts, tasks, activities, users, currentUser]);
+
+  const scoreMap = useMemo(() => {
+    const map = new Map<string, DealScore>();
+    for (const deal of scopedDeals) map.set(deal.id, scoreDeal(deal, insightContext));
+    return map;
+  }, [scopedDeals, insightContext]);
 
   const [viewType, setViewType] = useState<'kanban' | 'list' | 'forecast'>('kanban');
   const [searchQuery, setSearchQuery] = useState('');
@@ -89,9 +151,6 @@ export default function PipelineModule() {
     { name: 'Architecture_Blueprint_V2.png', size: '4.8 MB' }
   ]);
 
-  const scopedDeals = getScopedDeals();
-  const activeStages = stages.filter(s => s.pipeline_id === activePipelineId);
-
   // Filters
   const filteredDeals = scopedDeals.filter(d => {
     if (d.pipeline_id !== activePipelineId) return false;
@@ -113,6 +172,22 @@ export default function PipelineModule() {
     }
     return months;
   })();
+
+  // ─── CSV export (list view) ───
+  const handleExportDeals = () => {
+    exportCsv(`boutinly-deals-${new Date().toISOString().slice(0, 10)}.csv`, filteredDeals, [
+      { key: 'name', header: 'Deal' },
+      { key: 'value', header: 'Value (USD)', format: d => d.value.toLocaleString('en-US') },
+      { key: 'stage', header: 'Stage', format: d => stages.find(s => s.id === d.stage_id)?.name ?? '' },
+      { key: 'probability', header: 'Probability (%)', format: d => `${d.probability ?? stages.find(s => s.id === d.stage_id)?.probability ?? 0}%` },
+      { key: 'account', header: 'Account', format: d => accounts.find(a => a.id === d.account_id)?.name ?? '' },
+      { key: 'owner', header: 'Owner', format: d => users.find(u => u.id === d.owner_id)?.name ?? '' },
+      { key: 'close_date', header: 'Close Date', format: d => new Date(d.close_date).toISOString().slice(0, 10) },
+      { key: 'score', header: 'Boutinly Score', format: d => String(scoreMap.get(d.id)?.score ?? '') },
+      { key: 'stage_entered_at', header: 'Stage Entered', format: d => new Date(d.stage_entered_at).toISOString().slice(0, 10) },
+    ]);
+    toast.success('Deals exported', `${filteredDeals.length} rows → CSV`);
+  };
 
   // Add line item to deal
   const handleAddLineItem = (e: React.FormEvent) => {
@@ -300,6 +375,65 @@ export default function PipelineModule() {
                 })),
               };
             })}
+            renderCard={card => {
+              const deal = (card.meta?.deal ?? null) as Deal | null;
+              const score = deal ? scoreMap.get(deal.id) : undefined;
+              const meta = score ? GRADE_META[score.grade] : null;
+              const hasStagnation = score?.factors.some(f => f.key === 'stagnation' && f.impact < 0) ?? false;
+              const hasOverdueStep = score?.factors.some(f => f.key === 'next_step' && f.impact < 0) ?? false;
+              return (
+                <div className="bg-theme-card border border-theme-border rounded-lg p-3 cursor-grab active:cursor-grabbing hover:shadow-raised transition-shadow group">
+                  <div className="flex items-start gap-2">
+                    <GripVertical className="w-3 h-3 text-theme-secondary/40 mt-0.5 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity" />
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center justify-between gap-2">
+                        <p className="text-xs font-medium text-theme-primary truncate">{card.title}</p>
+                        {score && meta && (
+                          <span
+                            className={`shrink-0 inline-flex items-center gap-0.5 text-[9px] font-bold px-1.5 py-0.5 rounded-full border ${
+                              meta.tone === 'success' ? 'text-success bg-success-soft border-success/20'
+                              : meta.tone === 'info' ? 'text-info bg-info-soft border-info/20'
+                              : meta.tone === 'warning' ? 'text-warning bg-warning-soft border-warning/20'
+                              : 'text-danger bg-danger-soft border-danger/20'
+                            }`}
+                            title={`Boutinly Score ${score.score}/100 — ${meta.label}. ${score.factors.filter(f => f.impact < 0).map(f => f.label).join(', ') || 'No negative factors.'}`}
+                          >
+                            <Sparkles className="w-2 h-2" />
+                            {score.score}
+                          </span>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-3 mt-1.5 text-2xs text-theme-secondary">
+                        {card.value !== undefined && (
+                          <span className="flex items-center gap-0.5 font-mono tabular-nums">
+                            <DollarSign className="w-2.5 h-2.5" />
+                            {card.value.toLocaleString()}
+                          </span>
+                        )}
+                        {card.owner && (
+                          <span className="flex items-center gap-0.5 truncate">
+                            <User className="w-2.5 h-2.5" />
+                            {card.owner}
+                          </span>
+                        )}
+                        {card.closeDate && (
+                          <span className="flex items-center gap-0.5">
+                            <Calendar className="w-2.5 h-2.5" />
+                            {new Date(card.closeDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                          </span>
+                        )}
+                        {(hasStagnation || hasOverdueStep) && (
+                          <span className="ml-auto flex items-center gap-0.5 text-warning font-medium" title={hasStagnation ? 'Stalled in stage — see score breakdown' : 'Overdue next step — see score breakdown'}>
+                            <AlertTriangle className="w-2.5 h-2.5" />
+                            {hasStagnation ? 'stalled' : 'step overdue'}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              );
+            }}
             onCardMove={async (cardId, _fromId, toStageId) => {
               if (isReadOnly) return;
               const deal = filteredDeals.find(d => d.id === cardId);
@@ -323,6 +457,122 @@ export default function PipelineModule() {
           />
         )}
 
+        {/* VIEW: DEALS LIST (sortable, filterable, exportable) */}
+        {viewType === 'list' && (
+          <div className="flex-1 flex flex-col overflow-hidden bg-theme-base">
+            <div className="flex items-center justify-between px-4 pt-3 pb-2 shrink-0">
+              <p className="text-xs text-theme-secondary font-sans">
+                {filteredDeals.length} deal{filteredDeals.length === 1 ? '' : 's'} ·{' '}
+                <span className="font-medium text-theme-primary">${filteredDeals.reduce((s, d) => s + d.value, 0).toLocaleString()}</span> open pipeline
+              </p>
+              <button
+                onClick={handleExportDeals}
+                disabled={filteredDeals.length === 0}
+                className="flex items-center gap-1.5 text-[11px] font-medium text-theme-secondary hover:text-theme-primary border border-theme-border rounded-md px-2.5 py-1.5 hover:bg-theme-hover transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed bg-theme-card"
+                aria-label="Export deals to CSV"
+              >
+                <Download className="w-3.5 h-3.5" /> Export CSV
+              </button>
+            </div>
+            <div className="flex-1 px-4 pb-4 overflow-auto min-h-0">
+              <DataTable
+                data={filteredDeals as unknown as Record<string, unknown>[]}
+                rowKey={d => String(d.id)}
+                showDensityToggle
+                emptyState={
+                  <div className="bg-theme-card border border-theme-border rounded-[10px] p-10 text-center text-xs text-theme-secondary font-sans">
+                    No deals match the current filters.
+                  </div>
+                }
+                columns={[
+                  {
+                    key: 'name',
+                    header: 'Deal',
+                    minWidth: 180,
+                    render: d => {
+                      const deal = d as unknown as Deal;
+                      return (
+                        <button
+                          onClick={() => setSelectedDealId(deal.id)}
+                          className="text-left font-semibold text-theme-primary hover:text-theme-accent cursor-pointer bg-transparent border-none"
+                        >
+                          {deal.name}
+                        </button>
+                      );
+                    },
+                  },
+                  {
+                    key: 'value',
+                    header: 'Value',
+                    width: 110,
+                    render: d => <span className="font-mono tabular-nums">${(d as unknown as Deal).value.toLocaleString()}</span>,
+                  },
+                  {
+                    key: 'stage_id',
+                    header: 'Stage',
+                    minWidth: 150,
+                    render: d => {
+                      const stage = stages.find(s => s.id === (d as unknown as Deal).stage_id);
+                      return (
+                        <span className={`inline-flex items-center gap-1.5 text-xs ${stage?.type === 'won' ? 'text-success' : stage?.type === 'lost' ? 'text-danger' : 'text-theme-primary'}`}>
+                          <span className={`w-1.5 h-1.5 rounded-full ${stage?.type === 'won' ? 'bg-success' : stage?.type === 'lost' ? 'bg-danger' : 'bg-theme-accent'}`} aria-hidden="true" />
+                          {stage?.name ?? 'Unknown'}
+                        </span>
+                      );
+                    },
+                  },
+                  {
+                    key: 'probability',
+                    header: 'Prob.',
+                    width: 80,
+                    render: d => {
+                      const deal = d as unknown as Deal;
+                      const prob = deal.probability ?? stages.find(s => s.id === deal.stage_id)?.probability ?? 0;
+                      return <span className="tabular-nums">{prob}%</span>;
+                    },
+                  },
+                  {
+                    key: 'owner_id',
+                    header: 'Owner',
+                    minWidth: 110,
+                    render: d => users.find(u => u.id === (d as unknown as Deal).owner_id)?.name ?? '—',
+                  },
+                  {
+                    key: 'close_date',
+                    header: 'Close',
+                    width: 100,
+                    render: d => new Date((d as unknown as Deal).close_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+                  },
+                  {
+                    key: 'score',
+                    header: 'Score',
+                    width: 120,
+                    render: d => {
+                      const score = scoreMap.get((d as unknown as Deal).id);
+                      if (!score) return null;
+                      const meta = GRADE_META[score.grade];
+                      return (
+                        <span className="inline-flex items-center gap-1.5" title={`${meta.label} — ${score.score}/100`}>
+                          <span className={`inline-flex items-center gap-1 text-[10px] font-bold px-1.5 py-0.5 rounded-full border ${
+                            meta.tone === 'success' ? 'text-success bg-success-soft border-success/20'
+                            : meta.tone === 'info' ? 'text-info bg-info-soft border-info/20'
+                            : meta.tone === 'warning' ? 'text-warning bg-warning-soft border-warning/20'
+                            : 'text-danger bg-danger-soft border-danger/20'
+                          }`}>
+                            <Sparkles className="w-2.5 h-2.5" />
+                            {score.score}
+                          </span>
+                          <span className="text-2xs text-theme-secondary">{meta.label}</span>
+                        </span>
+                      );
+                    },
+                  },
+                ]}
+              />
+            </div>
+          </div>
+        )}
+
         {/* VIEW: REVENUE FORECASTING */}
         {viewType === 'forecast' && (
           <div className="flex-1 p-5 overflow-y-auto bg-theme-base text-left space-y-6">
@@ -330,6 +580,34 @@ export default function PipelineModule() {
               <h4 className="text-xs font-bold uppercase font-sans tracking-wider text-theme-secondary">Weighted Financial Pipeline Rollup</h4>
               <p className="text-[11px] text-theme-secondary mt-1">Expected revenue is calculated dynamically using stage probability ratios (Deal value × Win probability).</p>
             </div>
+
+            {(() => {
+              const fc = forecastConfidence(filteredDeals, insightContext);
+              if (filteredDeals.length === 0) return null;
+              return (
+                <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+                  <div className="bg-theme-card p-4 rounded-xl border border-theme-border shadow-2xs">
+                    <span className="text-[10px] uppercase font-sans text-theme-secondary block font-bold">Committed (≥75% prob.)</span>
+                    <span className="text-lg font-bold text-theme-primary font-sans tnum">${fc.committed.toLocaleString()}</span>
+                  </div>
+                  <div className="bg-theme-card p-4 rounded-xl border border-theme-border shadow-2xs">
+                    <span className="text-[10px] uppercase font-sans text-theme-secondary block font-bold">Weighted Expected</span>
+                    <span className="text-lg font-bold text-theme-accent font-sans tnum">${fc.weighted.toLocaleString()}</span>
+                  </div>
+                  <div className="bg-theme-card p-4 rounded-xl border border-theme-border shadow-2xs">
+                    <span className="text-[10px] uppercase font-sans text-theme-secondary block font-bold">Expected Range</span>
+                    <span className="text-sm font-bold text-theme-primary font-sans tnum">
+                      ${fc.expectedLow.toLocaleString()} – ${fc.expectedHigh.toLocaleString()}
+                    </span>
+                  </div>
+                  <div className="bg-theme-card p-4 rounded-xl border border-theme-border shadow-2xs">
+                    <span className="text-[10px] uppercase font-sans text-theme-secondary block font-bold">Variance (±)</span>
+                    <span className="text-sm font-bold text-theme-primary font-sans tnum">{fc.variancePct}%</span>
+                    <span className="text-[10px] text-theme-secondary block mt-0.5 font-sans">Why? Spread of stage probabilities on open deals.</span>
+                  </div>
+                </div>
+              );
+            })()}
 
             <div className="space-y-4 font-sans text-xs">
               {filteredDeals.length === 0 ? (
@@ -371,6 +649,17 @@ export default function PipelineModule() {
                         <span className="text-base font-bold text-theme-accent font-sans">${totalWeightedValue.toLocaleString()}</span>
                       </div>
                     </div>
+                    {(() => {
+                      const mfc = forecastConfidence(monthDeals, insightContext);
+                      if (monthDeals.length === 0) return null;
+                      return (
+                        <p className="text-[10px] text-theme-secondary font-sans border-t border-theme-border pt-2">
+                          Confidence range{' '}
+                          <span className="font-semibold text-theme-primary tnum">${mfc.expectedLow.toLocaleString()} – ${mfc.expectedHigh.toLocaleString()}</span>{' '}
+                          (±{mfc.variancePct}%) · committed <span className="font-semibold tnum">${mfc.committed.toLocaleString()}</span>
+                        </p>
+                      );
+                    })()}
                   </div>
                 );
               })
@@ -405,13 +694,9 @@ export default function PipelineModule() {
                 {/* CRUD delete */}
                 {!isReadOnly && (
                   <button
-                    onClick={() => {
-                      if (confirm('Are you sure you want to delete this deal?')) {
-                        deleteDeal(activeDeal.id);
-                        setSelectedDealId(null);
-                      }
-                    }}
+                    onClick={() => setConfirmDeleteDealId(activeDeal.id)}
                     className="p-1.5 text-theme-secondary hover:text-theme-accent rounded hover:bg-theme-base transition-colors cursor-pointer bg-transparent border-none"
+                    aria-label={`Delete deal ${activeDeal.name}`}
                   >
                     <Trash2 className="w-4.5 h-4.5" />
                   </button>
@@ -486,7 +771,70 @@ export default function PipelineModule() {
 
             {/* Split panels: PRODUCTS & ATTACHMENTS */}
             <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-theme-base">
-              
+
+              {/* Boutinly Intelligence: explainable deal score */}
+              {(() => {
+                const score = scoreMap.get(activeDeal.id);
+                if (!score) return null;
+                const meta = GRADE_META[score.grade];
+                const toneClasses = {
+                  success: 'text-success bg-success-soft border-success/20',
+                  info: 'text-info bg-info-soft border-info/20',
+                  warning: 'text-warning bg-warning-soft border-warning/20',
+                  danger: 'text-danger bg-danger-soft border-danger/20',
+                }[meta.tone];
+                const barTone = {
+                  success: 'bg-success',
+                  info: 'bg-info',
+                  warning: 'bg-warning',
+                  danger: 'bg-danger',
+                }[meta.tone];
+                return (
+                  <div className="bg-theme-card rounded-xl border border-theme-border p-4 space-y-3 shadow-2xs">
+                    <div className="flex items-center justify-between">
+                      <h4 className="text-xs font-bold uppercase font-sans tracking-wider text-theme-secondary flex items-center gap-1.5">
+                        <Sparkles className="w-4 h-4 text-theme-accent" /> Boutinly Score
+                      </h4>
+                      <span className={`inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full border ${toneClasses}`}>
+                        {meta.label} · {score.score}/100
+                      </span>
+                    </div>
+
+                    <div>
+                      <div className="h-1.5 w-full bg-theme-inset rounded-full overflow-hidden">
+                        <div className={`h-full rounded-full transition-all duration-500 ${barTone}`} style={{ width: `${score.score}%` }} />
+                      </div>
+                      <p className="text-[10px] text-theme-secondary mt-1.5 font-sans">
+                        Deterministic model · stage momentum, dwell time, engagement, next-step readiness, value, and record completeness.
+                      </p>
+                    </div>
+
+                    <div className="divide-y divide-theme-border rounded-lg border border-theme-border overflow-hidden">
+                      {score.factors.map(factor => (
+                        <div key={factor.key} className="px-3 py-2 flex items-start justify-between gap-3 bg-theme-base/30">
+                          <div className="min-w-0">
+                            <p className="text-xs font-medium text-theme-primary">{factor.label}</p>
+                            <p className="text-[10px] text-theme-secondary mt-0.5 leading-relaxed">{factor.detail}</p>
+                          </div>
+                          <span
+                            className={`shrink-0 text-[10px] font-bold px-1.5 py-0.5 rounded tabular-nums ${
+                              factor.impact > 0 ? 'text-success bg-success-soft' : factor.impact < 0 ? 'text-danger bg-danger-soft' : 'text-theme-secondary bg-theme-inset'
+                            }`}
+                          >
+                            {factor.impact > 0 ? `+${factor.impact}` : factor.impact}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+
+                    <p className="text-[10px] text-theme-secondary/80 font-sans leading-relaxed">
+                      Scores are advisory and recomputed live from CRM data. Use them to prioritize follow-ups —
+                      they do not replace sales judgment.
+                    </p>
+                  </div>
+                );
+              })()}
+
               {/* Card Section: Products & Line Items */}
               <div className="bg-theme-card rounded-xl border border-theme-border p-4 space-y-3 shadow-2xs">
                 <div className="flex justify-between items-center">
@@ -808,6 +1156,23 @@ export default function PipelineModule() {
           </div>
         </div>
       )}
+
+      {/* MODAL: CONFIRM DELETE DEAL */}
+      <ConfirmDialog
+        open={confirmDeleteDealId !== null}
+        onCancel={() => setConfirmDeleteDealId(null)}
+        onConfirm={() => {
+          if (confirmDeleteDealId) {
+            deleteDeal(confirmDeleteDealId);
+            setSelectedDealId(null);
+            toast.success('Deal deleted');
+          }
+          setConfirmDeleteDealId(null);
+        }}
+        title="Delete deal?"
+        body="This permanently removes the deal and its history from the pipeline. This action cannot be undone."
+        confirmLabel="Delete deal"
+      />
 
     </div>
   );

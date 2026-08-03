@@ -48,7 +48,7 @@ async function createTestHarness() {
     return r.body.token as string;
   }
 
-  return { app, repository, signup, login };
+  return { app, repository, signup, login, lockoutService };
 }
 
 // ═══════════════════════════════════════════════════════
@@ -316,18 +316,99 @@ describe('Boutinly CRM API', () => {
     await request(h.app).get('/api/auth/oidc/providers').expect(200);
   });
 
+  // ── Feature Flags (G-AI-14 / G-OPS-06) ────────────
+
+  it('lists effective feature flags for the caller', async () => {
+    const { token } = await h.signup('A', 'a@t.com', 'ChangeMe123!', 'TC');
+    const r = await request(h.app).get('/api/flags')
+      .set('Authorization', `Bearer ${token}`).expect(200);
+    const scoring = r.body.flags.find((f: { key: string }) => f.key === 'ai.deal_scoring');
+    expect(scoring?.enabled).toBe(true);
+  });
+
+  it('admin can toggle an org flag and the change is effective + audited', async () => {
+    const { token } = await h.signup('A', 'a@t.com', 'ChangeMe123!', 'TC');
+    await request(h.app).put('/api/admin/flags/ai.deal_scoring')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ enabled: false, scope: 'organization' }).expect(200);
+
+    const r = await request(h.app).get('/api/flags')
+      .set('Authorization', `Bearer ${token}`).expect(200);
+    const scoring = r.body.flags.find((f: { key: string }) => f.key === 'ai.deal_scoring');
+    expect(scoring?.enabled).toBe(false);
+
+    const audit = await request(h.app).get('/api/audit-logs')
+      .set('Authorization', `Bearer ${token}`);
+    if (audit.status === 200) {
+      const entries = audit.body.auditLogs ?? audit.body.logs ?? [];
+      expect(JSON.stringify(entries)).toContain('feature_flag.changed');
+    }
+  });
+
+  it('rejects unauthenticated flag access', async () => {
+    await request(h.app).get('/api/flags').expect(401);
+  });
+
   // ── Account Lockout ───────────────────────────────
 
-  it('locks account after 5 failures', async () => {
+  it('locks account after configured max failures', async () => {
     await h.signup('L', 'lock@t.com', 'ChangeMe123!', 'TC');
-    // First 4 failures return 401
-    for (let i = 0; i < 4; i++) {
+    // Deterministic baseline: clear any lockout state (email and shared-IP keys)
+    // accumulated by other requests in this harness (G-SEC-09).
+    h.lockoutService.resetAll();
+    const { maxFailedAttempts } = h.lockoutService.getConfig();
+    // First (max - 1) failures return 401
+    for (let i = 0; i < maxFailedAttempts - 1; i++) {
       await request(h.app).post('/api/auth/login')
         .send({ email: 'lock@t.com', password: 'WrongPassword!' }).expect(401);
     }
-    // 5th failure locks the account (429)
+    // Final failure locks the account (429)
     await request(h.app).post('/api/auth/login')
       .send({ email: 'lock@t.com', password: 'WrongPassword!' }).expect(429);
+    // Subsequent attempts (even with the correct password) stay locked
+    await request(h.app).post('/api/auth/login')
+      .send({ email: 'lock@t.com', password: 'ChangeMe123!' }).expect(429);
+  });
+
+  // ── Idempotency (G-DAT-12) ────────────────────────
+
+  it('replays a POST with the same Idempotency-Key instead of creating a duplicate', async () => {
+    const { token, userId } = await h.signup('A', 'a@t.com', 'ChangeMe123!', 'TC');
+
+    const first = await request(h.app).post('/api/accounts')
+      .set('Authorization', `Bearer ${token}`)
+      .set('Idempotency-Key', 'create-acme-001')
+      .send({ name: 'Acme', owner_id: userId }).expect(201);
+
+    const replay = await request(h.app).post('/api/accounts')
+      .set('Authorization', `Bearer ${token}`)
+      .set('Idempotency-Key', 'create-acme-001')
+      .send({ name: 'Acme', owner_id: userId }).expect(201);
+
+    expect(replay.headers['idempotency-replayed']).toBe('true');
+    expect(replay.body.account.id).toBe(first.body.account.id);
+
+    // A different key creates a distinct record
+    const other = await request(h.app).post('/api/accounts')
+      .set('Authorization', `Bearer ${token}`)
+      .set('Idempotency-Key', 'create-acme-002')
+      .send({ name: 'Acme 2', owner_id: userId }).expect(201);
+    expect(other.body.account.id).not.toBe(first.body.account.id);
+  });
+
+  it('does not cache failed requests for an Idempotency-Key', async () => {
+    const { token, userId } = await h.signup('A', 'a@t.com', 'ChangeMe123!', 'TC');
+
+    // Invalid body -> 400, key must remain reusable
+    await request(h.app).post('/api/accounts')
+      .set('Authorization', `Bearer ${token}`)
+      .set('Idempotency-Key', 'retry-after-failure')
+      .send({}).expect(400);
+
+    await request(h.app).post('/api/accounts')
+      .set('Authorization', `Bearer ${token}`)
+      .set('Idempotency-Key', 'retry-after-failure')
+      .send({ name: 'Retry Co', owner_id: userId }).expect(201);
   });
 
   // ── CSRF ──────────────────────────────────────────

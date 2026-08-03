@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { useCRM } from '../store';
 import { UserRole, Deal, Task } from '../types';
 import { 
@@ -16,9 +16,15 @@ import {
   GitPullRequest, 
   FileDown, 
   Sparkles,
-  RefreshCw
+  RefreshCw,
+  ArrowRight,
+  AlertTriangle,
+  ClipboardList,
+  ShieldCheck
 } from 'lucide-react';
 import { FunnelChart, DonutChart, TrendLine } from './ui/charts';
+import { buildNextBestActions, findDuplicateContacts, type InsightContext } from '../ai/insights';
+import { dispatchSelectEntity } from './GlobalShortcuts';
 
 export default function ReportsModule() {
   const {
@@ -30,7 +36,8 @@ export default function ReportsModule() {
     contacts,
     users,
     stages,
-    activePipelineId
+    activePipelineId,
+    setActiveModule
   } = useCRM();
 
   const [activeSubTab, setActiveSubTab] = useState<'dash' | 'health' | 'winloss' | 'builder'>('dash');
@@ -45,6 +52,27 @@ export default function ReportsModule() {
   const scopedDeals = getScopedDeals();
   const scopedTasks = getScopedTasks();
   const scopedActivities = getScopedActivities();
+
+  // ─── Boutinly Intelligence: next best actions + data quality ───
+  const insightContext = useMemo<InsightContext>(() => ({
+    deals: scopedDeals,
+    stages,
+    contacts,
+    accounts,
+    tasks: scopedTasks,
+    activities: scopedActivities,
+    users,
+    currentUserId: currentUser?.id ?? '',
+    currentUserRole: currentUser?.role ?? UserRole.VIEWER,
+  }), [scopedDeals, stages, contacts, accounts, scopedTasks, scopedActivities, users, currentUser]);
+
+  const nextBestActions = useMemo(() => buildNextBestActions(insightContext, 6), [insightContext]);
+  const duplicateGroups = useMemo(() => findDuplicateContacts(contacts), [contacts]);
+  const dataQuality = useMemo(() => {
+    const incomplete = contacts.filter(c => !c.phone || !c.title || !c.email).length;
+    const unassigned = contacts.filter(c => !users.some(u => u.id === c.owner_id)).length;
+    return { incomplete, unassigned, duplicates: duplicateGroups.reduce((n, g) => n + g.contacts.length, 0) };
+  }, [contacts, users, duplicateGroups]);
 
   // Metrics Calculations
   const wonDeals = scopedDeals.filter(d => {
@@ -306,6 +334,114 @@ export default function ReportsModule() {
                   {scopedActivities.length}
                 </h3>
                 <p className="text-[10px] text-theme-secondary mt-2 font-medium">Calls, notes, emails synced</p>
+              </div>
+            </div>
+
+            {/* Boutinly Intelligence: Next Best Actions + Data Quality */}
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+              <div className="bg-theme-card p-5 rounded-xl shadow-xs border border-theme-border lg:col-span-2">
+                <div className="flex items-center justify-between mb-4">
+                  <div className="flex items-center gap-2.5">
+                    <span className="w-8 h-8 rounded-lg bg-theme-accent-soft text-theme-accent flex items-center justify-center">
+                      <Sparkles className="w-4 h-4" />
+                    </span>
+                    <div>
+                      <h4 className="text-xs font-bold uppercase font-sans tracking-wider text-theme-secondary">
+                        AI Assistant — Next Best Actions
+                      </h4>
+                      <p className="text-[11px] text-theme-secondary mt-0.5">Prioritized suggestions with reasons, computed from your scoped data</p>
+                    </div>
+                  </div>
+                  <RefreshCw className="w-3.5 h-3.5 text-theme-secondary/50" aria-label="Live" />
+                </div>
+
+                {nextBestActions.length === 0 ? (
+                  <div className="py-8 text-center">
+                    <ShieldCheck className="w-8 h-8 mx-auto text-success/50 mb-2" />
+                    <p className="text-xs text-theme-secondary font-sans">All caught up — no urgent follow-ups, stale deals, or data hygiene issues detected.</p>
+                  </div>
+                ) : (
+                  <div className="divide-y divide-theme-border rounded-lg border border-theme-border overflow-hidden">
+                    {nextBestActions.map(action => {
+                      const priorityTone = action.priority === 'high'
+                        ? 'bg-danger-soft text-danger'
+                        : action.priority === 'medium' ? 'bg-warning-soft text-warning' : 'bg-theme-inset text-theme-secondary';
+                      const categoryIcon = action.category === 'revenue' ? <TrendingUp className="w-3.5 h-3.5" />
+                        : action.category === 'task' ? <ClipboardList className="w-3.5 h-3.5" /> : <AlertTriangle className="w-3.5 h-3.5" />;
+                      return (
+                        <div key={action.id} className="px-4 py-3 flex items-start gap-3 bg-theme-base/30">
+                          <span className="shrink-0 mt-0.5 text-theme-secondary">{categoryIcon}</span>
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-center gap-2">
+                              <p className="text-xs font-semibold text-theme-primary">{action.title}</p>
+                              <span className={`shrink-0 text-[9px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded ${priorityTone}`}>
+                                {action.priority}
+                              </span>
+                            </div>
+                            <p className="text-[11px] text-theme-secondary mt-0.5 leading-relaxed">{action.reason}</p>
+                          </div>
+                          <button
+                            onClick={() => {
+                              setActiveModule(action.module);
+                              if (action.entityId) dispatchSelectEntity({ module: action.module, entityId: action.entityId });
+                            }}
+                            className="shrink-0 flex items-center gap-1 text-[11px] font-medium text-theme-accent hover:opacity-80 cursor-pointer bg-transparent border-none"
+                            aria-label={`Open ${action.title}`}
+                          >
+                            Open <ArrowRight className="w-3 h-3" />
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+
+              {/* Data quality snapshot */}
+              <div className="bg-theme-card p-5 rounded-xl shadow-xs border border-theme-border">
+                <h4 className="text-xs font-bold uppercase font-sans tracking-wider text-theme-secondary mb-1 flex items-center gap-1.5">
+                  <ShieldCheck className="w-4 h-4 text-theme-accent" /> Data Quality
+                </h4>
+                <p className="text-[11px] text-theme-secondary mb-4">
+                  Poor data costs an estimated 15–25% of revenue — hygiene is the prerequisite for every AI feature.
+                </p>
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between p-3 rounded-lg border border-theme-border bg-theme-base/40">
+                    <div>
+                      <p className="text-xs font-semibold text-theme-primary">Duplicate contacts</p>
+                      <p className="text-[10px] text-theme-secondary mt-0.5">
+                        {dataQuality.duplicates > 0 ? `${duplicateGroups.length} group${duplicateGroups.length === 1 ? '' : 's'} share email, phone, or name+domain` : 'No exact duplicates found'}
+                      </p>
+                    </div>
+                    <span className={`text-sm font-bold tabular-nums ${dataQuality.duplicates > 0 ? 'text-warning' : 'text-success'}`}>
+                      {dataQuality.duplicates}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between p-3 rounded-lg border border-theme-border bg-theme-base/40">
+                    <div>
+                      <p className="text-xs font-semibold text-theme-primary">Incomplete records</p>
+                      <p className="text-[10px] text-theme-secondary mt-0.5">Missing phone, title, or email</p>
+                    </div>
+                    <span className={`text-sm font-bold tabular-nums ${dataQuality.incomplete > 0 ? 'text-warning' : 'text-success'}`}>
+                      {dataQuality.incomplete}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between p-3 rounded-lg border border-theme-border bg-theme-base/40">
+                    <div>
+                      <p className="text-xs font-semibold text-theme-primary">Unassigned contacts</p>
+                      <p className="text-[10px] text-theme-secondary mt-0.5">No owner — invisible in rep views</p>
+                    </div>
+                    <span className={`text-sm font-bold tabular-nums ${dataQuality.unassigned > 0 ? 'text-warning' : 'text-success'}`}>
+                      {dataQuality.unassigned}
+                    </span>
+                  </div>
+                  <button
+                    onClick={() => setActiveModule('contacts')}
+                    className="w-full mt-1 text-[11px] font-medium text-theme-accent hover:opacity-80 py-2 rounded-lg border border-theme-accent/25 hover:bg-theme-accent-soft transition-colors cursor-pointer bg-transparent"
+                  >
+                    Review contacts →
+                  </button>
+                </div>
               </div>
             </div>
 

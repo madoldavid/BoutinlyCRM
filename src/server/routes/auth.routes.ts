@@ -6,7 +6,8 @@ import type { EmailService } from '../email/service.js';
 import type { CrmRepository } from '../repositories/crmRepository.js';
 import { authenticate, type AuthenticatedRequest } from '../security/rbac.js';
 import { hashPassword } from '../security/password.js';
-import { issueToken, issueMfaChallengeToken, verifyMfaChallengeToken, verifyRefreshToken, issueRefreshToken, ACCESS_TOKEN_TTL } from '../security/token.js';
+import { issueToken, issueMfaChallengeToken, verifyMfaChallengeToken, verifyRefreshToken, issueRefreshToken } from '../security/token.js';
+import { validatePasswordPolicy } from '../security/passwordPolicy.js';
 import { generateTotpSecret, generateTotpUri, verifyTotp } from '../security/totp.js';
 import type { AccountLockoutService } from '../security/lockout.js';
 import type { KeyManager } from '../security/jwks.js';
@@ -61,6 +62,11 @@ export function registerAuthRoutes(
     }
 
     const body = signupSchema.parse(req.body);
+    const policyError = validatePasswordPolicy(body.password, {
+      minLength: config.PASSWORD_MIN_LENGTH,
+      requireComplexity: config.PASSWORD_REQUIRE_COMPLEXITY,
+    });
+    if (policyError) throw new ApiError(400, policyError, 'password_policy_violation');
     const passwordHash = await hashPassword(body.password, config.PASSWORD_PEPPER);
     const org = await repository.createOrganization(body.company_name, slugify(body.company_name));
 
@@ -110,8 +116,8 @@ export function registerAuthRoutes(
       });
 
       const principal = makePrincipal(user);
-      const token = issueToken(principal, config.JWT_SECRET, ACCESS_TOKEN_TTL, generateJti());
-      const refreshToken = issueRefreshToken(principal, config.JWT_SECRET);
+      const token = issueToken(principal, config.JWT_SECRET, config.ACCESS_TOKEN_TTL_SECONDS, generateJti());
+      const refreshToken = issueRefreshToken(principal, config.JWT_SECRET, config.REFRESH_TOKEN_TTL_SECONDS);
 
       return { token, refresh_token: refreshToken, user };
     });
@@ -155,7 +161,8 @@ export function registerAuthRoutes(
       }).catch(() => { /* fire-and-forget */ });
 
       if (result.locked) {
-        throw new ApiError(429, `Account locked after too many failed attempts. Try again in 15 minutes.`, 'account_locked');
+        const lockMinutes = Math.ceil(lockoutService.getConfig().lockoutDurationMs / 60_000);
+        throw new ApiError(429, `Account locked after too many failed attempts. Try again in ${lockMinutes} minutes.`, 'account_locked');
       }
       throw new ApiError(401, 'Invalid email or password.', 'invalid_credentials');
     }
@@ -173,8 +180,8 @@ export function registerAuthRoutes(
       return;
     }
 
-    const token = issueToken(principal, config.JWT_SECRET, ACCESS_TOKEN_TTL, generateJti());
-    const refreshToken = issueRefreshToken(principal, config.JWT_SECRET);
+    const token = issueToken(principal, config.JWT_SECRET, config.ACCESS_TOKEN_TTL_SECONDS, generateJti());
+    const refreshToken = issueRefreshToken(principal, config.JWT_SECRET, config.REFRESH_TOKEN_TTL_SECONDS);
 
     res.json({ token, refresh_token: refreshToken, user });
   }));
@@ -194,8 +201,8 @@ export function registerAuthRoutes(
     }
 
     const newPrincipal = makePrincipal(user);
-    const token = issueToken(newPrincipal, config.JWT_SECRET, ACCESS_TOKEN_TTL, generateJti());
-    const refreshToken = issueRefreshToken(newPrincipal, config.JWT_SECRET);
+    const token = issueToken(newPrincipal, config.JWT_SECRET, config.ACCESS_TOKEN_TTL_SECONDS, generateJti());
+    const refreshToken = issueRefreshToken(newPrincipal, config.JWT_SECRET, config.REFRESH_TOKEN_TTL_SECONDS);
 
     res.json({ token, refresh_token: refreshToken, user });
   }));
@@ -263,6 +270,11 @@ export function registerAuthRoutes(
 
   app.post('/api/auth/reset-password', asyncHandler(async (req, res) => {
     const { token, password } = resetPasswordSchema.parse(req.body);
+    const policyError = validatePasswordPolicy(password, {
+      minLength: config.PASSWORD_MIN_LENGTH,
+      requireComplexity: config.PASSWORD_REQUIRE_COMPLEXITY,
+    });
+    if (policyError) throw new ApiError(400, policyError, 'password_policy_violation');
     const userId = await repository.consumePasswordResetToken(token);
     if (!userId) {
       throw new ApiError(400, 'Invalid or expired reset token.', 'invalid_reset_token');
@@ -283,8 +295,8 @@ export function registerAuthRoutes(
     }
 
     const newPrincipal = makePrincipal(user);
-    const token = issueToken(newPrincipal, config.JWT_SECRET, ACCESS_TOKEN_TTL, generateJti());
-    const refreshToken = issueRefreshToken(newPrincipal, config.JWT_SECRET);
+    const token = issueToken(newPrincipal, config.JWT_SECRET, config.ACCESS_TOKEN_TTL_SECONDS, generateJti());
+    const refreshToken = issueRefreshToken(newPrincipal, config.JWT_SECRET, config.REFRESH_TOKEN_TTL_SECONDS);
 
     res.json({ token, refresh_token: refreshToken });
   }));

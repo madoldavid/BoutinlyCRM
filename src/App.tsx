@@ -8,9 +8,10 @@ import { CRMProvider, useCRM } from './store';
 import Sidebar from './components/Sidebar';
 import LoginPage from './components/LoginPage';
 import CommandPalette from './components/CommandPalette';
+import GlobalShortcuts, { dispatchNewRecord } from './components/GlobalShortcuts';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { ToastViewport, Skeleton } from './components/ui';
-import { ShieldAlert, Loader2, WifiOff, Search, Menu } from 'lucide-react';
+import { ShieldAlert, Loader2, WifiOff, Search, Menu, Plus, HelpCircle } from 'lucide-react';
 
 const ReportsModule = React.lazy(() => import('./components/ReportsModule'));
 const ContactsModule = React.lazy(() => import('./components/ContactsModule'));
@@ -190,9 +191,26 @@ function DashboardLayout() {
               <span className="flex-1 text-left">Search…</span>
               <kbd className="text-[9px] bg-theme-card border border-theme-border rounded px-1 py-px font-sans">⌘K</kbd>
             </button>
+            <button
+              onClick={dispatchNewRecord}
+              className="hidden md:flex items-center gap-1.5 text-xs font-medium text-white bg-theme-accent hover:opacity-90 rounded-md px-3 py-1.5 cursor-pointer transition-opacity shadow-card"
+              aria-label="Create new record (N)"
+              title="New record (N)"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              New
+            </button>
             <span className="text-xs text-theme-secondary hidden md:block">
               {currentUser?.role?.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}
             </span>
+            <button
+              onClick={() => window.dispatchEvent(new Event('boutinly:open-shortcuts'))}
+              className="p-1.5 text-theme-secondary hover:text-theme-primary hover:bg-theme-hover rounded-md cursor-pointer bg-transparent border-none"
+              aria-label="Keyboard shortcuts (?)"
+              title="Keyboard shortcuts (?)"
+            >
+              <HelpCircle className="w-4 h-4" />
+            </button>
             <div
               className="w-7 h-7 rounded-full bg-theme-accent-soft text-theme-accent flex items-center justify-center text-xs font-bold border border-theme-border"
               title={currentUser?.name}
@@ -215,6 +233,7 @@ function DashboardLayout() {
 
       {/* Global overlays */}
       <CommandPalette />
+      <GlobalShortcuts />
       <ToastViewport />
 
     </div>

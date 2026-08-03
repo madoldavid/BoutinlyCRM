@@ -275,6 +275,7 @@ export default function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
               }`}
               id={`nav-${item.id}`}
               aria-current={isActive ? 'page' : undefined}
+              aria-label={item.label}
               title={collapsed ? item.label : undefined}
             >
               {isActive && (

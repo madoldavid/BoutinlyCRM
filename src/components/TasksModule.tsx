@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useCRM } from '../store';
 import { Task, UserRole } from '../types';
 import {
@@ -21,6 +21,7 @@ import {
   Info,
   Sparkles
 } from 'lucide-react';
+import { NEW_RECORD_EVENT, SELECT_ENTITY_EVENT, type SelectEntityDetail } from './GlobalShortcuts';
 
 export default function TasksModule() {
   const {
@@ -45,6 +46,24 @@ export default function TasksModule() {
 
   // Forms
   const [showCreateTask, setShowCreateTask] = useState(false);
+
+  // "n" shortcut → open create-task modal
+  useEffect(() => {
+    const onNewRecord = () => setShowCreateTask(true);
+    window.addEventListener(NEW_RECORD_EVENT, onNewRecord);
+    return () => window.removeEventListener(NEW_RECORD_EVENT, onNewRecord);
+  }, []);
+
+  // Deep-link from AI next-best-action → surface overdue task
+  useEffect(() => {
+    const onSelect = (e: Event) => {
+      const detail = (e as CustomEvent<SelectEntityDetail>).detail;
+      if (!detail || detail.module !== 'tasks') return;
+      setTaskFilter('overdue');
+    };
+    window.addEventListener(SELECT_ENTITY_EVENT, onSelect);
+    return () => window.removeEventListener(SELECT_ENTITY_EVENT, onSelect);
+  }, []);
   const [taskForm, setTaskForm] = useState({
     title: '',
     type: 'todo' as Task['type'],

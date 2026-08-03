@@ -3,9 +3,10 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useCRM } from '../store';
-import { UserRole } from '../types';
+import { UserRole, EmailTemplate } from '../types';
+import { NEW_RECORD_EVENT } from './GlobalShortcuts';
 import {
   Mail,
   Send,
@@ -62,6 +63,16 @@ export default function EmailsModule() {
 
   const [campaignProgress, setCampaignProgress] = useState(false);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
+
+  // "n" shortcut → new template or campaign depending on active view
+  useEffect(() => {
+    const onNewRecord = () => {
+      if (activeSubView === 'campaigns') setShowCreateCampaign(true);
+      else setShowCreateTemplate(true);
+    };
+    window.addEventListener(NEW_RECORD_EVENT, onNewRecord);
+    return () => window.removeEventListener(NEW_RECORD_EVENT, onNewRecord);
+  }, [activeSubView]);
 
   // Load template into single compose
   const handleLoadTemplate = (templateId: string) => {

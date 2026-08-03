@@ -3,10 +3,14 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useCRM } from '../store';
 import { Contact, Account, UserRole } from '../types';
 import { DataTable, type DataTableColumn } from './ui/DataTable';
+import { ConfirmDialog, toast } from './ui';
+import { NEW_RECORD_EVENT, SELECT_ENTITY_EVENT, type SelectEntityDetail } from './GlobalShortcuts';
+import { exportCsv } from '../utils/exportCsv';
+import { findDuplicateContacts } from '../ai/insights';
 import {
   Search,
   Plus,
@@ -25,7 +29,9 @@ import {
   Users2,
   Check,
   List,
-  LayoutGrid
+  LayoutGrid,
+  Download,
+  AlertTriangle
 } from 'lucide-react';
 
 export default function ContactsModule() {
@@ -96,6 +102,57 @@ export default function ContactsModule() {
   // Merge states
   const [mergeSourceId, setMergeSourceId] = useState('');
   const [mergeTargetId, setMergeTargetId] = useState('');
+
+  // ─── Boutinly Intelligence: duplicate detection & bulk actions ───
+  const [selectedRowKeys, setSelectedRowKeys] = useState<Set<string>>(new Set());
+  const [confirmBulkDelete, setConfirmBulkDelete] = useState(false);
+
+  const duplicateGroups = useMemo(() => findDuplicateContacts(getScopedContacts()), [getScopedContacts]);
+
+  // "n" shortcut → open the create modal for the active tab
+  useEffect(() => {
+    const onNewRecord = () => {
+      if (activeTab === 'contacts') setShowCreateContact(true);
+      else setShowCreateAccount(true);
+    };
+    window.addEventListener(NEW_RECORD_EVENT, onNewRecord);
+    return () => window.removeEventListener(NEW_RECORD_EVENT, onNewRecord);
+  }, [activeTab]);
+
+  // Deep-link from AI next-best-action → select the contact
+  useEffect(() => {
+    const onSelect = (e: Event) => {
+      const detail = (e as CustomEvent<SelectEntityDetail>).detail;
+      if (!detail || detail.module !== 'contacts') return;
+      setActiveTab('contacts');
+      setSelectedContactId(detail.entityId);
+    };
+    window.addEventListener(SELECT_ENTITY_EVENT, onSelect);
+    return () => window.removeEventListener(SELECT_ENTITY_EVENT, onSelect);
+  }, []);
+
+  // CSV export (filtered set, or only selected rows when provided)
+  const handleExportContacts = (rows: Contact[] = filteredContacts) => {
+    exportCsv(`boutinly-contacts-${new Date().toISOString().slice(0, 10)}.csv`, rows, [
+      { key: 'first_name', header: 'First Name' },
+      { key: 'last_name', header: 'Last Name' },
+      { key: 'email', header: 'Email' },
+      { key: 'phone', header: 'Phone' },
+      { key: 'title', header: 'Title' },
+      { key: 'account', header: 'Account', format: c => scopedAccounts.find(a => a.id === c.account_id)?.name ?? '' },
+      { key: 'owner', header: 'Owner', format: c => users.find(u => u.id === c.owner_id)?.name ?? '' },
+      { key: 'tags', header: 'Tags', format: c => c.tags.join('; ') },
+      { key: 'created_at', header: 'Created', format: c => new Date(c.created_at).toISOString().slice(0, 10) },
+    ]);
+    toast.success('Contacts exported', `${rows.length} rows → CSV`);
+  };
+
+  // Open merge modal pre-filled from a detected duplicate group
+  const openMergeForGroup = (group: ReturnType<typeof findDuplicateContacts>[number]) => {
+    setMergeSourceId(group.contacts[1]?.id ?? '');
+    setMergeTargetId(group.contacts[0]?.id ?? '');
+    setShowMergeModal(true);
+  };
 
   // Get Scoped lists
   const scopedContacts = getScopedContacts();
@@ -362,10 +419,22 @@ export default function ContactsModule() {
             {/* Quick Actions */}
             {!isReadOnly && (
               <div className="flex gap-2">
+                {activeTab === 'contacts' && (
+                  <button
+                    onClick={() => handleExportContacts()}
+                    disabled={filteredContacts.length === 0}
+                    className="p-1.5 rounded-lg border border-theme-border text-theme-secondary hover:bg-theme-base transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+                    title="Export contacts to CSV"
+                    aria-label="Export contacts to CSV"
+                  >
+                    <Download className="w-4 h-4" />
+                  </button>
+                )}
                 <button
                   onClick={() => setShowImportModal(true)}
                   className="p-1.5 rounded-lg border border-theme-border text-theme-secondary hover:bg-theme-base transition-colors cursor-pointer"
                   title="Bulk CSV Import"
+                  aria-label="Bulk CSV import"
                 >
                   <Upload className="w-4 h-4" />
                 </button>
@@ -434,6 +503,54 @@ export default function ContactsModule() {
 
         {/* List Content */}
         <div className="flex-1 overflow-y-auto divide-y divide-theme-border">
+
+          {/* Boutinly Intelligence: duplicate detection banner */}
+          {activeTab === 'contacts' && duplicateGroups.length > 0 && (
+            <div className="mx-4 mt-3 mb-1 p-3 rounded-lg border border-warning/30 bg-warning-soft/60 flex items-center gap-3 animate-fade-in">
+              <AlertTriangle className="w-4 h-4 text-warning shrink-0" />
+              <div className="min-w-0 flex-1">
+                <p className="text-[11px] font-semibold text-warning">
+                  {duplicateGroups.reduce((n, g) => n + g.contacts.length, 0)} contacts look like duplicates
+                </p>
+                <p className="text-[10px] text-theme-secondary leading-relaxed">
+                  {duplicateGroups.length} group{duplicateGroups.length === 1 ? '' : 's'} match on email, phone, or name+domain. Merging keeps forecasts and timelines clean.
+                </p>
+              </div>
+              <button
+                onClick={() => openMergeForGroup(duplicateGroups[0])}
+                className="shrink-0 flex items-center gap-1 text-[11px] font-semibold text-warning hover:opacity-80 border border-warning/40 rounded-md px-2.5 py-1.5 cursor-pointer bg-theme-card/60 transition-colors"
+              >
+                <Shuffle className="w-3 h-3" /> Review first group
+              </button>
+            </div>
+          )}
+
+          {/* Bulk action bar (table view) */}
+          {activeTab === 'contacts' && selectedRowKeys.size > 0 && (
+            <div className="mx-4 mt-3 p-2.5 rounded-lg border border-theme-accent/30 bg-theme-accent-soft/60 flex items-center gap-3 animate-fade-in">
+              <span className="text-[11px] font-semibold text-theme-accent tabular-nums">
+                {selectedRowKeys.size} selected
+              </span>
+              <div className="ml-auto flex items-center gap-2">
+                <button
+                  onClick={() => {
+                    const selected = scopedContacts.filter(c => selectedRowKeys.has(c.id));
+                    handleExportContacts(selected);
+                  }}
+                  className="flex items-center gap-1 text-[11px] font-medium text-theme-accent border border-theme-accent/30 rounded-md px-2.5 py-1.5 hover:bg-theme-accent-soft cursor-pointer bg-transparent transition-colors"
+                >
+                  <Download className="w-3 h-3" /> Export
+                </button>
+                <button
+                  onClick={() => setConfirmBulkDelete(true)}
+                  className="flex items-center gap-1 text-[11px] font-medium text-danger border border-danger/30 rounded-md px-2.5 py-1.5 hover:bg-danger-soft cursor-pointer bg-transparent transition-colors"
+                >
+                  <Trash2 className="w-3 h-3" /> Delete
+                </button>
+              </div>
+            </div>
+          )}
+
           {activeTab === 'contacts' ? (
             filteredContacts.length === 0 ? (
               <div className="p-8 text-center text-xs text-theme-secondary font-sans">
@@ -446,6 +563,9 @@ export default function ContactsModule() {
                 rowKey={(c: any) => c.id}
                 pageSize={25}
                 density="compact"
+                selectable={!isReadOnly}
+                selectedKeys={selectedRowKeys}
+                onSelectionChange={setSelectedRowKeys}
               />
             ) : (
               filteredContacts.map(c => {
@@ -1147,6 +1267,21 @@ export default function ContactsModule() {
           </div>
         </div>
       )}
+
+      {/* MODAL: CONFIRM BULK DELETE CONTACTS */}
+      <ConfirmDialog
+        open={confirmBulkDelete}
+        onCancel={() => setConfirmBulkDelete(false)}
+        onConfirm={() => {
+          selectedRowKeys.forEach(id => deleteContact(id));
+          setSelectedRowKeys(new Set());
+          setConfirmBulkDelete(false);
+          toast.success('Contacts deleted', `${selectedRowKeys.size} removed`);
+        }}
+        title={`Delete ${selectedRowKeys.size} contact${selectedRowKeys.size === 1 ? '' : 's'}?`}
+        body="The selected contacts and their timelines will be permanently removed. This action cannot be undone."
+        confirmLabel="Delete selected"
+      />
 
     </div>
   );

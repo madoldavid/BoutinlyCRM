@@ -27,6 +27,19 @@ const envSchema = z.object({
   SES_REGION: z.string().default('us-east-1'),
   SES_ACCESS_KEY_ID: z.string().optional(),
   SES_SECRET_ACCESS_KEY: z.string().optional(),
+  // G-SEC-09: configurable account-lockout thresholds
+  LOCKOUT_MAX_FAILURES: z.coerce.number().int().min(1).max(100).default(5),
+  LOCKOUT_DURATION_MS: z.coerce.number().int().positive().default(15 * 60 * 1000),
+  LOCKOUT_WINDOW_MS: z.coerce.number().int().positive().default(30 * 60 * 1000),
+  // G-SEC-08 (subset): configurable password & session policy (defaults preserve current behavior)
+  PASSWORD_MIN_LENGTH: z.coerce.number().int().min(8).max(32).default(8),
+  PASSWORD_REQUIRE_COMPLEXITY: z.coerce.boolean().default(false),
+  ACCESS_TOKEN_TTL_SECONDS: z.coerce.number().int().min(60).max(24 * 60 * 60).default(15 * 60),
+  REFRESH_TOKEN_TTL_SECONDS: z.coerce.number().int().min(3600).default(7 * 24 * 60 * 60),
+  // G-DAT-12: idempotency-key replay window
+  IDEMPOTENCY_TTL_MS: z.coerce.number().int().positive().default(24 * 60 * 60 * 1000),
+  // G-AI-14 / G-OPS-06: startup flag seed, e.g. "ai.deal_scoring=off,email.campaigns=on"
+  FEATURE_FLAGS: z.string().optional(),
 });
 
 export type AppConfig = ReturnType<typeof loadConfig>;

@@ -17,6 +17,7 @@ import { authenticate } from './security/rbac.js';
 import type { AuthenticatedRequest } from './security/rbac.js';
 import { authLimiter, bootstrapLimiter, globalLimiter } from './security/rateLimiter.js';
 import { csrfProtection, parseCookies } from './security/csrf.js';
+import { idempotencyMiddleware } from './middleware/idempotency.js';
 import type { KeyManager } from './security/jwks.js';
 import type { AccountLockoutService } from './security/lockout.js';
 import type { TokenBlocklist } from './security/tokenBlocklist.js';
@@ -34,6 +35,8 @@ import { registerNotificationsRoutes } from './routes/notifications.routes.js';
 import { registerOidcRoutes } from './routes/oidc.routes.js';
 import { registerReportsRoutes } from './routes/reports.routes.js';
 import { registerTasksRoutes } from './routes/tasks.routes.js';
+import { registerFlagsRoutes } from './routes/flags.routes.js';
+import { FeatureFlagService } from './services/featureFlags.js';
 
 interface CreateAppOptions {
   config: AppConfig;
@@ -44,9 +47,12 @@ interface CreateAppOptions {
   lockoutService: AccountLockoutService;
   keyManager: KeyManager;
   tokenBlocklist: TokenBlocklist;
+  /** Optional injection (tests); defaults to an env-seeded instance. */
+  featureFlags?: FeatureFlagService;
 }
 
-export function createApp({ config, logger, repository, emailService, fileService, lockoutService, keyManager, tokenBlocklist }: CreateAppOptions) {
+export function createApp({ config, logger, repository, emailService, fileService, lockoutService, keyManager, tokenBlocklist, featureFlags }: CreateAppOptions) {
+  const flags = featureFlags ?? new FeatureFlagService(config.FEATURE_FLAGS);
   const app = express();
 
   app.disable('x-powered-by');
@@ -208,6 +214,9 @@ export function createApp({ config, logger, repository, emailService, fileServic
   // Apply auth rate limiter to all auth routes
   app.use('/api/auth', authLimiter.middleware);
 
+  // Idempotency-Key replay protection for POSTs that opt in (G-DAT-12)
+  app.use(idempotencyMiddleware({ ttlMs: config.IDEMPOTENCY_TTL_MS }));
+
   // Register all route modules
   registerAuthRoutes(app, config, repository, emailService, lockoutService, keyManager, tokenBlocklist);
   registerOidcRoutes(app, config, repository, logger);
@@ -223,6 +232,7 @@ export function createApp({ config, logger, repository, emailService, fileServic
   registerGdprRoutes(app, config, repository);
   registerAdminRoutes(app, config, repository);
   registerCalendarRoutes(app, config, repository, logger);
+  registerFlagsRoutes(app, config, repository, flags);
 
   app.use(notFoundHandler);
   app.use(createErrorHandler(logger));

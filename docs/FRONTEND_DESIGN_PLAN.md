@@ -73,3 +73,33 @@ Keep the footprint small and audited: `recharts` (charts), `@dnd-kit/core` + `@d
 ## Definition of Done (frontend)
 
 Every interactive element keyboard-reachable with a visible focus state; no raw `text-[Npx]` values outside the token scale; every mutation surfaces a toast; every async panel has skeleton + empty + error states; dark mode fully themed; Lighthouse accessibility ≥ 95; module bundles code-split.
+
+---
+
+## Implementation Status (updated August 2026)
+
+The design system and Phases 1–5 are substantially complete. Status per phase:
+
+| Area | Status | Notes |
+|------|--------|-------|
+| Design tokens (colors, typography scale, radius, elevation, motion, focus rings) | ✅ Done | `src/index.css` — 4 light themes + enterprise dark theme, no global `*` transition, `prefers-reduced-motion` support |
+| UI primitives (Button, Input, Select, Textarea, Modal w/ focus trap, ConfirmDialog, Badge, StatusDot, EmptyState, Skeleton, Avatar, KpiCard, Toast) | ✅ Done | `src/components/ui/` |
+| DataTable (sort, resize, pagination, density, bulk selection) | ✅ Done | `src/components/ui/DataTable.tsx` — selection wired into Contacts bulk actions |
+| Drag-and-drop kanban (@dnd-kit) | ✅ Done | Keyboard draggable (Space/Enter lift, arrow keys move) |
+| Charts (funnel, donut, trend, bar) | ✅ Done | `src/components/ui/charts.tsx` (dependency-free SVG) |
+| Command palette (⌘K) | ✅ Done | RBAC-scoped |
+| Code-splitting, skeletons, empty states, offline banner, error boundaries | ✅ Done | React.lazy per module |
+| Responsive shell (mobile overlay sidebar, card-list tables) | ✅ Done | |
+| **Global keyboard shortcuts + `?` cheatsheet** | ✅ Done (new) | `g`+`r/c/d/t/e/a` navigation, `n` new-record, ⌘K; `src/components/GlobalShortcuts.tsx` |
+| **Boutinly Intelligence** (explainable deal scoring, next-best actions, duplicate detection, forecast confidence) | ✅ Done (new) | See `docs/INTELLIGENCE_FEATURES.md` — engine in `src/ai/insights.ts` |
+| **Deals list view** | ✅ Done (new) | The List toggle previously had no view; now a sortable DataTable with score column + CSV export |
+| **CSV export** | ✅ Done (new) | Contacts (all/selected) + Deals, RFC-4180 with BOM; `src/utils/exportCsv.ts` |
+| **Bulk actions** | ✅ Done (new) | Contacts table: bulk delete (ConfirmDialog) + bulk export |
+| Replace `window.confirm` | ✅ Done | Deal delete now uses ConfirmDialog |
+| Virtualized long lists (@tanstack/react-virtual) | ⏳ Deferred | Fine at seed scale; revisit at 50k+ records (plan said keep footprint small) |
+| Visual regression tests (Playwright) + axe-core | ⏳ Deferred | Tracked in ENTERPRISE_READINESS_PLAN Phase 6 CI work |
+
+Definition-of-Done checklist: every interactive element keyboard-reachable with
+visible focus ✅ (focus-visible rings + aria labels + keyboard kanban); no raw
+`text-[Npx]` outside token scale ✅; mutations surface toasts ✅; async panels have
+skeleton/empty/error states ✅; dark mode fully themed ✅; modules code-split ✅.

@@ -60,7 +60,11 @@ const fileService = createFileService({
   s3SecretAccessKey: process.env.S3_SECRET_ACCESS_KEY,
 }, logger);
 
-const lockoutService = new AccountLockoutService(logger);
+const lockoutService = new AccountLockoutService(logger, {
+  maxFailedAttempts: config.LOCKOUT_MAX_FAILURES,
+  lockoutDurationMs: config.LOCKOUT_DURATION_MS,
+  windowMs: config.LOCKOUT_WINDOW_MS,
+});
 const keyManager = new KeyManager(config.JWT_SECRET);
 const tokenBlocklist = new InMemoryTokenBlocklist();
 

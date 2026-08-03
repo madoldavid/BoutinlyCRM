@@ -11,7 +11,7 @@ import type { AppConfig } from '../config.js';
 import { ApiError, asyncHandler } from '../errors.js';
 import type { CrmRepository } from '../repositories/crmRepository.js';
 import { hashPassword } from '../security/password.js';
-import { issueToken, issueRefreshToken, ACCESS_TOKEN_TTL } from '../security/token.js';
+import { issueToken, issueRefreshToken } from '../security/token.js';
 import { OidcService } from '../services/oidcService.js';
 import type { AppLogger } from '../logger.js';
 import type { User } from '../../types.js';
@@ -121,8 +121,8 @@ export function registerOidcRoutes(
       }
 
       const principal = makePrincipal(user);
-      const token = issueToken(principal, config.JWT_SECRET, ACCESS_TOKEN_TTL);
-      const refreshToken = issueRefreshToken(principal, config.JWT_SECRET);
+      const token = issueToken(principal, config.JWT_SECRET, config.ACCESS_TOKEN_TTL_SECONDS);
+      const refreshToken = issueRefreshToken(principal, config.JWT_SECRET, config.REFRESH_TOKEN_TTL_SECONDS);
 
       await repository.addAuditLog({
         user_id: user.id,
