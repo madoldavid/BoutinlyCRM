@@ -8,7 +8,9 @@ import { useCRM } from '../store';
 import { Contact, Account, UserRole } from '../types';
 import { DataTable, type DataTableColumn } from './ui/DataTable';
 import { useSavedViews, ViewSwitcher, type SavedView } from './ui/SavedViews';
-import { ConfirmDialog, toast } from './ui';
+import { ConfirmDialog, toast, RecordDetailPage, ActivityTimeline } from './ui';
+import { FieldRow } from './ui/RecordDetailPage';
+import type { RecordDetailPageProps } from './ui';
 import { NEW_RECORD_EVENT, SELECT_ENTITY_EVENT, type SelectEntityDetail } from './GlobalShortcuts';
 import { exportCsv } from '../utils/exportCsv';
 import { findDuplicateContacts } from '../ai/insights';
@@ -35,7 +37,10 @@ import {
   LayoutGrid,
   Download,
   AlertTriangle,
-  Printer
+  Printer,
+  Maximize2,
+  DollarSign,
+  Clock,
 } from 'lucide-react';
 
 export default function ContactsModule() {
@@ -45,6 +50,7 @@ export default function ContactsModule() {
     contacts,
     getScopedContacts,
     getScopedAccounts,
+    getScopedDeals,
     addContact,
     deleteContact,
     mergeContacts,
@@ -53,6 +59,7 @@ export default function ContactsModule() {
     customFields,
     activities,
     addActivity,
+    deals,
   } = useCRM();
 
   const [activeTab, setActiveTab] = useState<'contacts' | 'accounts'>('contacts');
@@ -85,6 +92,8 @@ export default function ContactsModule() {
   // Selection
   const [selectedContactId, setSelectedContactId] = useState<string | null>(null);
   const [selectedAccountId, setSelectedAccountId] = useState<string | null>(null);
+  const [fullContactDetail, setFullContactDetail] = useState<string | null>(null);
+  const [fullAccountDetail, setFullAccountDetail] = useState<string | null>(null);
 
   // Timeline note state
   const [timelineNote, setTimelineNote] = useState('');
@@ -405,6 +414,107 @@ export default function ContactsModule() {
     { key: 'tags', header: 'Tags', render: (c) => c.tags?.join(', ') || '—' },
   ];
 
+  if (fullContactDetail) {
+    const contact = contacts.find(c => c.id === fullContactDetail);
+    if (contact) {
+      const company = scopedAccounts.find(a => a.id === contact.account_id);
+      const owner = users.find(u => u.id === contact.owner_id);
+      const contactActivities = activities.filter(a => a.contact_id === contact.id);
+
+      return (
+        <RecordDetailPage
+          title={`${contact.first_name} ${contact.last_name}`}
+          subtitle={`${contact.title} at ${company?.name || 'Unassigned'}`}
+          onBack={() => setFullContactDetail(null)}
+          users={users}
+          activities={contactActivities}
+          actions={
+            <button onClick={printRecord} className="p-1.5 text-theme-secondary hover:text-theme-primary rounded hover:bg-theme-hover transition-colors cursor-pointer bg-transparent border-none" title="Print / PDF">
+              <Printer className="w-4 h-4" />
+            </button>
+          }
+        >
+          <div className="space-y-0">
+            <FieldRow label="Email" value={<a href={`mailto:${contact.email}`} className="text-theme-accent hover:underline">{contact.email}</a>} />
+            <FieldRow label="Phone" value={contact.phone} />
+            <FieldRow label="Title" value={contact.title} />
+            <FieldRow label="LinkedIn" value={contact.linkedin_url ? <a href={contact.linkedin_url} target="_blank" rel="noreferrer" className="text-theme-accent hover:underline">View Profile</a> : undefined} />
+            <FieldRow label="Account" value={company?.name || '—'} />
+            <FieldRow label="Owner" value={owner?.name || 'Unassigned'} />
+            <FieldRow label="Tags" value={contact.tags.length > 0 ? (
+              <span className="flex flex-wrap gap-1">{contact.tags.map(t => <span key={t} className="bg-theme-accent-soft text-theme-accent px-1.5 py-0.5 rounded text-2xs font-medium">#{t}</span>)}</span>
+            ) : undefined} />
+            <FieldRow label="Created" value={formatDateTime(contact.created_at, currentUser?.timezone)} />
+            {customFields.filter(f => f.entity_type === 'contact' && f.is_visible).map(f => (
+              <FieldRow key={f.id} label={f.label} value={contact.custom_fields[f.key]?.toString() || '—'} />
+            ))}
+            {contact.unsubscribed && (
+              <FieldRow label="Status" value={<span className="text-danger font-medium">Unsubscribed</span>} />
+            )}
+          </div>
+        </RecordDetailPage>
+      );
+    }
+  }
+
+  if (fullAccountDetail) {
+    const account = scopedAccounts.find(a => a.id === fullAccountDetail);
+    if (account) {
+      const owner = users.find(u => u.id === account.owner_id);
+      const accountContacts = contacts.filter(c => c.account_id === account.id);
+      const accountActivities = activities.filter(a => accountContacts.some(c => c.id === a.contact_id));
+
+      return (
+        <RecordDetailPage
+          title={account.name}
+          subtitle={`${account.industry} · ${account.size} employees`}
+          onBack={() => setFullAccountDetail(null)}
+          users={users}
+          activities={accountActivities}
+          tabs={[
+            {
+              id: 'contacts',
+              label: 'Contacts',
+              count: accountContacts.length,
+              content: (
+                <div className="divide-y divide-theme-border">
+                  {accountContacts.length === 0 ? (
+                    <p className="text-xs text-theme-secondary py-4 text-center">No contacts associated</p>
+                  ) : (
+                    accountContacts.map(c => (
+                      <div key={c.id} className="flex items-center justify-between py-2.5">
+                        <div>
+                          <p className="text-xs font-semibold text-theme-primary">{c.first_name} {c.last_name}</p>
+                          <p className="text-2xs text-theme-secondary">{c.title}</p>
+                        </div>
+                        <button onClick={() => { setFullAccountDetail(null); setActiveTab('contacts'); setSelectedContactId(c.id); }} className="text-2xs text-theme-accent hover:opacity-80 font-medium cursor-pointer bg-transparent border-none">View</button>
+                      </div>
+                    ))
+                  )}
+                </div>
+              ),
+            },
+          ]}
+        >
+          <div className="space-y-0">
+            <FieldRow label="Industry" value={account.industry} />
+            <FieldRow label="Company Size" value={account.size} />
+            <FieldRow label="Domain" value={account.domain} />
+            <FieldRow label="Website" value={account.website ? <a href={account.website} target="_blank" rel="noreferrer" className="text-theme-accent hover:underline">{account.website}</a> : undefined} />
+            <FieldRow label="ARR" value={`$${account.arr.toLocaleString()}`} />
+            <FieldRow label="Owner" value={owner?.name || 'Unassigned'} />
+            <FieldRow label="Tags" value={account.tags.length > 0 ? (
+              <span className="flex flex-wrap gap-1">{account.tags.map(t => <span key={t} className="bg-theme-accent-soft text-theme-accent px-1.5 py-0.5 rounded text-2xs font-medium">#{t}</span>)}</span>
+            ) : undefined} />
+            {customFields.filter(f => f.entity_type === 'account' && f.is_visible).map(f => (
+              <FieldRow key={f.id} label={f.label} value={account.custom_fields[f.key]?.toString() || '—'} />
+            ))}
+          </div>
+        </RecordDetailPage>
+      );
+    }
+  }
+
   return (
     <div className="flex-1 flex overflow-hidden bg-theme-base text-theme-primary">
       
@@ -715,6 +825,14 @@ export default function ContactsModule() {
                     </button>
                   )}
                   <button
+                    onClick={() => setFullContactDetail(activeContact.id)}
+                    className="p-1.5 text-theme-secondary hover:text-theme-accent rounded hover:bg-theme-base transition-all cursor-pointer bg-transparent border-none"
+                    aria-label={`View full record for ${activeContact.first_name} ${activeContact.last_name}`}
+                    title="View Full Record"
+                  >
+                    <Maximize2 className="w-4 h-4" />
+                  </button>
+                  <button
                     onClick={printRecord}
                     className="p-1.5 text-theme-secondary hover:text-theme-primary rounded hover:bg-theme-base transition-all cursor-pointer bg-transparent border-none"
                     aria-label={`Print or save ${activeContact.first_name} ${activeContact.last_name} as PDF`}
@@ -865,6 +983,14 @@ export default function ContactsModule() {
                       <Trash2 className="w-4 h-4" />
                     </button>
                   )}
+                  <button
+                    onClick={() => setFullAccountDetail(activeAccount.id)}
+                    className="p-1.5 text-theme-secondary hover:text-theme-accent rounded hover:bg-theme-base transition-all cursor-pointer bg-transparent border-none"
+                    aria-label={`View full record for ${activeAccount.name}`}
+                    title="View Full Record"
+                  >
+                    <Maximize2 className="w-4 h-4" />
+                  </button>
                 </div>
 
                 <div className="grid grid-cols-2 gap-3 mt-4 text-[11px] text-theme-secondary border-t border-theme-border pt-3">

@@ -10,8 +10,12 @@ import LoginPage from './components/LoginPage';
 import CommandPalette from './components/CommandPalette';
 import GlobalShortcuts, { dispatchNewRecord } from './components/GlobalShortcuts';
 import { ErrorBoundary } from './components/ErrorBoundary';
-import { ToastViewport, Skeleton } from './components/ui';
-import { ShieldAlert, Loader2, WifiOff, Search, Menu, Plus, HelpCircle } from 'lucide-react';
+import { ToastViewport, Skeleton, AppLauncher, getDefaultApps } from './components/ui';
+import {
+  ShieldAlert, Loader2, WifiOff, Search, Menu, Plus, HelpCircle,
+  LayoutDashboard, Users, Briefcase, CheckSquare, Mail, Sliders,
+} from 'lucide-react';
+import { UserRole } from './types';
 
 const ReportsModule = React.lazy(() => import('./components/ReportsModule'));
 const ContactsModule = React.lazy(() => import('./components/ContactsModule'));
@@ -58,7 +62,7 @@ function OfflineBanner({ error }: { error: string }) {
 }
 
 function DashboardLayout() {
-  const { activeModule, currentUser, logout, apiError } = useCRM();
+  const { activeModule, setActiveModule, currentUser, logout, apiError } = useCRM();
   const [mobileSidebarOpen, setMobileSidebarOpen] = React.useState(false);
 
   // FR-AUTH-008: Immediate session lock upon user deactivation
@@ -126,24 +130,18 @@ function DashboardLayout() {
     }
   };
 
-  const getModuleTitle = () => {
-    switch (activeModule) {
-      case 'dashboard':
-        return 'Reports & Analytics Dashboard';
-      case 'contacts':
-        return 'Contacts & Accounts';
-      case 'deals':
-        return 'Sales Pipeline & Opportunities';
-      case 'tasks':
-        return 'Tasks & Activity Timeline';
-      case 'emails':
-        return 'Email Outbox & Templates';
-      case 'admin':
-        return 'Boutinly CRM System Administration';
-      default:
-        return 'Boutinly';
-    }
-  };
+  const enterpriseTabs = [
+    { id: 'dashboard', label: 'Dashboards', icon: LayoutDashboard },
+    { id: 'contacts', label: 'Contacts', icon: Users },
+    { id: 'deals', label: 'Pipeline', icon: Briefcase },
+    { id: 'tasks', label: 'Tasks', icon: CheckSquare },
+    { id: 'emails', label: 'Email', icon: Mail },
+    ...(currentUser?.role === UserRole.SUPER_ADMIN || currentUser?.role === UserRole.ADMIN
+      ? [{ id: 'admin', label: 'Admin', icon: Sliders }]
+      : []),
+  ];
+
+  const apps = React.useMemo(() => getDefaultApps(activeModule, (id) => setActiveModule(id)), [activeModule, setActiveModule]);
 
   return (
     <div className="flex h-screen w-screen overflow-hidden font-sans bg-theme-base text-theme-primary">
@@ -164,66 +162,92 @@ function DashboardLayout() {
         {/* Offline/Error Banner */}
         {apiError && <OfflineBanner error={apiError} />}
 
-        {/* Global Security / Status Top Bar */}
-        <header className="h-14 bg-theme-card border-b border-theme-border px-4 sm:px-6 flex items-center justify-between shrink-0 select-none">
-          <div className="flex items-center gap-2 min-w-0">
-            <button
-              className="lg:hidden p-1.5 -ml-1 text-theme-secondary hover:text-theme-primary rounded cursor-pointer bg-transparent border-none"
-              onClick={() => setMobileSidebarOpen(true)}
-              aria-label="Open navigation menu"
-            >
-              <Menu className="w-5 h-5" />
-            </button>
-            <span className="text-xs text-theme-secondary font-sans hidden sm:block">Boutinly</span>
-            <span className="text-theme-secondary/50 text-xs hidden sm:block" aria-hidden="true">/</span>
-            <h2 className="text-sm font-semibold text-theme-primary font-sans truncate">
-              {getModuleTitle()}
-            </h2>
+        {/* Enterprise Header Bar */}
+        <header className="shrink-0 bg-theme-card border-b border-theme-border select-none">
+          {/* Top row: breadcrumb + global actions */}
+          <div className="h-12 px-4 sm:px-6 flex items-center justify-between">
+            <div className="flex items-center gap-2 min-w-0">
+              <button
+                className="lg:hidden p-1.5 -ml-1 text-theme-secondary hover:text-theme-primary rounded cursor-pointer bg-transparent border-none"
+                onClick={() => setMobileSidebarOpen(true)}
+                aria-label="Open navigation menu"
+              >
+                <Menu className="w-5 h-5" />
+              </button>
+              <span className="text-xs text-theme-secondary font-sans font-medium hidden sm:block">Boutinly CRM</span>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => window.dispatchEvent(new Event('boutinly:open-palette'))}
+                className="flex items-center gap-2 text-xs text-theme-secondary bg-theme-inset hover:bg-theme-hover border border-theme-border rounded-md px-3 py-1.5 cursor-pointer transition-colors w-44 sm:w-52"
+                aria-label="Open global search (Ctrl+K)"
+              >
+                <Search className="w-3.5 h-3.5 shrink-0" />
+                <span className="flex-1 text-left truncate">Search…</span>
+                <kbd className="text-[9px] bg-theme-card border border-theme-border rounded px-1 py-px font-sans shrink-0">⌘K</kbd>
+              </button>
+              <button
+                onClick={dispatchNewRecord}
+                className="hidden sm:flex items-center gap-1.5 text-xs font-medium text-white bg-theme-accent hover:opacity-90 rounded-md px-3 py-1.5 cursor-pointer transition-opacity shadow-card"
+                aria-label="Create new record (N)"
+                title="New record (N)"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                New
+              </button>
+              <button
+                onClick={() => window.dispatchEvent(new Event('boutinly:open-shortcuts'))}
+                className="p-1.5 text-theme-secondary hover:text-theme-primary hover:bg-theme-hover rounded-md cursor-pointer bg-transparent border-none"
+                aria-label="Keyboard shortcuts (?)"
+                title="Keyboard shortcuts (?)"
+              >
+                <HelpCircle className="w-4 h-4" />
+              </button>
+              <AppLauncher
+                apps={apps}
+                activeAppId={activeModule}
+                onSelect={(id) => setActiveModule(id)}
+                currentUserRole={currentUser?.role ?? 'viewer'}
+              />
+              <div
+                className="w-7 h-7 rounded-full bg-theme-accent-soft text-theme-accent flex items-center justify-center text-xs font-bold border border-theme-border"
+                title={currentUser?.name}
+                aria-label={`Signed in as ${currentUser?.name}`}
+              >
+                {currentUser?.name?.charAt(0)}
+              </div>
+            </div>
           </div>
 
-          <div className="flex items-center gap-3">
-            <button
-              onClick={() => window.dispatchEvent(new Event('boutinly:open-palette'))}
-              className="hidden sm:flex items-center gap-2 text-xs text-theme-secondary bg-theme-inset hover:bg-theme-hover border border-theme-border rounded-md px-3 py-1.5 cursor-pointer transition-colors w-52"
-              aria-label="Open global search (Ctrl+K)"
-            >
-              <Search className="w-3.5 h-3.5" />
-              <span className="flex-1 text-left">Search…</span>
-              <kbd className="text-[9px] bg-theme-card border border-theme-border rounded px-1 py-px font-sans">⌘K</kbd>
-            </button>
-            <button
-              onClick={dispatchNewRecord}
-              className="hidden md:flex items-center gap-1.5 text-xs font-medium text-white bg-theme-accent hover:opacity-90 rounded-md px-3 py-1.5 cursor-pointer transition-opacity shadow-card"
-              aria-label="Create new record (N)"
-              title="New record (N)"
-            >
-              <Plus className="w-3.5 h-3.5" />
-              New
-            </button>
-            <span className="text-xs text-theme-secondary hidden md:block">
-              {currentUser?.role?.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}
-            </span>
-            <button
-              onClick={() => window.dispatchEvent(new Event('boutinly:open-shortcuts'))}
-              className="p-1.5 text-theme-secondary hover:text-theme-primary hover:bg-theme-hover rounded-md cursor-pointer bg-transparent border-none"
-              aria-label="Keyboard shortcuts (?)"
-              title="Keyboard shortcuts (?)"
-            >
-              <HelpCircle className="w-4 h-4" />
-            </button>
-            <div
-              className="w-7 h-7 rounded-full bg-theme-accent-soft text-theme-accent flex items-center justify-center text-xs font-bold border border-theme-border"
-              title={currentUser?.name}
-              aria-label={`Signed in as ${currentUser?.name}`}
-            >
-              {currentUser?.name?.charAt(0)}
+          {/* Bottom row: enterprise tabs navigation */}
+          <div className="flex items-center border-t border-theme-border overflow-x-auto scrollbar-none">
+            <div className="flex px-2">
+              {enterpriseTabs.map(tab => (
+                <button
+                  key={tab.id}
+                  onClick={() => setActiveModule(tab.id)}
+                  className={`flex items-center gap-1.5 px-3 py-2.5 text-xs font-medium font-sans whitespace-nowrap cursor-pointer transition-colors relative ${
+                    activeModule === tab.id
+                      ? 'text-theme-accent'
+                      : 'text-theme-secondary hover:text-theme-primary hover:bg-theme-hover/50'
+                  }`}
+                  aria-current={activeModule === tab.id ? 'page' : undefined}
+                >
+                  <tab.icon className="w-3.5 h-3.5" />
+                  {tab.label}
+                  {activeModule === tab.id && (
+                    <span className="absolute bottom-0 left-2 right-2 h-0.5 bg-theme-accent rounded-full" />
+                  )}
+                </button>
+              ))}
             </div>
           </div>
         </header>
 
         {/* Dynamic Inner Sub-Module Workspace */}
         <div className="flex-1 overflow-hidden flex flex-col bg-theme-base">
-          <ErrorBoundary moduleName={getModuleTitle()}>
+          <ErrorBoundary moduleName={enterpriseTabs.find(t => t.id === activeModule)?.label || 'Module'}>
             <Suspense fallback={<ModuleSkeleton />}>
               {renderActiveModule()}
             </Suspense>

@@ -6,7 +6,9 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useCRM } from '../store';
 import { Deal, UserRole, DealLineItem } from '../types';
-import { toast, ConfirmDialog } from './ui';
+import { toast, ConfirmDialog, RecordDetailPage, ActivityTimeline } from './ui';
+import { FieldRow } from './ui/RecordDetailPage';
+import type { RecordDetailPageProps } from './ui';
 import { DataTable, type DataTableColumn } from './ui/DataTable';
 import { useSavedViews, ViewSwitcher, type SavedView } from './ui/SavedViews';
 import KanbanBoard from './ui/KanbanBoard';
@@ -43,7 +45,11 @@ import {
   User,
   Calendar,
   AlertTriangle,
-  Printer
+  Printer,
+  Maximize2,
+  Phone,
+  Mail,
+  Clock,
 } from 'lucide-react';
 
 export default function PipelineModule() {
@@ -64,6 +70,7 @@ export default function PipelineModule() {
     setActivePipelineId,
     activities,
     tasks,
+    contacts,
   } = useCRM();
 
   // "n" shortcut → open create-deal modal
@@ -135,6 +142,7 @@ export default function PipelineModule() {
   
   // Selection / Drawer
   const [selectedDealId, setSelectedDealId] = useState<string | null>(null);
+  const [fullDealDetail, setFullDealDetail] = useState<string | null>(null);
 
   // Kanban drag-and-drop state
   const [dragDealId, setDragDealId] = useState<string | null>(null);
@@ -288,6 +296,171 @@ export default function PipelineModule() {
   };
 
   const isReadOnly = currentUser.role === UserRole.VIEWER;
+
+  if (fullDealDetail) {
+    const deal = scopedDeals.find(d => d.id === fullDealDetail);
+    if (deal) {
+      const dealAccount = accounts.find(a => a.id === deal.account_id);
+      const dealOwner = users.find(u => u.id === deal.owner_id);
+      const dealStage = stages.find(s => s.id === deal.stage_id);
+      const dealActivities = activities.filter(a => a.deal_id === deal.id);
+      const dealScore = scoreMap.get(deal.id);
+      const relatedTasks = tasks.filter(t => t.deal_id === deal.id);
+      const relatedContacts = contacts.filter(c => c.account_id === deal.account_id);
+
+      return (
+        <RecordDetailPage
+          title={deal.name}
+          subtitle={`${dealAccount?.name || 'Unassigned'} · ${dealStage?.name || 'Unknown Stage'}`}
+          status={{
+            label: dealStage?.name || 'Unknown',
+            tone: dealStage?.type === 'won' ? 'success' : dealStage?.type === 'lost' ? 'danger' : 'info',
+          }}
+          onBack={() => setFullDealDetail(null)}
+          users={users}
+          activities={dealActivities}
+          highlightsPanel={
+            <div>
+              <div className="flex items-center justify-between mb-1">
+                <span className="text-2xs text-theme-secondary font-sans">Deal Value</span>
+                <span className="text-base font-bold text-theme-primary tnum" data-metric>${deal.value.toLocaleString()}</span>
+              </div>
+              <div className="h-1.5 bg-theme-inset rounded-full overflow-hidden mt-1 mb-3">
+                <div className="h-full bg-theme-accent rounded-full transition-all" style={{ width: `${dealScore?.score ?? dealStage?.probability ?? 0}%` }} />
+              </div>
+              <div className="grid grid-cols-2 gap-2 mt-3">
+                <div className="bg-theme-inset rounded-lg p-2 text-center">
+                  <span className="text-2xs text-theme-secondary block font-sans">Probability</span>
+                  <span className="text-sm font-bold text-theme-primary tnum">{dealScore?.score ?? dealStage?.probability ?? 0}%</span>
+                  {dealScore && (
+                    <span className={`text-[10px] font-medium`} style={{ color: `var(--${GRADE_META[dealScore.grade]?.tone === 'warning' ? 'warning' : GRADE_META[dealScore.grade]?.tone === 'danger' ? 'danger' : GRADE_META[dealScore.grade]?.tone === 'info' ? 'info' : 'success'})` }}>{GRADE_META[dealScore.grade]?.label}</span>
+                  )}
+                </div>
+                <div className="bg-theme-inset rounded-lg p-2 text-center">
+                  <span className="text-2xs text-theme-secondary block font-sans">Total Items</span>
+                  <span className="text-sm font-bold text-theme-primary tnum">{deal.line_items.length}</span>
+                </div>
+              </div>
+            </div>
+          }
+          tabs={[
+            {
+              id: 'items',
+              label: 'Line Items',
+              count: deal.line_items.length,
+              content: (
+                <div>
+                  {deal.line_items.length === 0 ? (
+                    <p className="text-xs text-theme-secondary py-4 text-center">No line items</p>
+                  ) : (
+                    <table className="w-full text-xs">
+                      <thead>
+                        <tr className="border-b border-theme-border">
+                          <th className="text-left py-2 font-semibold text-theme-secondary text-2xs uppercase tracking-wider font-sans">Product</th>
+                          <th className="text-center py-2 font-semibold text-theme-secondary text-2xs uppercase tracking-wider font-sans">Qty</th>
+                          <th className="text-right py-2 font-semibold text-theme-secondary text-2xs uppercase tracking-wider font-sans">Price</th>
+                          <th className="text-right py-2 font-semibold text-theme-secondary text-2xs uppercase tracking-wider font-sans">Total</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {deal.line_items.map(item => (
+                          <tr key={item.id} className="border-b border-theme-border/50">
+                            <td className="py-2 text-theme-primary font-medium">{item.product_name}</td>
+                            <td className="py-2 text-center text-theme-secondary">{item.quantity}</td>
+                            <td className="py-2 text-right text-theme-secondary">${item.unit_price.toLocaleString()}</td>
+                            <td className="py-2 text-right text-theme-primary font-semibold tnum">${item.total.toLocaleString()}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  )}
+                </div>
+              ),
+            },
+            {
+              id: 'contacts',
+              label: 'Related Contacts',
+              count: relatedContacts.length,
+              content: (
+                <div className="divide-y divide-theme-border">
+                  {relatedContacts.length === 0 ? (
+                    <p className="text-xs text-theme-secondary py-4 text-center">No contacts at this account</p>
+                  ) : (
+                    relatedContacts.map(c => (
+                      <div key={c.id} className="flex items-center justify-between py-2.5">
+                        <div>
+                          <p className="text-xs font-semibold text-theme-primary">{c.first_name} {c.last_name}</p>
+                          <p className="text-2xs text-theme-secondary">{c.title} · {c.email}</p>
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
+              ),
+            },
+            {
+              id: 'tasks',
+              label: 'Tasks',
+              count: relatedTasks.length,
+              content: (
+                <div className="divide-y divide-theme-border">
+                  {relatedTasks.length === 0 ? (
+                    <p className="text-xs text-theme-secondary py-4 text-center">No tasks linked</p>
+                  ) : (
+                    relatedTasks.map(t => (
+                      <div key={t.id} className="flex items-center justify-between py-2.5">
+                        <div>
+                          <p className="text-xs font-medium text-theme-primary">{t.title}</p>
+                          <p className="text-2xs text-theme-secondary">{t.type} · Due {new Date(t.due_at).toLocaleDateString()}</p>
+                        </div>
+                        <span className={`text-2xs font-sans px-1.5 py-0.5 rounded-full ${t.completed_at ? 'bg-success-soft text-success' : t.priority === 'high' ? 'bg-danger-soft text-danger' : 'bg-theme-inset text-theme-secondary'}`}>
+                          {t.completed_at ? 'Done' : t.priority}
+                        </span>
+                      </div>
+                    ))
+                  )}
+                </div>
+              ),
+            },
+          ]}
+        >
+          <div className="space-y-0">
+            <FieldRow label="Account" value={dealAccount?.name || '—'} />
+            <FieldRow label="Stage" value={dealStage?.name} />
+            <FieldRow label="Probability" value={`${dealScore?.score ?? dealStage?.probability ?? 0}%`} />
+            <FieldRow label="Expected Close" value={
+              <span className={new Date(deal.close_date) < new Date() ? 'text-danger' : ''}>
+                {new Date(deal.close_date).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })}
+                <span className="block text-2xs text-theme-secondary">{relativeDueLabel(deal.close_date, currentUser?.timezone).text}</span>
+              </span>
+            } />
+            <FieldRow label="Owner" value={dealOwner?.name || 'Unassigned'} />
+            <FieldRow label="Currency" value={deal.currency} />
+            <FieldRow label="Stage Entered" value={formatDateTime(deal.stage_entered_at, currentUser?.timezone)} />
+            {deal.won_at && <FieldRow label="Won At" value={formatDateTime(deal.won_at, currentUser?.timezone)} />}
+            {deal.lost_at && <FieldRow label="Lost At" value={formatDateTime(deal.lost_at, currentUser?.timezone)} />}
+            {deal.lost_reason && <FieldRow label="Lost Reason" value={<span className="text-danger">{deal.lost_reason}</span>} />}
+            {customFields.filter(f => f.entity_type === 'deal' && f.is_visible).map(f => (
+              <FieldRow key={f.id} label={f.label} value={deal.custom_fields[f.key]?.toString() || '—'} />
+            ))}
+            {dealScore && (
+              <>
+                <FieldRow label="Boutinly Score" value={
+                  <span className={`font-bold ${dealScore.score >= 75 ? 'text-success' : dealScore.score >= 50 ? 'text-warning' : 'text-danger'}`}>
+                    {dealScore.score}
+                  </span>
+                } />
+                <FieldRow label="Confidence" value={`${dealScore.score >= 75 ? 'High' : dealScore.score >= 50 ? 'Medium' : 'Low'}`} />
+                <FieldRow label="Factors" value={
+                  <span className="text-2xs">{dealScore.factors.join(' · ')}</span>
+                } />
+              </>
+            )}
+          </div>
+        </RecordDetailPage>
+      );
+    }
+  }
 
   return (
     <div className="flex-1 flex overflow-hidden bg-theme-base text-theme-primary">
@@ -754,6 +927,14 @@ export default function PipelineModule() {
                   title="Print / Save as PDF"
                 >
                   <Printer className="w-4.5 h-4.5" />
+                </button>
+                <button
+                  onClick={() => setFullDealDetail(activeDeal.id)}
+                  className="p-1.5 text-theme-secondary hover:text-theme-accent rounded hover:bg-theme-base transition-colors cursor-pointer bg-transparent border-none"
+                  aria-label={`View full record for ${activeDeal.name}`}
+                  title="View Full Record"
+                >
+                  <Maximize2 className="w-4.5 h-4.5" />
                 </button>
               </div>
 

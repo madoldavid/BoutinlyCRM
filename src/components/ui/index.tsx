@@ -10,6 +10,12 @@ import React, { useEffect, useRef, useCallback } from 'react';
 import { Loader2, X, AlertTriangle } from 'lucide-react';
 
 export { toast, ToastViewport } from './toast';
+export { default as ActivityTimeline } from './ActivityTimeline';
+export { default as RecordDetailPage, RelatedList, FieldRow, HighlightsPanel, DetailTabs } from './RecordDetailPage';
+export type { RecordDetailPageProps } from './RecordDetailPage';
+export { default as DashboardWidgetGrid } from './DashboardWidgetGrid';
+export type { DashboardWidget } from './DashboardWidgetGrid';
+export { default as AppLauncher, getDefaultApps } from './AppLauncher';
 
 /* ────────────────────────── Button ────────────────────────── */
 

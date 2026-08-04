@@ -23,6 +23,7 @@ import {
   ShieldCheck
 } from 'lucide-react';
 import { FunnelChart, DonutChart, TrendLine } from './ui/charts';
+import DashboardWidgetGrid, { type DashboardWidget } from './ui/DashboardWidgetGrid';
 import { buildNextBestActions, findDuplicateContacts, type InsightContext } from '../ai/insights';
 import { dispatchSelectEntity } from './GlobalShortcuts';
 import SetupChecklist from './SetupChecklist';
@@ -225,6 +226,185 @@ export default function ReportsModule() {
     setReportResult(results);
   };
 
+  const dashboardWidgets = useMemo<DashboardWidget[]>(() => [
+    {
+      id: 'kpi-open-value',
+      type: 'kpi',
+      title: 'Open Pipeline Value',
+      span: 'sm',
+      content: (
+        <div className="p-4">
+          <div className="flex items-start justify-between mb-2">
+            <span className="text-2xs text-theme-secondary uppercase tracking-wider font-sans">Open Pipeline</span>
+            <DollarSign className="w-4 h-4 text-theme-accent/60" />
+          </div>
+          <p className="text-xl font-bold text-theme-primary tnum" data-metric>${totalOpenValue.toLocaleString()}</p>
+          <p className="text-2xs text-theme-secondary mt-1 font-sans">{openDeals.length} active deals</p>
+        </div>
+      ),
+    },
+    {
+      id: 'kpi-won-revenue',
+      type: 'kpi',
+      title: 'Closed Won Revenue',
+      span: 'sm',
+      content: (
+        <div className="p-4">
+          <div className="flex items-start justify-between mb-2">
+            <span className="text-2xs text-theme-secondary uppercase tracking-wider font-sans">Closed Won</span>
+            <TrendingUp className="w-4 h-4 text-success/60" />
+          </div>
+          <p className="text-xl font-bold text-theme-primary tnum" data-metric>${totalWonValue.toLocaleString()}</p>
+          <p className="text-2xs text-theme-secondary mt-1 font-sans">${personalQuota.toLocaleString()} quota</p>
+        </div>
+      ),
+    },
+    {
+      id: 'kpi-winrate',
+      type: 'kpi',
+      title: 'Win Rate',
+      span: 'sm',
+      content: (
+        <div className="p-4">
+          <div className="flex items-start justify-between mb-2">
+            <span className="text-2xs text-theme-secondary uppercase tracking-wider font-sans">Win Rate</span>
+            <Percent className="w-4 h-4 text-info/60" />
+          </div>
+          <p className="text-xl font-bold text-theme-primary tnum" data-metric>{winRate.toFixed(1)}%</p>
+          <p className="text-2xs text-theme-secondary mt-1 font-sans">{wonDeals.length} won / {lostDeals.length} lost</p>
+        </div>
+      ),
+    },
+    {
+      id: 'kpi-activities',
+      type: 'kpi',
+      title: 'Activities',
+      span: 'sm',
+      content: (
+        <div className="p-4">
+          <div className="flex items-start justify-between mb-2">
+            <span className="text-2xs text-theme-secondary uppercase tracking-wider font-sans">Activities</span>
+            <ListTodo className="w-4 h-4 text-warning/60" />
+          </div>
+          <p className="text-xl font-bold text-theme-primary tnum" data-metric>{scopedActivities.length}</p>
+          <p className="text-2xs text-theme-secondary mt-1 font-sans">Calls, notes, emails</p>
+        </div>
+      ),
+    },
+    {
+      id: 'chart-funnel',
+      type: 'chart',
+      title: 'Pipeline Funnel',
+      span: 'md',
+      content: (
+        <div className="p-4">
+          <FunnelChart data={activeStagesForChart.map(stg => ({
+            label: stg.name,
+            value: scopedDeals.filter(d => d.stage_id === stg.id).reduce((sum, d) => sum + d.value, 0),
+          }))} />
+        </div>
+      ),
+    },
+    {
+      id: 'chart-trend',
+      type: 'chart',
+      title: 'Revenue Trend',
+      span: 'md',
+      content: (
+        <div className="p-4">
+          <TrendLine points={trendData.map(t => t.value)} labels={trendData.map(t => t.label)} money height={160} />
+        </div>
+      ),
+    },
+    {
+      id: 'ai-actions',
+      type: 'list',
+      title: 'AI — Next Best Actions',
+      span: 'lg',
+      content: (
+        <div className="p-4">
+          {nextBestActions.length === 0 ? (
+            <div className="py-6 text-center">
+              <ShieldCheck className="w-8 h-8 mx-auto text-success/50 mb-2" />
+              <p className="text-xs text-theme-secondary font-sans">All caught up — no urgent actions detected.</p>
+            </div>
+          ) : (
+            <div className="divide-y divide-theme-border rounded-lg border border-theme-border overflow-hidden max-h-[260px] overflow-y-auto">
+              {nextBestActions.map(action => {
+                const priorityTone = action.priority === 'high'
+                  ? 'bg-danger-soft text-danger'
+                  : action.priority === 'medium' ? 'bg-warning-soft text-warning' : 'bg-theme-inset text-theme-secondary';
+                return (
+                  <div key={action.id} className="flex items-start gap-3 p-3 hover:bg-theme-hover/50 cursor-pointer transition-colors" onClick={() => {
+                    if (action.entityId) dispatchSelectEntity({ module: action.module, entityId: action.entityId });
+                  }}>
+                    <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded shrink-0 mt-0.5 ${priorityTone}`}>{action.priority.toUpperCase()}</span>
+                    <div className="min-w-0">
+                      <p className="text-xs font-medium text-theme-primary">{action.title}</p>
+                      <p className="text-2xs text-theme-secondary mt-0.5">{action.reason}</p>
+                    </div>
+                    <ArrowRight className="w-3.5 h-3.5 text-theme-secondary/40 shrink-0" />
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      ),
+    },
+    {
+      id: 'chart-donut',
+      type: 'chart',
+      title: 'Pipeline Distribution',
+      span: 'md',
+      content: (
+        <div className="p-4">
+          <DonutChart
+            data={activeStagesForChart.map(stg => ({
+              label: stg.name,
+              value: scopedDeals.filter(d => d.stage_id === stg.id).length,
+              color: stg.type === 'won' ? 'var(--success)' : stg.type === 'lost' ? 'var(--text-secondary)' : undefined,
+            }))}
+          />
+        </div>
+      ),
+    },
+    {
+      id: 'data-quality',
+      type: 'list',
+      title: 'Data Quality',
+      span: 'sm',
+      content: (
+        <div className="p-4">
+          <div className="space-y-3">
+            <div className="flex items-center justify-between">
+              <span className="text-2xs text-theme-secondary font-sans">Incomplete Contacts</span>
+              <span className={`text-xs font-bold ${dataQuality.incomplete > 0 ? 'text-warning' : 'text-success'}`}>{dataQuality.incomplete}</span>
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="text-2xs text-theme-secondary font-sans">Unassigned Contacts</span>
+              <span className={`text-xs font-bold ${dataQuality.unassigned > 0 ? 'text-warning' : 'text-success'}`}>{dataQuality.unassigned}</span>
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="text-2xs text-theme-secondary font-sans">Duplicate Contacts</span>
+              <span className={`text-xs font-bold ${dataQuality.duplicates > 0 ? 'text-danger' : 'text-success'}`}>{dataQuality.duplicates}</span>
+            </div>
+            {duplicateGroups.length > 0 && (
+              <div className="pt-2 border-t border-theme-border">
+                <p className="text-2xs text-theme-secondary mb-2">{duplicateGroups.length} duplicate group(s) detected</p>
+                {duplicateGroups.slice(0, 3).map((g, i) => (
+                  <div key={i} className="text-2xs text-warning mb-1">
+                    {g.contacts.map(c => `${c.first_name} ${c.last_name}`).join(' ≈ ')}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      ),
+    },
+  ], [totalOpenValue, openDeals.length, totalWonValue, personalQuota, winRate, wonDeals.length, lostDeals.length, scopedActivities.length, activeStagesForChart, scopedDeals, trendData, nextBestActions, dataQuality, duplicateGroups]);
+
   return (
     <div className="flex-1 flex flex-col overflow-hidden bg-theme-base text-theme-primary">
       {/* Module Title Section */}
@@ -280,334 +460,8 @@ export default function ReportsModule() {
         {/* SUB TAB: DASHBOARDS */}
         {activeSubTab === 'dash' && (
           <div className="space-y-6">
-
-            {/* Getting Started setup checklist */}
             <SetupChecklist />
-
-            {/* Top Scorecard Widgets Grid */}
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-5">
-              <div className="bg-theme-card p-5 rounded-xl shadow-xs border border-theme-border">
-                <div className="flex justify-between items-start">
-                  <span className="text-xs font-semibold text-theme-secondary uppercase font-sans">Open Pipeline Value</span>
-                  <div className="p-1 bg-theme-accent/10 text-theme-accent rounded">
-                    <DollarSign className="w-4 h-4" />
-                  </div>
-                </div>
-                <h3 className="text-2xl font-bold text-theme-primary mt-2">
-                  ${totalOpenValue.toLocaleString()}
-                </h3>
-                <p className="text-[10px] text-theme-secondary mt-2 font-medium">Across {openDeals.length} active opportunities</p>
-              </div>
-
-              <div className="bg-theme-card p-5 rounded-xl shadow-xs border border-theme-border">
-                <div className="flex justify-between items-start">
-                  <span className="text-xs font-semibold text-theme-secondary uppercase font-sans">Closed Won Revenue</span>
-                  <div className="p-1 bg-theme-accent/10 text-theme-accent rounded">
-                    <TrendingUp className="w-4 h-4" />
-                  </div>
-                </div>
-                <h3 className="text-2xl font-bold text-theme-primary mt-2">
-                  ${totalWonValue.toLocaleString()}
-                </h3>
-                <p className="text-[10px] text-theme-accent mt-2 font-medium flex items-center gap-0.5">
-                  Quota target: ${personalQuota.toLocaleString()}
-                </p>
-              </div>
-
-              <div className="bg-theme-card p-5 rounded-xl shadow-xs border border-theme-border">
-                <div className="flex justify-between items-start">
-                  <span className="text-xs font-semibold text-theme-secondary uppercase font-sans">Opportunity Win Rate</span>
-                  <div className="p-1 bg-theme-accent/10 text-theme-accent rounded">
-                    <Percent className="w-4 h-4" />
-                  </div>
-                </div>
-                <h3 className="text-2xl font-bold text-theme-primary mt-2">
-                  {winRate.toFixed(1)}%
-                </h3>
-                <p className="text-[10px] text-theme-secondary mt-2 font-medium">{wonDeals.length} Won / {lostDeals.length} Lost</p>
-              </div>
-
-              <div className="bg-theme-card p-5 rounded-xl shadow-xs border border-theme-border">
-                <div className="flex justify-between items-start">
-                  <span className="text-xs font-semibold text-theme-secondary uppercase font-sans">Activities Logged</span>
-                  <div className="p-1 bg-theme-accent/10 text-theme-accent rounded">
-                    <ListTodo className="w-4 h-4" />
-                  </div>
-                </div>
-                <h3 className="text-2xl font-bold text-theme-primary mt-2">
-                  {scopedActivities.length}
-                </h3>
-                <p className="text-[10px] text-theme-secondary mt-2 font-medium">Calls, notes, emails synced</p>
-              </div>
-            </div>
-
-            {/* Boutinly Intelligence: Next Best Actions + Data Quality */}
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-              <div className="bg-theme-card p-5 rounded-xl shadow-xs border border-theme-border lg:col-span-2">
-                <div className="flex items-center justify-between mb-4">
-                  <div className="flex items-center gap-2.5">
-                    <span className="w-8 h-8 rounded-lg bg-theme-accent-soft text-theme-accent flex items-center justify-center">
-                      <Sparkles className="w-4 h-4" />
-                    </span>
-                    <div>
-                      <h4 className="text-xs font-bold uppercase font-sans tracking-wider text-theme-secondary">
-                        AI Assistant — Next Best Actions
-                      </h4>
-                      <p className="text-[11px] text-theme-secondary mt-0.5">Prioritized suggestions with reasons, computed from your scoped data</p>
-                    </div>
-                  </div>
-                  <RefreshCw className="w-3.5 h-3.5 text-theme-secondary/50" aria-label="Live" />
-                </div>
-
-                {nextBestActions.length === 0 ? (
-                  <div className="py-8 text-center">
-                    <ShieldCheck className="w-8 h-8 mx-auto text-success/50 mb-2" />
-                    <p className="text-xs text-theme-secondary font-sans">All caught up — no urgent follow-ups, stale deals, or data hygiene issues detected.</p>
-                  </div>
-                ) : (
-                  <div className="divide-y divide-theme-border rounded-lg border border-theme-border overflow-hidden">
-                    {nextBestActions.map(action => {
-                      const priorityTone = action.priority === 'high'
-                        ? 'bg-danger-soft text-danger'
-                        : action.priority === 'medium' ? 'bg-warning-soft text-warning' : 'bg-theme-inset text-theme-secondary';
-                      const categoryIcon = action.category === 'revenue' ? <TrendingUp className="w-3.5 h-3.5" />
-                        : action.category === 'task' ? <ClipboardList className="w-3.5 h-3.5" /> : <AlertTriangle className="w-3.5 h-3.5" />;
-                      return (
-                        <div key={action.id} className="px-4 py-3 flex items-start gap-3 bg-theme-base/30">
-                          <span className="shrink-0 mt-0.5 text-theme-secondary">{categoryIcon}</span>
-                          <div className="min-w-0 flex-1">
-                            <div className="flex items-center gap-2">
-                              <p className="text-xs font-semibold text-theme-primary">{action.title}</p>
-                              <span className={`shrink-0 text-[9px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded ${priorityTone}`}>
-                                {action.priority}
-                              </span>
-                            </div>
-                            <p className="text-[11px] text-theme-secondary mt-0.5 leading-relaxed">{action.reason}</p>
-                          </div>
-                          <button
-                            onClick={() => {
-                              setActiveModule(action.module);
-                              if (action.entityId) dispatchSelectEntity({ module: action.module, entityId: action.entityId });
-                            }}
-                            className="shrink-0 flex items-center gap-1 text-[11px] font-medium text-theme-accent hover:opacity-80 cursor-pointer bg-transparent border-none"
-                            aria-label={`Open ${action.title}`}
-                          >
-                            Open <ArrowRight className="w-3 h-3" />
-                          </button>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
-
-              {/* Data quality snapshot */}
-              <div className="bg-theme-card p-5 rounded-xl shadow-xs border border-theme-border">
-                <h4 className="text-xs font-bold uppercase font-sans tracking-wider text-theme-secondary mb-1 flex items-center gap-1.5">
-                  <ShieldCheck className="w-4 h-4 text-theme-accent" /> Data Quality
-                </h4>
-                <p className="text-[11px] text-theme-secondary mb-4">
-                  Poor data costs an estimated 15–25% of revenue — hygiene is the prerequisite for every AI feature.
-                </p>
-                <div className="space-y-3">
-                  <div className="flex items-center justify-between p-3 rounded-lg border border-theme-border bg-theme-base/40">
-                    <div>
-                      <p className="text-xs font-semibold text-theme-primary">Duplicate contacts</p>
-                      <p className="text-[10px] text-theme-secondary mt-0.5">
-                        {dataQuality.duplicates > 0 ? `${duplicateGroups.length} group${duplicateGroups.length === 1 ? '' : 's'} share email, phone, or name+domain` : 'No exact duplicates found'}
-                      </p>
-                    </div>
-                    <span className={`text-sm font-bold tabular-nums ${dataQuality.duplicates > 0 ? 'text-warning' : 'text-success'}`}>
-                      {dataQuality.duplicates}
-                    </span>
-                  </div>
-                  <div className="flex items-center justify-between p-3 rounded-lg border border-theme-border bg-theme-base/40">
-                    <div>
-                      <p className="text-xs font-semibold text-theme-primary">Incomplete records</p>
-                      <p className="text-[10px] text-theme-secondary mt-0.5">Missing phone, title, or email</p>
-                    </div>
-                    <span className={`text-sm font-bold tabular-nums ${dataQuality.incomplete > 0 ? 'text-warning' : 'text-success'}`}>
-                      {dataQuality.incomplete}
-                    </span>
-                  </div>
-                  <div className="flex items-center justify-between p-3 rounded-lg border border-theme-border bg-theme-base/40">
-                    <div>
-                      <p className="text-xs font-semibold text-theme-primary">Unassigned contacts</p>
-                      <p className="text-[10px] text-theme-secondary mt-0.5">No owner — invisible in rep views</p>
-                    </div>
-                    <span className={`text-sm font-bold tabular-nums ${dataQuality.unassigned > 0 ? 'text-warning' : 'text-success'}`}>
-                      {dataQuality.unassigned}
-                    </span>
-                  </div>
-                  <button
-                    onClick={() => setActiveModule('contacts')}
-                    className="w-full mt-1 text-[11px] font-medium text-theme-accent hover:opacity-80 py-2 rounded-lg border border-theme-accent/25 hover:bg-theme-accent-soft transition-colors cursor-pointer bg-transparent"
-                  >
-                    Review contacts →
-                  </button>
-                </div>
-              </div>
-            </div>
-
-            {/* Dashboard Visual Charts & Quota attainments */}
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-              
-              {/* Box 1: Custom Quota Gauge (SVG) */}
-              <div className="bg-theme-card p-5 rounded-xl shadow-xs border border-theme-border flex flex-col justify-between">
-                <div>
-                  <h4 className="text-xs font-bold uppercase font-sans tracking-wider text-theme-secondary">Q3 Quota Attainment</h4>
-                  <p className="text-[11px] text-theme-secondary mt-0.5">Closed won target achievement</p>
-                </div>
-
-                <div className="flex flex-col items-center justify-center my-6 relative">
-                  {/* Custom SVG semicircle gauge */}
-                  <svg className="w-48 h-28">
-                    {/* Background track */}
-                    <path
-                      d="M 10 100 A 80 80 0 0 1 170 100"
-                      fill="none"
-                      stroke="var(--border)"
-                      strokeWidth="16"
-                      strokeLinecap="round"
-                    />
-                    {/* Foreground fill based on score */}
-                    <path
-                      d="M 10 100 A 80 80 0 0 1 170 100"
-                      fill="none"
-                      stroke="var(--accent)"
-                      strokeWidth="16"
-                      strokeLinecap="round"
-                      strokeDasharray="251"
-                      strokeDashoffset={Math.max(0, 251 - (251 * Math.min(100, repQuotaAttainment)) / 100)}
-                      className="transition-all duration-1000 ease-out"
-                    />
-                  </svg>
-                  <div className="text-center absolute bottom-0">
-                    <span className="text-3xl font-extrabold text-theme-primary">{Math.round(repQuotaAttainment)}%</span>
-                    <span className="block text-[10px] uppercase font-sans tracking-wider font-semibold text-theme-secondary mt-1">
-                      ${totalWonValue.toLocaleString()} / $1M
-                    </span>
-                  </div>
-                </div>
-
-                <div className="p-3 bg-theme-base/50 rounded-lg border border-theme-border text-[11px] text-theme-secondary leading-normal font-medium">
-                  {repQuotaAttainment >= 100 
-                    ? "🎉 Outstanding! You have fully attained and exceeded your seasonal revenue quota."
-                    : `Keep pushing! You need another $${(personalQuota - totalWonValue).toLocaleString()} in Closed Won revenue to hit Q3 attainment.`}
-                </div>
-              </div>
-
-              {/* Box 2: ScScoped pipeline distribution bar chart (SVG) */}
-              <div className="bg-theme-card p-5 rounded-xl shadow-xs border border-theme-border lg:col-span-2">
-                <div className="flex justify-between items-center mb-4">
-                  <div>
-                    <h4 className="text-xs font-bold uppercase font-sans tracking-wider text-theme-secondary">Pipeline Stage Distribution</h4>
-                    <p className="text-[11px] text-theme-secondary mt-0.5">Total pipeline value grouped by stage</p>
-                  </div>
-                  <BarChart3 className="w-4 h-4 text-theme-secondary" />
-                </div>
-
-                <div className="my-4">
-                  <FunnelChart data={funnelData} money />
-                </div>
-              </div>
-            </div>
-
-            {/* Revenue trend + Win/Loss composition */}
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-              <div className="bg-theme-card p-5 rounded-xl shadow-xs border border-theme-border lg:col-span-2">
-                <div className="mb-4">
-                  <h4 className="text-xs font-bold uppercase font-sans tracking-wider text-theme-secondary">Closed Won Revenue Trend</h4>
-                  <p className="text-[11px] text-theme-secondary mt-0.5">Trailing 6 months, RBAC-scoped</p>
-                </div>
-                <TrendLine
-                  points={trendData.map(m => m.value)}
-                  labels={trendData.map(m => m.label)}
-                  money
-                />
-              </div>
-
-              <div className="bg-theme-card p-5 rounded-xl shadow-xs border border-theme-border">
-                <div className="mb-4">
-                  <h4 className="text-xs font-bold uppercase font-sans tracking-wider text-theme-secondary">Deal Outcomes</h4>
-                  <p className="text-[11px] text-theme-secondary mt-0.5">Composition of all scoped deals</p>
-                </div>
-                <DonutChart
-                  centerLabel="Deals"
-                  data={[
-                    { label: 'Open', value: openDeals.length, color: 'var(--accent)' },
-                    { label: 'Won', value: wonDeals.length, color: 'var(--success)' },
-                    { label: 'Lost', value: lostDeals.length, color: 'var(--danger)' },
-                  ]}
-                />
-              </div>
-            </div>
-
-            {/* If Manager role, display side-by-side leaderboard */}
-            {isManagerOrAdmin && (
-              <div className="bg-theme-card p-5 rounded-xl shadow-xs border border-theme-border">
-                <h4 className="text-xs font-bold uppercase font-sans tracking-wider text-theme-secondary mb-4">Team Performance Leaderboard</h4>
-                
-                {users.length === 0 ? (
-                  <div className="text-center py-6 text-xs text-theme-secondary font-sans">
-                    No active team members found.
-                  </div>
-                ) : (
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
-                    {users.map(u => {
-                      const userDeals = scopedDeals.filter(d => d.owner_id === u.id);
-                      const userWonRevenue = userDeals
-                        .filter(d => stages.find(s => s.id === d.stage_id)?.type === 'won')
-                        .reduce((sum, d) => sum + d.value, 0);
-                      const userOpenValue = userDeals
-                        .filter(d => stages.find(s => s.id === d.stage_id)?.type === 'open')
-                        .reduce((sum, d) => sum + d.value, 0);
-                      const userActivities = scopedActivities.filter(act => act.user_id === u.id);
-                      
-                      const initials = u.name
-                        .split(' ')
-                        .map(n => n[0])
-                        .join('')
-                        .toUpperCase()
-                        .slice(0, 2);
-
-                      return (
-                        <div key={u.id} className="p-4 bg-theme-base/30 rounded-lg border border-theme-border">
-                          <div className="flex items-center gap-2 mb-3">
-                            <div className="w-8 h-8 rounded-full border border-theme-border bg-theme-accent/10 flex items-center justify-center text-theme-accent text-xs font-bold shrink-0">
-                              {initials || '?'}
-                            </div>
-                            <div>
-                              <h5 className="text-xs font-bold text-theme-primary">{u.name}</h5>
-                              <p className="text-[10px] text-theme-secondary uppercase font-sans">
-                                {u.role === UserRole.SUPER_ADMIN ? 'Super Admin' :
-                                 u.role === UserRole.ADMIN ? 'Administrator' :
-                                 u.role === UserRole.MANAGER ? 'Team Manager' :
-                                 u.role === UserRole.SALES_REP ? 'Sales Representative' : 'Viewer'}
-                              </p>
-                            </div>
-                          </div>
-                          <div className="space-y-2 text-xs">
-                            <div className="flex justify-between">
-                              <span className="text-theme-secondary">Won Revenue</span>
-                              <span className="font-bold text-theme-primary">${userWonRevenue.toLocaleString()}</span>
-                            </div>
-                            <div className="flex justify-between">
-                              <span className="text-theme-secondary">Open Opportunities</span>
-                              <span className="font-bold text-theme-primary">${userOpenValue.toLocaleString()}</span>
-                            </div>
-                            <div className="flex justify-between">
-                              <span className="text-theme-secondary">Activities Logged</span>
-                              <span className="font-semibold text-theme-secondary">{userActivities.length} logs</span>
-                            </div>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
-            )}
+            <DashboardWidgetGrid widgets={dashboardWidgets} />
           </div>
         )}
 
