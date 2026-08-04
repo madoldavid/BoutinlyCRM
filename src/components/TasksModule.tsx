@@ -22,6 +22,7 @@ import {
   Sparkles
 } from 'lucide-react';
 import { NEW_RECORD_EVENT, SELECT_ENTITY_EVENT, type SelectEntityDetail } from './GlobalShortcuts';
+import { relativeDueLabel, formatDateTime } from '../utils/time';
 
 export default function TasksModule() {
   const {
@@ -281,7 +282,6 @@ export default function TasksModule() {
               <p className="p-8 text-center text-xs text-theme-secondary/70 font-sans">No tasks in this list.</p>
             ) : (
               sortedTasks.map(task => {
-                const isTaskOverdue = isOverdue(task);
                 const assignedUser = users.find(u => u.id === task.assigned_to_id);
                 const linkedContact = contacts.find(c => c.id === task.contact_id);
                 const linkedDeal = deals.find(d => d.id === task.deal_id);
@@ -329,8 +329,22 @@ export default function TasksModule() {
                       </div>
 
                       <div className="flex items-center justify-between mt-3 text-[9px] text-theme-secondary font-sans">
-                        <span className={`flex items-center gap-1 font-semibold ${isTaskOverdue ? 'text-theme-accent font-bold' : ''}`}>
-                          <Clock className="w-3 h-3" /> Due: {new Date(task.due_at).toLocaleDateString()} at {new Date(task.due_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                        <span
+                          className={`flex items-center gap-1 font-semibold ${
+                            task.completed_at ? '' :
+                            (() => {
+                              const rel = relativeDueLabel(task.due_at, currentUser?.timezone);
+                              if (rel.tone === 'overdue') return 'text-danger';
+                              if (rel.tone === 'soon') return 'text-warning';
+                              return '';
+                            })()
+                          }`}
+                          title={formatDateTime(task.due_at, currentUser?.timezone)}
+                        >
+                          <Clock className="w-3 h-3" />
+                          {task.completed_at
+                            ? 'completed'
+                            : `Due: ${relativeDueLabel(task.due_at, currentUser?.timezone).text}`}
                         </span>
                         
                         <div className="flex items-center gap-1.5 uppercase font-bold tracking-wider">

@@ -8,16 +8,18 @@ import { useCRM } from '../store';
 import { Deal, UserRole, DealLineItem } from '../types';
 import { toast, ConfirmDialog } from './ui';
 import { DataTable, type DataTableColumn } from './ui/DataTable';
+import { useSavedViews, ViewSwitcher, type SavedView } from './ui/SavedViews';
 import KanbanBoard from './ui/KanbanBoard';
 import { NEW_RECORD_EVENT, SELECT_ENTITY_EVENT, type SelectEntityDetail } from './GlobalShortcuts';
 import { exportCsv } from '../utils/exportCsv';
-import {
-  scoreDeal,
+import { scoreDeal,
   forecastConfidence,
   GRADE_META,
   type DealScore,
   type InsightContext,
 } from '../ai/insights';
+import { relativeDueLabel, formatDateTime } from '../utils/time';
+import { printRecord } from '../utils/print';
 import {
   Briefcase,
   Layers,
@@ -40,7 +42,8 @@ import {
   DollarSign,
   User,
   Calendar,
-  AlertTriangle
+  AlertTriangle,
+  Printer
 } from 'lucide-react';
 
 export default function PipelineModule() {
@@ -109,6 +112,26 @@ export default function PipelineModule() {
   const [viewType, setViewType] = useState<'kanban' | 'list' | 'forecast'>('kanban');
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedRepId, setSelectedRepId] = useState<string>('All');
+
+  // ─── Saved views (G-FE-01, client layer) ───────────
+  interface PipelineViewFilters {
+    viewType: 'kanban' | 'list' | 'forecast';
+    searchQuery: string;
+    selectedRepId: string;
+  }
+  const { views, saveView, deleteView, setDefaultView, defaultView } = useSavedViews<PipelineViewFilters>('pipeline');
+
+  const applyView = (view: SavedView<PipelineViewFilters>) => {
+    setViewType(view.filters.viewType);
+    setSearchQuery(view.filters.searchQuery);
+    setSelectedRepId(view.filters.selectedRepId);
+  };
+
+  // Apply the default view once on mount
+  useEffect(() => {
+    if (defaultView) applyView(defaultView);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   
   // Selection / Drawer
   const [selectedDealId, setSelectedDealId] = useState<string | null>(null);
@@ -320,8 +343,18 @@ export default function PipelineModule() {
             </div>
           </div>
 
-          {/* Search, Filter rep dropdown, and create deal */}
+          {/* Search, Filter rep dropdown, saved views, and create deal */}
           <div className="flex gap-2">
+            <ViewSwitcher
+              views={views}
+              onApply={applyView}
+              onSaveCurrent={(name) => {
+                saveView(name, { viewType, searchQuery, selectedRepId });
+                toast.success(`View "${name}" saved.`);
+              }}
+              onDelete={deleteView}
+              onSetDefault={setDefaultView}
+            />
             <div className="relative flex-1">
               <Search className="w-3.5 h-3.5 absolute left-3 top-3 text-theme-secondary/80" />
               <input
@@ -417,10 +450,22 @@ export default function PipelineModule() {
                           </span>
                         )}
                         {card.closeDate && (
-                          <span className="flex items-center gap-0.5">
-                            <Calendar className="w-2.5 h-2.5" />
-                            {new Date(card.closeDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
-                          </span>
+                          (() => {
+                            const rel = relativeDueLabel(card.closeDate, currentUser?.timezone);
+                            return (
+                              <span
+                                className={`flex items-center gap-0.5 ${
+                                  rel.tone === 'overdue' ? 'text-danger font-medium'
+                                  : rel.tone === 'soon' ? 'text-warning font-medium'
+                                  : ''
+                                }`}
+                                title={formatDateTime(card.closeDate, currentUser?.timezone)}
+                              >
+                                <Calendar className="w-2.5 h-2.5" />
+                                {rel.text}
+                              </span>
+                            );
+                          })()
                         )}
                         {(hasStagnation || hasOverdueStep) && (
                           <span className="ml-auto flex items-center gap-0.5 text-warning font-medium" title={hasStagnation ? 'Stalled in stage — see score breakdown' : 'Overdue next step — see score breakdown'}>
@@ -673,7 +718,7 @@ export default function PipelineModule() {
 
 
       {/* RIGHT COLUMN: DEAL DETAIL VIEW PANEL */}
-      <div className="w-1/2 flex flex-col bg-theme-base h-full overflow-hidden select-none">
+      <div className="w-1/2 flex flex-col bg-theme-base h-full overflow-hidden select-none print-area">
         {activeDeal ? (
           <div className="flex-1 flex flex-col h-full overflow-hidden text-left">
             
@@ -702,6 +747,14 @@ export default function PipelineModule() {
                     <Trash2 className="w-4.5 h-4.5" />
                   </button>
                 )}
+                <button
+                  onClick={printRecord}
+                  className="p-1.5 text-theme-secondary hover:text-theme-primary rounded hover:bg-theme-base transition-colors cursor-pointer bg-transparent border-none"
+                  aria-label={`Print or save ${activeDeal.name} as PDF`}
+                  title="Print / Save as PDF"
+                >
+                  <Printer className="w-4.5 h-4.5" />
+                </button>
               </div>
 
               {/* Core Attributes */}
@@ -718,7 +771,20 @@ export default function PipelineModule() {
                 </div>
                 <div>
                   <span className="text-theme-secondary/80 block font-sans text-[9px] uppercase tracking-wider font-semibold">Expected Close</span>
-                  <span className="text-xs font-bold text-theme-primary block mt-1">{new Date(activeDeal.close_date).toLocaleDateString()}</span>
+                  <span
+                    className={`text-xs font-bold block mt-1 ${
+                      (() => {
+                        const rel = relativeDueLabel(activeDeal.close_date, currentUser?.timezone);
+                        return rel.tone === 'overdue' ? 'text-danger' : rel.tone === 'soon' ? 'text-warning' : 'text-theme-primary';
+                      })()
+                    }`}
+                    title={formatDateTime(activeDeal.close_date, currentUser?.timezone)}
+                  >
+                    {new Date(activeDeal.close_date).toLocaleDateString()}
+                    <span className="block text-[9px] font-medium text-theme-secondary normal-case">
+                      {relativeDueLabel(activeDeal.close_date, currentUser?.timezone).text}
+                    </span>
+                  </span>
                 </div>
               </div>
 

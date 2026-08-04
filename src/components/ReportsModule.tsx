@@ -25,6 +25,7 @@ import {
 import { FunnelChart, DonutChart, TrendLine } from './ui/charts';
 import { buildNextBestActions, findDuplicateContacts, type InsightContext } from '../ai/insights';
 import { dispatchSelectEntity } from './GlobalShortcuts';
+import SetupChecklist from './SetupChecklist';
 
 export default function ReportsModule() {
   const {
@@ -279,7 +280,10 @@ export default function ReportsModule() {
         {/* SUB TAB: DASHBOARDS */}
         {activeSubTab === 'dash' && (
           <div className="space-y-6">
-            
+
+            {/* Getting Started setup checklist */}
+            <SetupChecklist />
+
             {/* Top Scorecard Widgets Grid */}
             <div className="grid grid-cols-1 md:grid-cols-4 gap-5">
               <div className="bg-theme-card p-5 rounded-xl shadow-xs border border-theme-border">

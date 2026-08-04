@@ -285,3 +285,47 @@ input:focus-visible, select:focus-visible, textarea:focus-visible {
 ::-webkit-scrollbar-thumb:hover {
   background: var(--text-secondary);
 }
+
+/* ─── Print / PDF export (G-FE-11) ─────────────────── */
+/* When .printing is set on <html>, only .print-area content is visible.
+   Used by the "Print / Save as PDF" buttons on record panels. */
+html.printing body * {
+  visibility: hidden !important;
+}
+
+html.printing .print-area,
+html.printing .print-area * {
+  visibility: visible !important;
+}
+
+html.printing .print-area {
+  position: absolute !important;
+  left: 0;
+  top: 0;
+  width: 100%;
+  height: auto !important;
+  max-height: none !important;
+  overflow: visible !important;
+  margin: 0;
+  box-shadow: none !important;
+  border: none !important;
+}
+
+@media print {
+  html.printing body * {
+    visibility: hidden !important;
+  }
+  html.printing .print-area,
+  html.printing .print-area * {
+    visibility: visible !important;
+  }
+  html.printing .print-area {
+    position: absolute !important;
+    left: 0;
+    top: 0;
+    width: 100%;
+    height: auto !important;
+    max-height: none !important;
+    overflow: visible !important;
+  }
+}

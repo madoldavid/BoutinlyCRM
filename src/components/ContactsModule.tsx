@@ -12,6 +12,8 @@ import { ConfirmDialog, toast } from './ui';
 import { NEW_RECORD_EVENT, SELECT_ENTITY_EVENT, type SelectEntityDetail } from './GlobalShortcuts';
 import { exportCsv } from '../utils/exportCsv';
 import { findDuplicateContacts } from '../ai/insights';
+import { timeAgo, formatDateTime } from '../utils/time';
+import { printRecord } from '../utils/print';
 import {
   Search,
   Plus,
@@ -32,7 +34,8 @@ import {
   List,
   LayoutGrid,
   Download,
-  AlertTriangle
+  AlertTriangle,
+  Printer
 } from 'lucide-react';
 
 export default function ContactsModule() {
@@ -129,6 +132,7 @@ export default function ContactsModule() {
   // ─── Boutinly Intelligence: duplicate detection & bulk actions ───
   const [selectedRowKeys, setSelectedRowKeys] = useState<Set<string>>(new Set());
   const [confirmBulkDelete, setConfirmBulkDelete] = useState(false);
+  const [confirmDeleteContactId, setConfirmDeleteContactId] = useState<string | null>(null);
 
   const duplicateGroups = useMemo(() => findDuplicateContacts(getScopedContacts()), [getScopedContacts]);
 
@@ -681,7 +685,7 @@ export default function ContactsModule() {
 
 
       {/* RIGHT COLUMN: DETAILS & TIMELINE PANEL */}
-      <div className="w-1/2 flex flex-col bg-theme-base h-full overflow-hidden">
+      <div className="w-1/2 flex flex-col bg-theme-base h-full overflow-hidden print-area">
         {activeTab === 'contacts' ? (
           activeContact ? (
             <div className="flex-1 flex flex-col h-full overflow-hidden">
@@ -703,17 +707,21 @@ export default function ContactsModule() {
 
                   {!isReadOnly && (
                     <button
-                      onClick={() => {
-                        if (confirm('Are you sure you want to soft-delete this contact? All related audit trails remain.')) {
-                          deleteContact(activeContact.id);
-                          setSelectedContactId(null);
-                        }
-                      }}
-                      className="p-1.5 text-theme-secondary hover:text-theme-accent rounded hover:bg-theme-base transition-all cursor-pointer"
+                      onClick={() => setConfirmDeleteContactId(activeContact.id)}
+                      className="p-1.5 text-theme-secondary hover:text-theme-accent rounded hover:bg-theme-base transition-all cursor-pointer bg-transparent border-none"
+                      aria-label={`Delete contact ${activeContact.first_name} ${activeContact.last_name}`}
                     >
                       <Trash2 className="w-4 h-4" />
                     </button>
                   )}
+                  <button
+                    onClick={printRecord}
+                    className="p-1.5 text-theme-secondary hover:text-theme-primary rounded hover:bg-theme-base transition-all cursor-pointer bg-transparent border-none"
+                    aria-label={`Print or save ${activeContact.first_name} ${activeContact.last_name} as PDF`}
+                    title="Print / Save as PDF"
+                  >
+                    <Printer className="w-4 h-4" />
+                  </button>
                 </div>
 
                 <div className="grid grid-cols-2 gap-3 mt-4 text-[11px] text-theme-secondary border-t border-theme-border pt-3 font-sans">
@@ -782,8 +790,11 @@ export default function ContactsModule() {
                         <div className="flex-1 bg-theme-card p-3.5 rounded-xl border border-theme-border shadow-2xs">
                           <div className="flex justify-between items-center">
                             <h5 className="text-xs font-bold text-theme-primary">{act.title}</h5>
-                            <span className="text-[9px] text-theme-secondary font-sans">
-                              {new Date(act.created_at).toLocaleDateString()} at {new Date(act.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                            <span
+                              className="text-[9px] text-theme-secondary font-sans"
+                              title={formatDateTime(act.created_at, currentUser?.timezone)}
+                            >
+                              {timeAgo(act.created_at)}
                             </span>
                           </div>
                           <p className="text-[11px] text-theme-secondary mt-2 whitespace-pre-wrap leading-relaxed">{act.body}</p>
@@ -1301,6 +1312,23 @@ export default function ContactsModule() {
           </div>
         </div>
       )}
+
+      {/* MODAL: CONFIRM DELETE CONTACT */}
+      <ConfirmDialog
+        open={confirmDeleteContactId !== null}
+        onCancel={() => setConfirmDeleteContactId(null)}
+        onConfirm={() => {
+          if (confirmDeleteContactId) {
+            deleteContact(confirmDeleteContactId);
+            setSelectedContactId(null);
+            toast.success('Contact deleted');
+          }
+          setConfirmDeleteContactId(null);
+        }}
+        title="Delete contact?"
+        body="This soft-deletes the contact record. All related audit trails remain."
+        confirmLabel="Delete contact"
+      />
 
       {/* MODAL: CONFIRM BULK DELETE CONTACTS */}
       <ConfirmDialog

@@ -103,3 +103,16 @@ Definition-of-Done checklist: every interactive element keyboard-reachable with
 visible focus ✅ (focus-visible rings + aria labels + keyboard kanban); no raw
 `text-[Npx]` outside token scale ✅; mutations surface toasts ✅; async panels have
 skeleton/empty/error states ✅; dark mode fully themed ✅; modules code-split ✅.
+
+
+### Round 2 additions (August 2026, second frontend pass)
+
+| Area | Status | Notes |
+|------|--------|-------|
+| Time and date intelligence | Done | src/utils/time.ts - relative due labels ("in 3 days", "overdue 2 days"), timeAgo, user-timezone-aware absolute formatting; applied to Tasks due dates, kanban card close chips, deal panel Expected Close, contact timeline |
+| Notifications Center | Done | src/components/NotificationsCenter.tsx - All/Unread tabs, per-type filter, per-type mute preferences (local prefs only), mark-read/mark-all; opened from the sidebar bell dropdown ("View all notifications"); user-scoped like the bell |
+| Print / Save-as-PDF | Done | src/utils/print.ts + html.printing stylesheet in index.css; record panels marked .print-area (deal + contact detail); native print dialog with "Save as PDF" |
+| Getting Started checklist | Done | src/components/SetupChecklist.tsx - data-aware setup steps on the Reports dashboard, progress bar, dismissible; auto-hides at 100% |
+| Saved views for Pipeline | Done | ViewSwitcher extended to the Pipeline module (view type + search + owner presets), same client-layer pattern as Contacts; server shared-views service pending (G-FE-01) |
+| Cleanup | Done | Removed accidental tracked SavedViews.tssx; replaced last window.confirm (contact delete) with ConfirmDialog |
+| Remaining (unchanged) | Deferred | i18n/RTL, list virtualization, E2E/visual/a11y test suites, record drawers for accounts/tasks (see PRD gap register G-FE-*) |

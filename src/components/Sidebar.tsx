@@ -7,6 +7,7 @@ import React, { useState } from 'react';
 import { useCRM } from '../store';
 import { runtimeConfig } from '../runtimeConfig';
 import { UserRole } from '../types';
+import NotificationsCenter from './NotificationsCenter';
 import {
   LayoutDashboard,
   Users,
@@ -21,7 +22,8 @@ import {
   UserCheck,
   Info,
   PanelLeftClose,
-  PanelLeftOpen
+  PanelLeftOpen,
+  ArrowRight
 } from 'lucide-react';
 
 export default function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
@@ -41,6 +43,7 @@ export default function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
 
   const [showUserMenu, setShowUserMenu] = useState(false);
   const [showNotifications, setShowNotifications] = useState(false);
+  const [showNotificationsCenter, setShowNotificationsCenter] = useState(false);
   const [collapsed, setCollapsed] = useState<boolean>(() => {
     try { return localStorage.getItem('boutinly_sidebar_collapsed') === '1'; } catch { return false; }
   });
@@ -174,6 +177,13 @@ export default function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
                   ))
                 )}
               </div>
+              {/* Footer: open the full notifications center */}
+              <button
+                onClick={() => { setShowNotifications(false); setShowNotificationsCenter(true); }}
+                className="w-full p-2.5 bg-theme-inset border-t border-theme-border text-[11px] font-medium text-theme-accent hover:opacity-80 flex items-center justify-center gap-1 cursor-pointer"
+              >
+                View all notifications <ArrowRight className="w-3 h-3" />
+              </button>
             </div>
           )}
         </div>
@@ -340,6 +350,9 @@ export default function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
         </div>
         )}
       </div>
+
+      {/* Notifications center modal */}
+      <NotificationsCenter open={showNotificationsCenter} onClose={() => setShowNotificationsCenter(false)} />
     </aside>
   );
 }
