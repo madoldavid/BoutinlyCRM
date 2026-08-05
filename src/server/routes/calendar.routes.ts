@@ -20,7 +20,7 @@ export function registerCalendarRoutes(
   repository: CrmRepository,
   logger: AppLogger,
 ) {
-  const calendarService = new CalendarService(config, logger);
+  const calendarService = new CalendarService(config, logger, repository);
 
   // Get authorization URL for the selected provider
   app.post('/api/calendar/connect/:provider', authenticate(config), asyncHandler<AuthenticatedRequest>(async (req, res) => {
@@ -58,7 +58,7 @@ export function registerCalendarRoutes(
 
     try {
       const tokens = await calendarService.exchangeCodeForTokens(parsed.provider, String(code));
-      calendarService.storeTokens(req.principal.userId, {
+      await calendarService.storeTokens(req.principal.userId, {
         id: `cal-${req.principal.userId}-${parsed.provider}`,
         userId: req.principal.userId,
         provider: parsed.provider,
@@ -88,7 +88,7 @@ export function registerCalendarRoutes(
 
   // Connected accounts status
   app.get('/api/calendar/status', authenticate(config), asyncHandler<AuthenticatedRequest>(async (req, res) => {
-    const tokens = calendarService.getTokens(req.principal.userId);
+    const tokens = await calendarService.getTokens(req.principal.userId);
     res.json({
       accounts: tokens.map(t => ({
         provider: t.provider,
@@ -106,7 +106,7 @@ export function registerCalendarRoutes(
       throw new ApiError(400, 'Provider must be "google" or "microsoft".', 'invalid_provider');
     }
 
-    calendarService.removeTokens(req.principal.userId, provider);
+    await calendarService.removeTokens(req.principal.userId, provider);
 
     await repository.addAuditLog({
       user_id: req.principal.userId,
@@ -123,7 +123,7 @@ export function registerCalendarRoutes(
 
   // Manual sync trigger — pulls events and creates tasks
   app.post('/api/calendar/sync', authenticate(config), asyncHandler<AuthenticatedRequest>(async (req, res) => {
-    const tokens = calendarService.getTokens(req.principal.userId);
+    const tokens = await calendarService.getTokens(req.principal.userId);
     if (tokens.length === 0) {
       throw new ApiError(400, 'No calendar accounts connected.', 'no_calendars');
     }

@@ -19,27 +19,26 @@ export function registerContactsRoutes(
 ) {
   app.get('/api/contacts', authenticate(config), asyncHandler<AuthenticatedRequest>(async (req, res) => {
     const query = paginationSchema.parse(req.query);
-    const snapshot = await repository.snapshot();
-    const scoped = scopeSnapshot(snapshot, req.principal);
 
-    // Apply scoping to contacts list
-    let contacts = scoped.contacts;
-    if (query.search) {
-      const q = query.search.toLowerCase();
-      contacts = contacts.filter(c =>
-        c.first_name.toLowerCase().includes(q) ||
-        c.last_name.toLowerCase().includes(q) ||
-        c.email.toLowerCase().includes(q)
-      );
-    }
+    // Load contacts with repository-side search + filters (DB-side WHERE for Postgres)
+    const contacts = await repository.listContacts({ search: query.search });
 
-    const total = contacts.length;
-    const page = query.page;
-    const limit = query.limit;
-    const offset = (page - 1) * limit;
-    const paged = contacts.slice(offset, offset + limit);
+    // RBAC scoping: load users + accounts for visibility checks
+    const users = await repository.listUsers();
+    const accounts = await repository.listAccounts();
+    const scoped = scopeSnapshot({
+      users, accounts,
+      contacts,
+      deals: [], pipelines: [], stages: [], tasks: [], activities: [],
+      notifications: [], customFields: [], emailTemplates: [], emailCampaigns: [], auditLogs: [],
+    }, req.principal);
 
-    res.json({ contacts: paged, total, page, limit });
+    // Paginate after scoping
+    const total = scoped.contacts.length;
+    const offset = (query.page - 1) * query.limit;
+    const paged = scoped.contacts.slice(offset, offset + query.limit);
+
+    res.json({ contacts: paged, total, page: query.page, limit: query.limit });
   }));
 
   app.get('/api/contacts/:id', authenticate(config), asyncHandler<AuthenticatedRequest>(async (req, res) => {
@@ -163,6 +162,18 @@ export function registerContactsRoutes(
     const owner = await repository.getUserById(defaultOwnerId);
     if (!owner) throw new ApiError(400, 'Owner user does not exist.', 'invalid_owner');
 
+    // Resolve and require default account_id from the request body when rows lack it
+    const defaultAccountId = (req.body.account_id as string || '').trim();
+    if (!defaultAccountId) {
+      throw new ApiError(400, 'account_id is required in the request body when importing CSV contacts. Set it as a default for all rows.', 'missing_account_id');
+    }
+
+    // Validate the default account exists
+    const defaultAccount = await repository.getAccountById(defaultAccountId);
+    if (!defaultAccount) {
+      throw new ApiError(400, `Default account "${defaultAccountId}" does not exist.`, 'invalid_account');
+    }
+
     const results: { imported: number; skipped: number; errors: { row: number; message: string }[] } = {
       imported: 0,
       skipped: 0,
@@ -183,9 +194,9 @@ export function registerContactsRoutes(
         continue;
       }
 
-      // Check for duplicate email among existing contacts (not users)
-      const existingContacts = await repository.listContacts({ search: email, page: 1, limit: 1 }).catch(() => []);
-      if (existingContacts.length > 0 && existingContacts[0].email.toLowerCase() === email.toLowerCase()) {
+      // Check for duplicate email among existing contacts (exact match, not substring)
+      const existingContacts = await repository.listContacts({ page: 1, limit: 100 }).catch(() => []);
+      if (existingContacts.some(c => c.email.toLowerCase() === email.toLowerCase())) {
         results.errors.push({ row: rowNum, message: `Contact with email ${email} already exists. Skipping.` });
         results.skipped++;
         continue;
@@ -199,7 +210,7 @@ export function registerContactsRoutes(
           phone: (row.phone || '').trim(),
           title: (row.title || '').trim(),
           linkedin_url: (row.linkedin_url || row.linkedin || '').trim() || undefined,
-          account_id: (row.account_id || req.body.account_id || '').trim() || (req.body.account_id as string) || '',
+          account_id: (row.account_id || '').trim() || defaultAccountId,
           owner_id: defaultOwnerId,
           tags: (row.tags || '').split(';').map((t: string) => t.trim()).filter(Boolean),
           custom_fields: {},

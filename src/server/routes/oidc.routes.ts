@@ -11,7 +11,9 @@ import type { AppConfig } from '../config.js';
 import { ApiError, asyncHandler } from '../errors.js';
 import type { CrmRepository } from '../repositories/crmRepository.js';
 import { hashPassword } from '../security/password.js';
-import { issueToken, issueRefreshToken } from '../security/token.js';
+import { issueTokenWithKey, issueRefreshToken } from '../security/token.js';
+import type { KeyManager } from '../security/jwks.js';
+import { generateJti } from '../security/tokenBlocklist.js';
 import { OidcService } from '../services/oidcService.js';
 import type { AppLogger } from '../logger.js';
 import type { User } from '../../types.js';
@@ -31,6 +33,7 @@ export function registerOidcRoutes(
   config: AppConfig,
   repository: CrmRepository,
   logger: AppLogger,
+  keyManager: KeyManager,
 ) {
   const oidcService = new OidcService(config, logger);
 
@@ -84,30 +87,34 @@ export function registerOidcRoutes(
       let user = await repository.getUserByEmail(profile.email);
 
       if (!user) {
-        // Auto-provision user if this is the first SSO login
-        const orgs = await repository.listUsers().then(u => u.length);
-        if (orgs === 0) {
+        // Auto-provision user if this is the first user (check via countUsers for accuracy)
+        const userCount = await repository.countUsers();
+        if (userCount === 0) {
           // First user — create organization + super admin
-          const org = await import('../db/connection.js').then(m => m.runWithTenant);
+          const { runWithTenant } = await import('../db/connection.js');
           // Create org and user inline
           const orgEntity = await repository.createOrganization(profile.name || 'My Company', profile.email.split('@')[1] || 'company');
           const passwordHash = await hashPassword(randomId(), config.PASSWORD_PEPPER);
-          user = await repository.addUserWithPassword({
-            name: profile.name || profile.email,
-            email: profile.email,
-            passwordHash,
-            role: UserRole.SUPER_ADMIN,
-            organization_id: orgEntity.id,
-          });
 
-          await repository.addAuditLog({
-            action: 'user.oidc_signup',
-            entity_type: 'user',
-            entity_id: user.id,
-            user_name: profile.name || profile.email,
-            diff: { provider, email: profile.email },
-            ip_address: String(req.ip || ''),
-            user_agent: String(req.get('user-agent') || ''),
+          // Wrap org-scoped operations in tenant context for Postgres RLS
+          await runWithTenant(orgEntity.id, async () => {
+            user = await repository.addUserWithPassword({
+              name: profile.name || profile.email,
+              email: profile.email,
+              passwordHash,
+              role: UserRole.SUPER_ADMIN,
+              organization_id: orgEntity.id,
+            });
+
+            await repository.addAuditLog({
+              action: 'user.oidc_signup',
+              entity_type: 'user',
+              entity_id: user.id,
+              user_name: profile.name || profile.email,
+              diff: { provider, email: profile.email },
+              ip_address: String(req.ip || ''),
+              user_agent: String(req.get('user-agent') || ''),
+            });
           });
         } else {
           res.redirect(`${config.APP_URL}/login?oidc_error=no_account&email=${encodeURIComponent(profile.email)}`);
@@ -121,8 +128,8 @@ export function registerOidcRoutes(
       }
 
       const principal = makePrincipal(user);
-      const token = issueToken(principal, config.JWT_SECRET, config.ACCESS_TOKEN_TTL_SECONDS);
-      const refreshToken = issueRefreshToken(principal, config.JWT_SECRET, config.REFRESH_TOKEN_TTL_SECONDS);
+      const token = issueTokenWithKey(principal, keyManager, config.ACCESS_TOKEN_TTL_SECONDS, generateJti());
+      const refreshToken = issueRefreshToken(principal, config.JWT_SECRET, config.REFRESH_TOKEN_TTL_SECONDS, generateJti());
 
       await repository.addAuditLog({
         user_id: user.id,

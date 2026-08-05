@@ -3,6 +3,8 @@
  * SPDX-License-Identifier: Apache-2.0
  *
  * File upload & download routes.
+ * Uses the files table (migration 002_files.sql) via the repository,
+ * NOT audit log entries for metadata storage.
  */
 
 import type { Router } from 'express';
@@ -20,27 +22,9 @@ async function parseSingleFile(req: AuthenticatedRequest): Promise<{
   originalName: string;
   mimeType: string;
 }> {
-  const contentType = req.headers['content-type'] || '';
-  if (!contentType.includes('multipart/form-data')) {
-    throw new ApiError(415, 'Content-Type must be multipart/form-data.', 'invalid_content_type');
-  }
-
-  // Extract boundary from Content-Type header
-  const boundaryMatch = contentType.match(/boundary=(?:"([^"]+)"|([^;]+))/);
-  const boundary = boundaryMatch?.[1] || boundaryMatch?.[2];
-  if (!boundary) {
-    throw new ApiError(400, 'Missing multipart boundary.', 'invalid_boundary');
-  }
-
-  // Accumulate raw body (Express raw body middleware not wired here,
-  // so we use the built-in JSON body — fallback to raw parsing).
-  // Since we need multipart, we read from the raw request.
-  const chunks: Buffer[] = [];
   const body = req.body as any;
 
-  // Express body parser may have already consumed the stream.
-  // For this simple implementation, accept base64-encoded file in JSON body
-  // as a pragmatic alternative (the frontend can base64-encode small files).
+  // Accept base64-encoded file in JSON body for simple client-side uploads.
   if (body && body.file_data && body.file_name) {
     return {
       buffer: Buffer.from(body.file_data, 'base64'),
@@ -99,9 +83,33 @@ export function registerFilesRoutes(
       orgId: req.principal.organizationId || 'unknown',
     });
 
-    // Store file metadata in the database using the repository
-    // (We use a direct query approach since the repository interface doesn't have file methods yet)
-    const fileRecord = await repository.addAuditLog({
+    // Store file metadata in the files table via repository
+    const fileRecord = await repository.addFile({
+      user_id: req.principal.userId,
+      entity_type: entityType as 'contact' | 'account' | 'deal' | 'task',
+      entity_id: entityId,
+      filename: stored.filename,
+      original_name: stored.originalName,
+      mime_type: stored.mimeType,
+      size_bytes: stored.sizeBytes,
+      storage_provider: stored.storageProvider,
+      storage_path: stored.storagePath,
+    });
+
+    // Log the upload as an activity
+    await repository.addActivity({
+      type: 'file_uploaded',
+      title: `File Uploaded: ${stored.originalName}`,
+      body: `${stored.originalName} (${(stored.sizeBytes / 1024).toFixed(1)} KB) attached.`,
+      user_id: req.principal.userId,
+      contact_id: entityType === 'contact' ? entityId : undefined,
+      deal_id: entityType === 'deal' ? entityId : undefined,
+      task_id: entityType === 'task' ? entityId : undefined,
+      metadata: { file_id: stored.id, mime_type: stored.mimeType },
+    });
+
+    // Audit log the upload
+    await repository.addAuditLog({
       user_id: req.principal.userId,
       user_name: req.principal.email,
       action: 'file.uploaded',
@@ -119,53 +127,32 @@ export function registerFilesRoutes(
       user_agent: String(req.get('user-agent') || ''),
     });
 
-    // Also log an activity for the entity
-    await repository.addActivity({
-      type: 'file_uploaded',
-      title: `File Uploaded: ${stored.originalName}`,
-      body: `${stored.originalName} (${(stored.sizeBytes / 1024).toFixed(1)} KB) attached.`,
-      user_id: req.principal.userId,
-      contact_id: entityType === 'contact' ? entityId : undefined,
-      deal_id: entityType === 'deal' ? entityId : undefined,
-      task_id: entityType === 'task' ? entityId : undefined,
-      metadata: { file_id: stored.id, mime_type: stored.mimeType },
-    });
-
     res.status(201).json({
       file: {
-        id: stored.id,
-        filename: stored.filename,
-        original_name: stored.originalName,
-        mime_type: stored.mimeType,
-        size_bytes: stored.sizeBytes,
-        storage_provider: stored.storageProvider,
-        entity_type: entityType,
-        entity_id: entityId,
-        created_at: new Date().toISOString(),
+        id: fileRecord.id,
+        filename: fileRecord.filename,
+        original_name: fileRecord.original_name,
+        mime_type: fileRecord.mime_type,
+        size_bytes: fileRecord.size_bytes,
+        storage_provider: fileRecord.storage_provider,
+        entity_type: fileRecord.entity_type,
+        entity_id: fileRecord.entity_id,
+        created_at: fileRecord.created_at,
       },
     });
   }));
 
   // Download a file by ID
   app.get('/api/files/:id', authenticate(config), asyncHandler<AuthenticatedRequest>(async (req, res) => {
-    // File metadata is stored in audit logs as the diff for 'file.uploaded' actions.
-    // In production this would be a dedicated files table query.
-    const logs = await repository.listAuditLogs({ search: req.params.id, page: 1, limit: 1 });
-    const fileLog = logs.find(l => l.action === 'file.uploaded' && (l.diff as any)?.file_id === req.params.id);
-
-    if (!fileLog) {
+    const fileRecord = await repository.getFileById(req.params.id);
+    if (!fileRecord) {
       throw new ApiError(404, 'File not found.', 'not_found');
     }
 
-    const meta = fileLog.diff as any;
-    if (!meta.storage_path) {
-      throw new ApiError(500, 'File storage path missing from metadata.', 'storage_error');
-    }
-
     try {
-      const buffer = await fileService.download(meta.storage_path);
-      res.setHeader('Content-Type', meta.mime_type || 'application/octet-stream');
-      res.setHeader('Content-Disposition', `attachment; filename="${meta.original_name || meta.filename}"`);
+      const buffer = await fileService.download(fileRecord.storage_path);
+      res.setHeader('Content-Type', fileRecord.mime_type || 'application/octet-stream');
+      res.setHeader('Content-Disposition', `attachment; filename="${fileRecord.original_name || fileRecord.filename}"`);
       res.setHeader('Content-Length', buffer.length);
       res.send(buffer);
     } catch {
@@ -178,25 +165,9 @@ export function registerFilesRoutes(
     const entityType = req.query.entity_type as string | undefined;
     const entityId = req.query.entity_id as string | undefined;
 
-    let logs = await repository.listAuditLogs({ page: 1, limit: 500 });
-    logs = logs.filter(l => l.action === 'file.uploaded');
-    if (entityType) logs = logs.filter(l => l.entity_type === entityType);
-    if (entityId) logs = logs.filter(l => l.entity_id === entityId);
-
-    const files = logs.map(l => {
-      const meta = l.diff as any;
-      return {
-        id: meta.file_id,
-        filename: meta.filename,
-        original_name: meta.original_name,
-        mime_type: meta.mime_type,
-        size_bytes: meta.size_bytes,
-        storage_provider: meta.storage_provider,
-        entity_type: l.entity_type,
-        entity_id: l.entity_id,
-        uploaded_by: l.user_name,
-        created_at: l.created_at,
-      };
+    const files = await repository.listFiles({
+      entity_type: entityType,
+      entity_id: entityId,
     });
 
     res.json({ files });
@@ -206,25 +177,25 @@ export function registerFilesRoutes(
   app.delete('/api/files/:id', authenticate(config), asyncHandler<AuthenticatedRequest>(async (req, res) => {
     requireWriteAccess(req);
 
-    const logs = await repository.listAuditLogs({ search: req.params.id, page: 1, limit: 1 });
-    const fileLog = logs.find(l => l.action === 'file.uploaded' && (l.diff as any)?.file_id === req.params.id);
-
-    if (!fileLog) {
+    const fileRecord = await repository.getFileById(req.params.id);
+    if (!fileRecord) {
       throw new ApiError(404, 'File not found.', 'not_found');
     }
 
-    const meta = fileLog.diff as any;
-    if (meta.storage_path) {
-      await fileService.remove(meta.storage_path).catch(() => {});
-    }
+    // Remove from storage
+    await fileService.remove(fileRecord.storage_path).catch(() => {});
 
+    // Remove from database
+    await repository.deleteFile(req.params.id);
+
+    // Audit log the deletion
     await repository.addAuditLog({
       user_id: req.principal.userId,
       user_name: req.principal.email,
       action: 'file.deleted',
-      entity_type: fileLog.entity_type,
-      entity_id: fileLog.entity_id,
-      diff: { file_id: req.params.id, original_name: meta.original_name },
+      entity_type: fileRecord.entity_type,
+      entity_id: fileRecord.entity_id,
+      diff: { file_id: req.params.id, original_name: fileRecord.original_name },
       ip_address: String(req.ip || ''),
       user_agent: String(req.get('user-agent') || ''),
     });

@@ -104,7 +104,7 @@ export default function CommandPalette() {
       .filter(c =>
         `${c.first_name} ${c.last_name}`.toLowerCase().includes(q) ||
         c.email.toLowerCase().includes(q) ||
-        c.title.toLowerCase().includes(q)
+        (c.title || '').toLowerCase().includes(q)
       )
       .slice(0, 5)
       .map<PaletteItem>(c => ({
@@ -117,7 +117,7 @@ export default function CommandPalette() {
       }));
 
     const accounts = getScopedAccounts()
-      .filter(a => a.name.toLowerCase().includes(q) || a.domain.toLowerCase().includes(q) || a.industry.toLowerCase().includes(q))
+      .filter(a => a.name.toLowerCase().includes(q) || (a.domain || '').toLowerCase().includes(q) || (a.industry || '').toLowerCase().includes(q))
       .slice(0, 5)
       .map<PaletteItem>(a => ({
         id: `account-${a.id}`,

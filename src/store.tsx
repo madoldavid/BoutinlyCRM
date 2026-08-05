@@ -49,6 +49,7 @@ interface CRMContextType {
   isAuthenticated: boolean;
   initialLoading: boolean;
   apiError: string | null;
+  featureFlags: Array<{ key: string; enabled: boolean }>;
   login: (email: string, password: string) => Promise<MfaRequiredResponse | void>;
   refreshAuthFromClient: () => void;
   logout: () => void;
@@ -115,6 +116,8 @@ interface CRMContextType {
 const CRMContext = createContext<CRMContextType | undefined>(undefined);
 
 const LOCAL_STORAGE_KEY_PREFIX = 'b2b_crm_v3_blank_';
+const userStoreGet = () => { try { return localStorage.getItem('boutinly_current_user') || sessionStorage.getItem('boutinly_current_user'); } catch { return null; } };
+const userStoreSet = (v: string | null) => { try { if (v) { localStorage.setItem('boutinly_current_user', v); sessionStorage.setItem('boutinly_current_user', v); } else { localStorage.removeItem('boutinly_current_user'); sessionStorage.removeItem('boutinly_current_user'); } } catch {} };
 
 // Secure storage helpers — respect runtime config
 const storageEnabled = !runtimeConfig.disableLocalStorage;
@@ -144,7 +147,7 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [apiError, setApiError] = useState<string | null>(null);
   const [currentUser, setCurrentUserState] = useState<User | null>(() => {
     try {
-      const saved = sessionStorage.getItem('current_user');
+      const saved = userStoreGet();
       return saved ? JSON.parse(saved) : null;
     } catch {
       return null;
@@ -155,7 +158,7 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [activePipelineId, setActivePipelineId] = useState<string>('');
   const initialPipelineSelectedRef = useRef(false);
   const [activeTheme, setActiveThemeState] = useState<string>(() => {
-    return safeGetItem(LOCAL_STORAGE_KEY_PREFIX + 'active_theme') || 'dark';
+    return safeGetItem(LOCAL_STORAGE_KEY_PREFIX + 'active_theme') || 'light';
   });
 
   // ─── Data state (initialized from localStorage fallback or initial data) ──
@@ -175,6 +178,8 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [accounts, setAccounts] = useState<Account[]>(() => loadFromStorage('accounts', INITIAL_ACCOUNTS));
   const [contacts, setContacts] = useState<Contact[]>(() => loadFromStorage('contacts', INITIAL_CONTACTS));
   const [pipelines, setPipelines] = useState<Pipeline[]>(INITIAL_PIPELINES);
+  const pipelinesRef = useRef(pipelines);
+  pipelinesRef.current = pipelines;
   const [stages, setStages] = useState<Stage[]>(INITIAL_STAGES);
   const [deals, setDeals] = useState<Deal[]>(() => loadFromStorage('deals', INITIAL_DEALS));
   const [tasks, setTasks] = useState<Task[]>(() => loadFromStorage('tasks', INITIAL_TASKS));
@@ -184,6 +189,7 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [emailTemplates, setEmailTemplates] = useState<EmailTemplate[]>(() => loadFromStorage('email_templates', INITIAL_TEMPLATES));
   const [emailCampaigns, setEmailCampaigns] = useState<EmailCampaign[]>(() => loadFromStorage('email_campaigns', INITIAL_CAMPAIGNS));
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>(() => loadFromStorage('audit_logs', INITIAL_AUDIT_LOGS));
+  const [featureFlags, setFeatureFlags] = useState<Array<{ key: string; enabled: boolean }>>([]);
 
   // ─── Bootstrap from API ────────────────────────────
 
@@ -201,7 +207,7 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         const me = await apiClient.getMe();
         if (cancelled) return;
 
-        sessionStorage.setItem('current_user', JSON.stringify(me));
+        userStoreSet(JSON.stringify(me));
         setCurrentUserState(me);
 
         // Load full CRM snapshot
@@ -229,6 +235,12 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         setEmailCampaigns(snapshot.emailCampaigns);
         setAuditLogs(snapshot.auditLogs);
 
+        // Fetch feature flags (separate endpoint)
+        try {
+          const flags = await apiClient.getFlags();
+          if (!cancelled) setFeatureFlags(flags.map(f => ({ key: f.key, enabled: f.enabled })));
+        } catch { /* flags optional — keep defaults */ }
+
         // Update localStorage as cache
         persistToLocalStorage(snapshot);
       } catch (err) {
@@ -241,8 +253,8 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           setApiError('Failed to connect to API server. Using offline data.');
         }
         // Offline fallback: auto-select the default pipeline so the board renders
-        if (pipelines.length > 0 && !initialPipelineSelectedRef.current) {
-          const defaultPipeline = pipelines.find(p => p.is_default) || pipelines[0];
+        if (pipelinesRef.current.length > 0 && !initialPipelineSelectedRef.current) {
+          const defaultPipeline = pipelinesRef.current.find(p => p.is_default) || pipelinesRef.current[0];
           setActivePipelineId(defaultPipeline.id);
           initialPipelineSelectedRef.current = true;
         }
@@ -289,7 +301,7 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       // MFA required — caller must handle the challenge
       return result;
     }
-    const user = JSON.parse(sessionStorage.getItem('current_user') || 'null');
+    const user = JSON.parse(userStoreGet() || 'null');
     setCurrentUserState(user);
     setIsAuthenticated(true);
     setApiError(null);
@@ -298,7 +310,7 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   /** Call this after external apiClient login (e.g., MFA challenge) to sync store state */
   const refreshAuthFromClient = useCallback(() => {
     if (apiClient.isAuthenticated()) {
-      const user = JSON.parse(sessionStorage.getItem('current_user') || 'null');
+      const user = JSON.parse(userStoreGet() || 'null');
       setCurrentUserState(user);
       setIsAuthenticated(true);
       setApiError(null);
@@ -307,7 +319,7 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const logout = useCallback(() => {
     apiClient.setToken(null);
-    sessionStorage.removeItem('current_user');
+    userStoreSet(null);
     // Clear persisted data on logout
     const keysToRemove = [
       'users', 'accounts', 'contacts', 'deals', 'tasks', 'activities',
@@ -335,7 +347,7 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setCurrentUserState(prev => {
       const target = users.find(u => u.id === userId);
       if (target) {
-        sessionStorage.setItem('current_user', JSON.stringify(target));
+        userStoreSet(JSON.stringify(target));
         return target;
       }
       return prev;
@@ -401,7 +413,7 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       // Fallback: local-only
       const newContact: Contact = {
         ...contactData,
-        id: 'con-' + Math.random().toString(36).substring(2, 11),
+        id: 'con-' + crypto.randomUUID(),
         created_at: new Date().toISOString(),
       };
       setContacts(prev => [newContact, ...prev]);
@@ -446,7 +458,7 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     } catch {
       const newAccount: Account = {
         ...accountData,
-        id: 'acc-' + Math.random().toString(36).substring(2, 11),
+        id: 'acc-' + crypto.randomUUID(),
         created_at: new Date().toISOString(),
       };
       setAccounts(prev => [newAccount, ...prev]);
@@ -477,7 +489,7 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     } catch {
       const newDeal: Deal = {
         ...dealData,
-        id: 'deal-' + Math.random().toString(36).substring(2, 11),
+        id: 'deal-' + crypto.randomUUID(),
         created_at: new Date().toISOString(),
         stage_entered_at: new Date().toISOString(),
       };
@@ -528,7 +540,7 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     // Log activity for stage movement (inline to avoid useCallback ordering issues)
     const newActivity: Activity = {
-      id: 'act-' + Math.random().toString(36).substring(2, 11),
+      id: 'act-' + crypto.randomUUID(),
       type: 'stage_change',
       title: `Deal moved: ${deal.name}`,
       body: prevStage
@@ -558,7 +570,7 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     // Log activity for deal closure (inline to avoid useCallback ordering issues)
     if (deal) {
       const newActivity: Activity = {
-        id: 'act-' + Math.random().toString(36).substring(2, 11),
+        id: 'act-' + crypto.randomUUID(),
         type: 'deal_closed',
         title: `Deal ${outcome === 'won' ? 'Won' : 'Lost'}: ${deal.name}`,
         body: reason
@@ -584,7 +596,7 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     } catch {
       const newTask: Task = {
         ...taskData,
-        id: 'task-' + Math.random().toString(36).substring(2, 11),
+        id: 'task-' + crypto.randomUUID(),
         created_by_id: currentUser?.id || '',
       };
       setTasks(prev => [newTask, ...prev]);
@@ -623,7 +635,7 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     } catch {
       const newActivity: Activity = {
         ...activityData,
-        id: 'act-' + Math.random().toString(36).substring(2, 11),
+        id: 'act-' + crypto.randomUUID(),
         created_at: new Date().toISOString(),
       };
       setActivities(prev => [newActivity, ...prev]);
@@ -639,7 +651,7 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     } catch {
       const newCfd: CustomFieldDefinition = {
         ...cfdData,
-        id: 'cfd-' + Math.random().toString(36).substring(2, 11),
+        id: 'cfd-' + crypto.randomUUID(),
       };
       setCustomFields(prev => [...prev, newCfd]);
     }
@@ -672,7 +684,8 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       setUsers(prev => [...prev, created]);
     } catch {
       const newUser: User = {
-        id: 'usr-' + Math.random().toString(36).substring(2, 11),
+        id: 'usr-' + crypto.randomUUID(),
+        organization_id: currentUser?.organization_id || '',
         email,
         name,
         avatar_url: '',
@@ -704,7 +717,7 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     } catch {
       const newTemplate: EmailTemplate = {
         ...templateData,
-        id: 'tmp-' + Math.random().toString(36).substring(2, 11),
+        id: 'tmp-' + crypto.randomUUID(),
       };
       setEmailTemplates(prev => [...prev, newTemplate]);
     }
@@ -716,7 +729,7 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       setEmailCampaigns(prev => [created, ...prev]);
     } catch {
       // Fallback: create a local-only campaign entry
-      const campaignId = 'camp-' + Math.random().toString(36).substring(2, 11);
+      const campaignId = 'camp-' + crypto.randomUUID();
       const newCampaign: EmailCampaign = {
         id: campaignId,
         name,
@@ -772,6 +785,7 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     isAuthenticated,
     initialLoading,
     apiError,
+    featureFlags,
     login,
     refreshAuthFromClient,
     logout,

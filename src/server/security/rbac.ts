@@ -5,6 +5,7 @@ import { verifyToken, verifyTokenWithKeys, type Principal } from './token.js';
 import type { AppConfig } from '../config.js';
 import type { KeyManager } from './jwks.js';
 import type { TokenBlocklist } from './tokenBlocklist.js';
+import { runWithTenant } from '../db/connection.js';
 
 export interface AuthenticatedRequest extends Request {
   principal: Principal;
@@ -46,7 +47,8 @@ export function authenticate(config: AppConfig) {
       }
 
       (req as AuthenticatedRequest).principal = principal;
-      next();
+      // Set tenant context from the verified principal's organizationId
+      runWithTenant(principal.organizationId, () => next());
     } catch (error) {
       next(error);
     }

@@ -19,7 +19,6 @@ import {
   ShieldCheck,
   Search,
   Check,
-  Cpu,
   Trash2,
   Info,
   KeyRound,
@@ -28,10 +27,6 @@ import {
   Download,
   AlertTriangle,
   Layers,
-  GripVertical,
-  X,
-  ArrowUp,
-  ArrowDown
 } from 'lucide-react';
 
 export default function AdminModule() {
@@ -236,8 +231,8 @@ export default function AdminModule() {
   // Scoped logs
   const filteredLogs = auditLogs.filter(log => {
     const searchLow = auditSearch.toLowerCase();
-    return log.action.toLowerCase().includes(searchLow) ||
-           log.user_name.toLowerCase().includes(searchLow) ||
+    return (log.action || '').toLowerCase().includes(searchLow) ||
+           (log.user_name || '').toLowerCase().includes(searchLow) ||
            (log.entity_type || '').toLowerCase().includes(searchLow);
   });
 
@@ -431,7 +426,7 @@ export default function AdminModule() {
               <div className="p-3 bg-theme-base border border-theme-border rounded-lg space-y-3 text-[11px] font-sans text-theme-primary">
                 <div>
                   <span className="text-theme-secondary block uppercase text-[9px] font-bold">Domain Name</span>
-                  <span className="font-bold">{currentUser.email.split('@')[1] || 'your-domain.com'}</span>
+                  <span className="font-bold">{currentUser?.email?.split('@')[1] || 'your-company-domain.com'}</span>
                 </div>
                 <div className="grid grid-cols-2 gap-4 border-t border-theme-border pt-2">
                   <div>

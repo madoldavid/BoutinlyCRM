@@ -6,27 +6,32 @@
 import React, { useState, useMemo } from 'react';
 import { useCRM } from '../store';
 import { UserRole, Deal, Task } from '../types';
-import { 
-  TrendingUp, 
-  DollarSign, 
-  Percent, 
-  ListTodo, 
-  BarChart3, 
-  PieChart, 
-  GitPullRequest, 
-  FileDown, 
+import {
+  TrendingUp,
+  DollarSign,
+  Percent,
+  ListTodo,
+  PieChart,
+  GitPullRequest,
+  FileDown,
   Sparkles,
   RefreshCw,
   ArrowRight,
   AlertTriangle,
-  ClipboardList,
   ShieldCheck,
-  Building2,
+  Target,
+  Zap,
+  BarChart3,
+  Users,
+  Phone,
+  UserX,
+  Copy,
+  CheckCircle,
+  XCircle,
 } from 'lucide-react';
-import { FunnelChart, DonutChart, TrendLine } from './ui/charts';
-import DashboardWidgetGrid, { type DashboardWidget } from './ui/DashboardWidgetGrid';
+import { FunnelChart, DonutChart, TrendLine, BarChart } from './ui/charts';
 import { buildNextBestActions, findDuplicateContacts, type InsightContext } from '../ai/insights';
-import { dispatchSelectEntity, dispatchDrillDown } from './GlobalShortcuts';
+import { dispatchSelectEntity } from './GlobalShortcuts';
 import SetupChecklist from './SetupChecklist';
 
 export default function ReportsModule() {
@@ -56,7 +61,7 @@ export default function ReportsModule() {
   const scopedTasks = getScopedTasks();
   const scopedActivities = getScopedActivities();
 
-  // ─── Boutinly Intelligence: next best actions + data quality ───
+  // ─── Boutinly Intelligence ───
   const insightContext = useMemo<InsightContext>(() => ({
     deals: scopedDeals,
     stages,
@@ -77,38 +82,22 @@ export default function ReportsModule() {
     return { incomplete, unassigned, duplicates: duplicateGroups.reduce((n, g) => n + g.contacts.length, 0) };
   }, [contacts, users, duplicateGroups]);
 
-  // Metrics Calculations
-  const wonDeals = scopedDeals.filter(d => {
-    const stage = stages.find(s => s.id === d.stage_id);
-    return stage?.type === 'won';
-  });
-
-  const lostDeals = scopedDeals.filter(d => {
-    const stage = stages.find(s => s.id === d.stage_id);
-    return stage?.type === 'lost';
-  });
-
-  const openDeals = scopedDeals.filter(d => {
-    const stage = stages.find(s => s.id === d.stage_id);
-    return stage?.type === 'open';
-  });
+  // Metrics
+  const wonDeals = scopedDeals.filter(d => stages.find(s => s.id === d.stage_id)?.type === 'won');
+  const lostDeals = scopedDeals.filter(d => stages.find(s => s.id === d.stage_id)?.type === 'lost');
+  const openDeals = scopedDeals.filter(d => stages.find(s => s.id === d.stage_id)?.type === 'open');
 
   const totalClosedDealsCount = wonDeals.length + lostDeals.length;
   const winRate = totalClosedDealsCount > 0 ? (wonDeals.length / totalClosedDealsCount) * 100 : 0;
-
   const totalOpenValue = openDeals.reduce((sum, d) => sum + d.value, 0);
   const totalWonValue = wonDeals.reduce((sum, d) => sum + d.value, 0);
 
-  // Rep Quota Attainment
-  const personalQuota = currentUser?.custom_fields?.quota
-    ? Number(currentUser.custom_fields.quota)
-    : 1000000;
-  const repQuotaAttainment = personalQuota > 0 ? (totalWonValue / personalQuota) * 100 : 0;
+  const personalQuota = Number(currentUser?.custom_fields?.quota) || 0;
+  const quotaAttainmentPct = personalQuota > 0 ? (totalWonValue / personalQuota) * 100 : 0;
 
-  // Render personal or manager views based on role
-  const isManagerOrAdmin = [UserRole.SUPER_ADMIN, UserRole.ADMIN, UserRole.MANAGER].includes(currentUser.role);
+  const isManagerOrAdmin = currentUser ? [UserRole.SUPER_ADMIN, UserRole.ADMIN, UserRole.MANAGER].includes(currentUser.role) : false;
 
-  // Won revenue by month (trailing 6 months) for trend chart
+  // Trend data
   const trendData = (() => {
     const now = new Date();
     const months: { label: string; value: number }[] = [];
@@ -126,15 +115,9 @@ export default function ReportsModule() {
     return months;
   })();
 
-  // Open pipeline value by stage for funnel chart
   const activeStagesForChart = stages.filter(s => s.pipeline_id === activePipelineId);
-  const funnelData = activeStagesForChart.map(stg => ({
-    label: stg.name,
-    value: scopedDeals.filter(d => d.stage_id === stg.id).reduce((sum, d) => sum + d.value, 0),
-    color: stg.type === 'won' ? 'var(--success)' : stg.type === 'lost' ? 'var(--text-secondary)' : undefined,
-  }));
 
-  // CSV export helper
+  // CSV export
   const handleExportCsv = () => {
     if (reportResult.length === 0) return;
     const headers = ['Group', 'Volume'];
@@ -154,13 +137,11 @@ export default function ReportsModule() {
     URL.revokeObjectURL(url);
   };
 
-  // Generate Custom Report Trigger
   const handleGenerateReport = () => {
     setReportGenerated(true);
     let results: any[] = [];
-    
+
     if (reportEntity === 'deal') {
-      // Group deals
       const groups: Record<string, Deal[]> = {};
       scopedDeals.forEach(d => {
         let key = '';
@@ -174,405 +155,304 @@ export default function ReportsModule() {
         if (!groups[key]) groups[key] = [];
         groups[key].push(d);
       });
-
-      results = Object.entries(groups).map(([groupName, items]) => {
-        const count = items.length;
-        const totalVal = items.reduce((sum, i) => sum + i.value, 0);
-        return {
-          groupName,
-          count,
-          value: totalVal
-        };
-      });
+      results = Object.entries(groups).map(([groupName, items]) => ({
+        groupName, count: items.length, value: items.reduce((sum, i) => sum + i.value, 0)
+      }));
     } else if (reportEntity === 'contact') {
-      // Group contacts
       const groups: Record<string, any[]> = {};
       contacts.forEach(c => {
         let key = '';
-        if (reportGrouping === 'owner_id') {
-          key = users.find(u => u.id === c.owner_id)?.name || 'Unknown Rep';
-        } else if (reportGrouping === 'account_id') {
-          key = accounts.find(a => a.id === c.account_id)?.name || 'Unassigned Account';
-        }
+        if (reportGrouping === 'owner_id') key = users.find(u => u.id === c.owner_id)?.name || 'Unknown Rep';
+        else if (reportGrouping === 'account_id') key = accounts.find(a => a.id === c.account_id)?.name || 'Unassigned Account';
         if (!groups[key]) groups[key] = [];
         groups[key].push(c);
       });
-
-      results = Object.entries(groups).map(([groupName, items]) => ({
-        groupName,
-        count: items.length,
-        value: 0
-      }));
+      results = Object.entries(groups).map(([groupName, items]) => ({ groupName, count: items.length, value: 0 }));
     } else if (reportEntity === 'task') {
-      // Group tasks
       const groups: Record<string, Task[]> = {};
       scopedTasks.forEach(t => {
-        let key = '';
-        if (reportGrouping === 'owner_id') {
-          key = users.find(u => u.id === t.assigned_to_id)?.name || 'Unknown User';
-        } else if (reportGrouping === 'type') {
-          key = t.type.toUpperCase();
-        }
+        let key = reportGrouping === 'owner_id'
+          ? users.find(u => u.id === t.assigned_to_id)?.name || 'Unknown User'
+          : t.type.toUpperCase();
         if (!groups[key]) groups[key] = [];
         groups[key].push(t);
       });
-
-      results = Object.entries(groups).map(([groupName, items]) => ({
-        groupName,
-        count: items.length,
-        value: 0
-      }));
+      results = Object.entries(groups).map(([groupName, items]) => ({ groupName, count: items.length, value: 0 }));
     }
-
     setReportResult(results);
   };
 
-  const dashboardWidgets = useMemo<DashboardWidget[]>(() => [
-    {
-      id: 'kpi-open-value',
-      type: 'kpi',
-      title: 'Open Pipeline Value',
-      span: 'sm',
-      content: (
-        <div className="p-4">
-          <div className="flex items-start justify-between mb-2">
-            <span className="text-2xs text-theme-secondary uppercase tracking-wider font-sans">Open Pipeline</span>
-            <DollarSign className="w-4 h-4 text-theme-accent/60" />
-          </div>
-          <p className="text-xl font-bold text-theme-primary tnum" data-metric>${totalOpenValue.toLocaleString()}</p>
-          <p className="text-2xs text-theme-secondary mt-1 font-sans">{openDeals.length} active deals</p>
-        </div>
-      ),
-    },
-    {
-      id: 'kpi-won-revenue',
-      type: 'kpi',
-      title: 'Closed Won Revenue',
-      span: 'sm',
-      content: (
-        <div className="p-4">
-          <div className="flex items-start justify-between mb-2">
-            <span className="text-2xs text-theme-secondary uppercase tracking-wider font-sans">Closed Won</span>
-            <TrendingUp className="w-4 h-4 text-success/60" />
-          </div>
-          <p className="text-xl font-bold text-theme-primary tnum" data-metric>${totalWonValue.toLocaleString()}</p>
-          <p className="text-2xs text-theme-secondary mt-1 font-sans">${personalQuota.toLocaleString()} quota</p>
-        </div>
-      ),
-    },
-    {
-      id: 'kpi-winrate',
-      type: 'kpi',
-      title: 'Win Rate',
-      span: 'sm',
-      content: (
-        <div className="p-4">
-          <div className="flex items-start justify-between mb-2">
-            <span className="text-2xs text-theme-secondary uppercase tracking-wider font-sans">Win Rate</span>
-            <Percent className="w-4 h-4 text-info/60" />
-          </div>
-          <p className="text-xl font-bold text-theme-primary tnum" data-metric>{winRate.toFixed(1)}%</p>
-          <p className="text-2xs text-theme-secondary mt-1 font-sans">{wonDeals.length} won / {lostDeals.length} lost</p>
-        </div>
-      ),
-    },
-    {
-      id: 'kpi-activities',
-      type: 'kpi',
-      title: 'Activities',
-      span: 'sm',
-      content: (
-        <div className="p-4">
-          <div className="flex items-start justify-between mb-2">
-            <span className="text-2xs text-theme-secondary uppercase tracking-wider font-sans">Activities</span>
-            <ListTodo className="w-4 h-4 text-warning/60" />
-          </div>
-          <p className="text-xl font-bold text-theme-primary tnum" data-metric>{scopedActivities.length}</p>
-          <p className="text-2xs text-theme-secondary mt-1 font-sans">Calls, notes, emails</p>
-        </div>
-      ),
-    },
-    {
-      id: 'chart-funnel',
-      type: 'chart',
-      title: 'Pipeline Funnel',
-      span: 'md',
-      content: (
-        <div className="p-4">
-          <FunnelChart
-            data={activeStagesForChart.map(stg => ({
-              label: stg.name,
-              value: scopedDeals.filter(d => d.stage_id === stg.id).reduce((sum, d) => sum + d.value, 0),
-            }))}
-            onDrillDown={(label) => dispatchDrillDown({ module: 'deals', filterKey: 'stage', filterValue: label })}
-          />
-        </div>
-      ),
-    },
-    {
-      id: 'chart-trend',
-      type: 'chart',
-      title: 'Revenue Trend',
-      span: 'md',
-      content: (
-        <div className="p-4">
-          <TrendLine points={trendData.map(t => t.value)} labels={trendData.map(t => t.label)} money height={160} />
-        </div>
-      ),
-    },
-    {
-      id: 'ai-actions',
-      type: 'list',
-      title: 'AI — Next Best Actions',
-      span: 'lg',
-      content: (
-        <div className="p-4">
-          {nextBestActions.length === 0 ? (
-            <div className="py-6 text-center">
-              <ShieldCheck className="w-8 h-8 mx-auto text-success/50 mb-2" />
-              <p className="text-xs text-theme-secondary font-sans">All caught up — no urgent actions detected.</p>
-            </div>
-          ) : (
-            <div className="divide-y divide-theme-border rounded-lg border border-theme-border overflow-hidden max-h-[260px] overflow-y-auto">
-              {nextBestActions.map(action => {
-                const priorityTone = action.priority === 'high'
-                  ? 'bg-danger-soft text-danger'
-                  : action.priority === 'medium' ? 'bg-warning-soft text-warning' : 'bg-theme-inset text-theme-secondary';
-                return (
-                  <div key={action.id} className="flex items-start gap-3 p-3 hover:bg-theme-hover/50 cursor-pointer transition-colors" onClick={() => {
-                    if (action.entityId) dispatchSelectEntity({ module: action.module, entityId: action.entityId });
-                  }}>
-                    <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded shrink-0 mt-0.5 ${priorityTone}`}>{action.priority.toUpperCase()}</span>
-                    <div className="min-w-0">
-                      <p className="text-xs font-medium text-theme-primary">{action.title}</p>
-                      <p className="text-2xs text-theme-secondary mt-0.5">{action.reason}</p>
-                    </div>
-                    <ArrowRight className="w-3.5 h-3.5 text-theme-secondary/40 shrink-0" />
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </div>
-      ),
-    },
-    {
-      id: 'chart-donut',
-      type: 'chart',
-      title: 'Pipeline Distribution',
-      span: 'md',
-      content: (
-        <div className="p-4">
-          <DonutChart
-            data={activeStagesForChart.map(stg => ({
-              label: stg.name,
-              value: scopedDeals.filter(d => d.stage_id === stg.id).length,
-              color: stg.type === 'won' ? 'var(--success)' : stg.type === 'lost' ? 'var(--text-secondary)' : undefined,
-            }))}
-            onDrillDown={(label) => dispatchDrillDown({ module: 'deals', filterKey: 'stage', filterValue: label })}
-          />
-        </div>
-      ),
-    },
-    {
-      id: 'data-quality',
-      type: 'list',
-      title: 'Data Quality',
-      span: 'sm',
-      content: (
-        <div className="p-4">
-          <div className="space-y-3">
-            <div className="flex items-center justify-between">
-              <span className="text-2xs text-theme-secondary font-sans">Incomplete Contacts</span>
-              <span className={`text-xs font-bold ${dataQuality.incomplete > 0 ? 'text-warning' : 'text-success'}`}>{dataQuality.incomplete}</span>
-            </div>
-            <div className="flex items-center justify-between">
-              <span className="text-2xs text-theme-secondary font-sans">Unassigned Contacts</span>
-              <span className={`text-xs font-bold ${dataQuality.unassigned > 0 ? 'text-warning' : 'text-success'}`}>{dataQuality.unassigned}</span>
-            </div>
-            <div className="flex items-center justify-between">
-              <span className="text-2xs text-theme-secondary font-sans">Duplicate Contacts</span>
-              <span className={`text-xs font-bold ${dataQuality.duplicates > 0 ? 'text-danger' : 'text-success'}`}>{dataQuality.duplicates}</span>
-            </div>
-            {duplicateGroups.length > 0 && (
-              <div className="pt-2 border-t border-theme-border">
-                <p className="text-2xs text-theme-secondary mb-2">{duplicateGroups.length} duplicate group(s) detected</p>
-                {duplicateGroups.slice(0, 3).map((g, i) => (
-                  <div key={i} className="text-2xs text-warning mb-1">
-                    {g.contacts.map(c => `${c.first_name} ${c.last_name}`).join(' ≈ ')}
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        </div>
-      ),
-    },
-  ], [totalOpenValue, openDeals.length, totalWonValue, personalQuota, winRate, wonDeals.length, lostDeals.length, scopedActivities.length, activeStagesForChart, scopedDeals, trendData, nextBestActions, dataQuality, duplicateGroups]);
-
   return (
     <div className="flex-1 flex flex-col overflow-hidden bg-theme-base text-theme-primary">
-      {/* Module Title Section */}
-      <header className="bg-theme-card border-b border-theme-border px-6 py-4 shrink-0 flex items-center justify-between">
+      {/* Module Header */}
+      <header className="bg-white border-b-2 border-theme-border px-6 py-4 shrink-0 flex items-center justify-between shadow-sm">
         <div>
-          <h2 className="text-xl font-bold text-theme-primary flex items-center gap-2">
-            <TrendingUp className="w-5.5 h-5.5 text-theme-accent" />
+          <h2 className="text-lg font-extrabold text-theme-primary flex items-center gap-2.5 font-sans">
+            <span className="w-9 h-9 rounded bg-theme-accent flex items-center justify-center shadow-sm"><TrendingUp className="w-5 h-5 text-white" /></span>
             Reports & Analytics
           </h2>
-          <p className="text-xs text-theme-secondary mt-0.5">Real-time revenue forecast, team targets, and performance pipeline snapshots.</p>
+          <p className="text-xs text-theme-secondary mt-0.5 ml-11 font-medium">Real-time revenue forecast, team targets, and pipeline snapshots.</p>
         </div>
-        
-        {/* Sub Navigation tabs */}
-        <div className="flex items-center gap-1.5 bg-theme-base p-1 rounded-lg border border-theme-border text-xs font-medium">
-          <button
-            onClick={() => setActiveSubTab('dash')}
-            className={`px-3 py-1.5 rounded-md cursor-pointer transition-all ${
-              activeSubTab === 'dash' ? 'bg-theme-card text-theme-primary shadow-xs border border-theme-border/50' : 'text-theme-secondary hover:text-theme-primary'
-            }`}
-          >
-            {isManagerOrAdmin ? 'Team Dashboard' : 'My Performance'}
-          </button>
-          <button
-            onClick={() => setActiveSubTab('health')}
-            className={`px-3 py-1.5 rounded-md cursor-pointer transition-all ${
-              activeSubTab === 'health' ? 'bg-theme-card text-theme-primary shadow-xs border border-theme-border/50' : 'text-theme-secondary hover:text-theme-primary'
-            }`}
-          >
-            Pipeline Health
-          </button>
-          <button
-            onClick={() => setActiveSubTab('winloss')}
-            className={`px-3 py-1.5 rounded-md cursor-pointer transition-all ${
-              activeSubTab === 'winloss' ? 'bg-theme-card text-theme-primary shadow-xs border border-theme-border/50' : 'text-theme-secondary hover:text-theme-primary'
-            }`}
-          >
-            Win/Loss Analysis
-          </button>
-          <button
-            onClick={() => setActiveSubTab('builder')}
-            className={`px-3 py-1.5 rounded-md cursor-pointer transition-all ${
-              activeSubTab === 'builder' ? 'bg-theme-card text-theme-primary shadow-xs border border-theme-border/50' : 'text-theme-secondary hover:text-theme-primary'
-            }`}
-          >
-            Custom Report Builder
-          </button>
+        <div className="flex items-center gap-1 bg-theme-inset p-1 rounded border border-theme-border text-xs font-bold shadow-sm">
+          {[
+            { id: 'dash' as const, label: isManagerOrAdmin ? 'Team Dashboard' : 'My Performance', icon: BarChart3 },
+            { id: 'health' as const, label: 'Pipeline Health', icon: GitPullRequest },
+            { id: 'winloss' as const, label: 'Win/Loss', icon: PieChart },
+            { id: 'builder' as const, label: 'Custom Reports', icon: Sparkles },
+          ].map(tab => (
+            <button
+              key={tab.id}
+              onClick={() => setActiveSubTab(tab.id)}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded cursor-pointer transition-all ${
+                activeSubTab === tab.id
+                  ? 'bg-white text-theme-accent shadow-sm border border-theme-border font-extrabold'
+                  : 'text-theme-secondary hover:text-theme-primary'
+              }`}
+            >
+              <tab.icon className="w-3.5 h-3.5" />
+              {tab.label}
+            </button>
+          ))}
         </div>
       </header>
 
-      {/* Main content scroll pane */}
+      {/* Main scroll */}
       <div className="flex-1 overflow-y-auto p-6 font-sans">
-        
-        {/* SUB TAB: DASHBOARDS */}
+
+        {/* ═══════════ SUB TAB: DASHBOARD ═══════════ */}
         {activeSubTab === 'dash' && (
           <div className="space-y-6">
             <SetupChecklist />
-            {accounts.length === 0 && (
-              <div className="bg-theme-card border border-theme-border border-dashed rounded-[10px] p-4 flex items-center justify-between gap-4 shadow-card">
-                <div className="flex items-center gap-3">
-                  <div className="w-9 h-9 rounded-lg bg-theme-accent-soft text-theme-accent flex items-center justify-center shrink-0">
-                    <Building2 className="w-4.5 h-4.5" />
-                  </div>
-                  <div>
-                    <p className="text-xs font-semibold text-theme-primary">No company account yet</p>
-                    <p className="text-2xs text-theme-secondary">Create your organization as an account to associate contacts and deals.</p>
+
+            {/* ── KPI ROW ── */}
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+              {[
+                {
+                  label: 'Open Pipeline', value: `$${totalOpenValue.toLocaleString()}`, sub: `${openDeals.length} active deals`,
+                  icon: DollarSign, accent: 'border-l-theme-accent', iconBg: 'bg-theme-accent', iconFg: 'text-white', bar: 'bg-theme-accent',
+                },
+                {
+                  label: 'Closed Won Revenue', value: `$${totalWonValue.toLocaleString()}`, sub: personalQuota > 0 ? `${Math.round(quotaAttainmentPct)}% of $${(personalQuota / 1000).toFixed(0)}k quota` : 'Set a quota target in your profile',
+                  icon: Target, accent: 'border-l-success', iconBg: 'bg-success', iconFg: 'text-white', bar: 'bg-success',
+                },
+                {
+                  label: 'Win Rate', value: `${winRate.toFixed(1)}%`, sub: `${wonDeals.length} won · ${lostDeals.length} lost`,
+                  icon: Percent, accent: 'border-l-info', iconBg: 'bg-info', iconFg: 'text-white', bar: 'bg-info',
+                },
+                {
+                  label: 'Activities', value: scopedActivities.length.toLocaleString(), sub: 'Calls, notes, emails',
+                  icon: Zap, accent: 'border-l-warning', iconBg: 'bg-warning', iconFg: 'text-white', bar: 'bg-warning',
+                },
+              ].map(kpi => (
+                <div key={kpi.label} className={`bg-white border border-theme-border rounded shadow-sm overflow-hidden ${kpi.accent} border-l-[3px]`}>
+                  <div className="p-5">
+                    <div className="flex items-center justify-between mb-3">
+                      <span className="text-xs font-extrabold text-theme-secondary uppercase tracking-wider font-sans">{kpi.label}</span>
+                      <span className={`w-8 h-8 rounded flex items-center justify-center shadow-sm ${kpi.iconBg}`}>
+                        <kpi.icon className={`w-4 h-4 ${kpi.iconFg}`} />
+                      </span>
+                    </div>
+                    <p className="text-2xl font-extrabold text-theme-primary tnum tracking-tight" data-metric>{kpi.value}</p>
+                    {/* Mini progress bar */}
+                    <div className="mt-3 h-1.5 w-full bg-theme-inset rounded-full overflow-hidden">
+                      <div className={`h-full rounded-full ${kpi.bar} transition-all duration-700`}
+                        style={{ width: `${kpi.label === 'Win Rate' ? winRate : kpi.label === 'Open Pipeline' ? (personalQuota > 0 ? Math.min(100, (totalOpenValue / personalQuota) * 100) : 0) : kpi.label === 'Closed Won Revenue' ? (personalQuota > 0 ? Math.min(100, quotaAttainmentPct) : 0) : Math.min(100, (scopedActivities.length / 30) * 100)}%` }} />
+                    </div>
+                    <p className="text-2xs text-theme-secondary mt-2 font-semibold font-sans">{kpi.sub}</p>
                   </div>
                 </div>
-                <button
-                  onClick={() => { setActiveModule('contacts'); setTimeout(() => window.dispatchEvent(new Event('boutinly:new-record')), 100); }}
-                  className="shrink-0 text-xs font-medium text-white bg-theme-accent hover:opacity-90 rounded-md px-3 py-1.5 cursor-pointer transition-opacity shadow-card"
-                >
-                  Create Account
-                </button>
+              ))}
+            </div>
+
+            {/* ── TWO COLUMN: Charts + AI ── */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              {/* Pipeline Funnel */}
+              <div className="bg-white border border-theme-border rounded shadow-sm p-5">
+                <h3 className="text-sm font-extrabold text-theme-primary uppercase tracking-wide font-sans mb-4 flex items-center gap-2">
+                  <GitPullRequest className="w-4 h-4 text-theme-accent" /> Pipeline Funnel
+                </h3>
+                <FunnelChart money data={activeStagesForChart.map(stg => ({
+                  label: stg.name,
+                  value: scopedDeals.filter(d => d.stage_id === stg.id).reduce((sum, d) => sum + d.value, 0),
+                }))} />
               </div>
-            )}
-            <DashboardWidgetGrid widgets={dashboardWidgets} />
+
+              {/* Revenue Trend */}
+              <div className="bg-white border border-theme-border rounded shadow-sm p-5">
+                <h3 className="text-sm font-extrabold text-theme-primary uppercase tracking-wide font-sans mb-4 flex items-center gap-2">
+                  <TrendingUp className="w-4 h-4 text-theme-accent" /> Revenue Trend
+                </h3>
+                <TrendLine points={trendData.map(t => t.value)} labels={trendData.map(t => t.label)} money height={200} />
+              </div>
+            </div>
+
+            {/* ── THREE COLUMN: AI Actions + Donut + Data Quality ── */}
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+              {/* AI Next Best Actions */}
+              <div className="bg-white border border-theme-border rounded shadow-sm p-5">
+                <h3 className="text-sm font-extrabold text-theme-primary uppercase tracking-wide font-sans mb-4 flex items-center gap-2">
+                  <Sparkles className="w-4 h-4 text-theme-accent" /> Next Best Actions
+                </h3>
+                {nextBestActions.length === 0 ? (
+                  <div className="py-8 text-center">
+                    <CheckCircle className="w-10 h-10 mx-auto text-success mb-3" />
+                    <p className="text-sm font-bold text-theme-primary font-sans">All caught up</p>
+                    <p className="text-xs text-theme-secondary mt-1">No urgent actions detected.</p>
+                  </div>
+                ) : (
+                  <div className="space-y-2 max-h-[320px] overflow-y-auto pr-1">
+                    {nextBestActions.map(action => {
+                      const tones: Record<string, { bg: string; text: string; bar: string }> = {
+                        high: { bg: 'bg-danger-soft', text: 'text-danger', bar: 'bg-danger' },
+                        medium: { bg: 'bg-warning-soft', text: 'text-warning', bar: 'bg-warning' },
+                        low: { bg: 'bg-theme-inset', text: 'text-theme-secondary', bar: 'bg-theme-border' },
+                      };
+                      const t = tones[action.priority] || tones.low;
+                      return (
+                        <div key={action.id}
+                          className="flex items-start gap-3 p-3 rounded border border-theme-border hover:border-theme-accent/40 hover:shadow-sm cursor-pointer transition-all bg-theme-inset/30"
+                          onClick={() => { if (action.entityId) dispatchSelectEntity({ module: action.module, entityId: action.entityId }); }}
+                        >
+                          <div className={`w-1.5 self-stretch rounded-full shrink-0 ${t.bar}`} />
+                          <div className="shrink-0">
+                            <span className={`text-[10px] font-extrabold px-2 py-0.5 rounded uppercase ${t.bg} ${t.text}`}>{action.priority}</span>
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <p className="text-xs font-bold text-theme-primary">{action.title}</p>
+                            <p className="text-2xs text-theme-secondary mt-0.5 leading-relaxed">{action.reason}</p>
+                          </div>
+                          <ArrowRight className="w-3.5 h-3.5 text-theme-secondary/30 shrink-0 mt-1" />
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+
+              {/* Pipeline Distribution */}
+              <div className="bg-white border border-theme-border rounded shadow-sm p-5">
+                <h3 className="text-sm font-extrabold text-theme-primary uppercase tracking-wide font-sans mb-4 flex items-center gap-2">
+                  <PieChart className="w-4 h-4 text-theme-accent" /> Pipeline Distribution
+                </h3>
+                <DonutChart
+                  data={activeStagesForChart.map(stg => ({
+                    label: stg.name,
+                    value: scopedDeals.filter(d => d.stage_id === stg.id).length,
+                    color: stg.type === 'won' ? 'var(--success)' : stg.type === 'lost' ? 'var(--text-secondary)' : undefined,
+                  }))}
+                  centerLabel="Deals"
+                />
+              </div>
+
+              {/* Data Quality */}
+              <div className="bg-white border border-theme-border rounded shadow-sm p-5">
+                <h3 className="text-sm font-extrabold text-theme-primary uppercase tracking-wide font-sans mb-4 flex items-center gap-2">
+                  <ShieldCheck className="w-4 h-4 text-theme-accent" /> Data Quality
+                </h3>
+                <div className="space-y-3">
+                  {[
+                    { icon: Phone, label: 'Incomplete Contacts', count: dataQuality.incomplete, tone: dataQuality.incomplete > 0 ? 'warning' : 'success' as const },
+                    { icon: UserX, label: 'Unassigned Contacts', count: dataQuality.unassigned, tone: dataQuality.unassigned > 0 ? 'warning' : 'success' as const },
+                    { icon: Copy, label: 'Duplicate Contacts', count: dataQuality.duplicates, tone: dataQuality.duplicates > 0 ? 'danger' : 'success' as const },
+                  ].map(item => (
+                    <div key={item.label} className="flex items-center justify-between py-2.5 px-3 rounded bg-theme-inset/50 border border-theme-border/50">
+                      <div className="flex items-center gap-2.5">
+                        <item.icon className="w-4 h-4 text-theme-secondary/60" />
+                        <span className="text-xs font-semibold text-theme-primary font-sans">{item.label}</span>
+                      </div>
+                      <span className={`text-sm font-extrabold font-sans ${item.tone === 'danger' ? 'text-danger' : item.tone === 'warning' ? 'text-warning' : 'text-success'}`}>
+                        {item.count}
+                      </span>
+                    </div>
+                  ))}
+                  {duplicateGroups.length > 0 && (
+                    <div className="pt-3 border-t border-theme-border space-y-1.5">
+                      <p className="text-2xs font-bold text-theme-secondary uppercase tracking-wider">{duplicateGroups.length} duplicate group{duplicateGroups.length > 1 ? 's' : ''}</p>
+                      {duplicateGroups.slice(0, 3).map((g, i) => (
+                        <p key={i} className="text-2xs text-warning font-semibold bg-warning-soft/50 px-2 py-1 rounded">
+                          {g.contacts.map(c => `${c.first_name} ${c.last_name}`).join(' ≈ ')}
+                        </p>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
           </div>
         )}
 
-        {/* SUB TAB: PIPELINE HEALTH */}
+        {/* ═══════════ SUB TAB: PIPELINE HEALTH ═══════════ */}
         {activeSubTab === 'health' && (
-          <div className="bg-theme-card p-6 rounded-xl shadow-xs border border-theme-border space-y-6">
+          <div className="bg-white rounded shadow-sm border border-theme-border p-6 space-y-7">
             <div>
-              <h3 className="text-base font-bold text-theme-primary flex items-center gap-1.5">
-                <GitPullRequest className="w-5 h-5 text-theme-accent" />
-                Pipeline Conversion Funnel & Health Diagnostics
+              <h3 className="text-base font-extrabold text-theme-primary flex items-center gap-2">
+                <span className="w-8 h-8 rounded bg-theme-accent/10 flex items-center justify-center"><GitPullRequest className="w-4 h-4 text-theme-accent" /></span>
+                Pipeline Conversion Funnel
               </h3>
-              <p className="text-xs text-theme-secondary mt-1">
-                Visualizing conversion degradation at each pipeline stage. Ideal for identifying sales friction bottlenecks.
-              </p>
+              <p className="text-xs text-theme-secondary mt-1 ml-10">Conversion degradation at each stage — identify friction bottlenecks.</p>
             </div>
 
-            {/* Custom Funnel Visualizer (SVG Horizontal bars of decreasing width) */}
-            <div className="flex flex-col items-center justify-center py-6 space-y-4 max-w-xl mx-auto">
+            <div className="max-w-2xl mx-auto space-y-3 py-4">
               {stages.filter(s => s.pipeline_id === activePipelineId && s.type === 'open').length === 0 ? (
-                <div className="text-center py-8 text-xs text-theme-secondary/70 font-sans">
-                  <GitPullRequest className="w-10 h-10 mx-auto mb-2 text-theme-secondary/30" />
-                  <p className="font-semibold text-theme-secondary">No pipeline stages available</p>
-                  <p className="mt-1">Configure your pipeline stages to visualize the deal funnel.</p>
+                <div className="text-center py-10 text-xs text-theme-secondary font-sans">
+                  <GitPullRequest className="w-12 h-12 mx-auto mb-3 text-theme-border" />
+                  <p className="font-bold text-theme-primary">No pipeline stages configured</p>
+                  <p className="mt-1">Set up your pipeline stages in Admin to visualize the funnel.</p>
                 </div>
               ) : (
                 stages.filter(s => s.pipeline_id === activePipelineId && s.type === 'open').map((stg, index) => {
-                const dealsInStgCount = scopedDeals.filter(d => d.stage_id === stg.id).length;
-                const widthPercent = 100 - (index * 15); // Stagger funnel layout
-                
-                return (
-                  <div key={stg.id} className="w-full flex items-center gap-4">
-                    <span className="w-32 text-right text-xs font-semibold text-theme-secondary">{stg.name}</span>
-                    <div className="flex-1">
-                      <div 
-                        className="bg-theme-accent hover:opacity-90 text-white text-xs font-bold py-2 px-3 rounded shadow-xs flex justify-between items-center transition-all"
-                        style={{ width: `${widthPercent}%` }}
-                      >
-                        <span>{dealsInStgCount} Deals</span>
-                        <span>{stg.probability}% Prob</span>
+                  const dealsInStg = scopedDeals.filter(d => d.stage_id === stg.id);
+                  const count = dealsInStg.length;
+                  const val = dealsInStg.reduce((s, d) => s + d.value, 0);
+                  const widthPct = Math.max(16, 100 - index * 14);
+                  return (
+                    <div key={stg.id} className="flex items-center gap-4">
+                      <div className="w-36 text-right shrink-0">
+                        <p className="text-xs font-extrabold text-theme-primary">{stg.name}</p>
+                        <p className="text-2xs text-theme-secondary font-semibold">{stg.probability}% probability</p>
+                      </div>
+                      <div className="flex-1">
+                        <div className="bg-theme-accent text-white text-xs font-extrabold py-2.5 px-4 rounded shadow-sm flex justify-between items-center transition-all" style={{ width: `${widthPct}%` }}>
+                          <span>{count} Deal{count !== 1 ? 's' : ''}</span>
+                          <span className="font-mono text-white/90">${val.toLocaleString()}</span>
+                        </div>
                       </div>
                     </div>
-                  </div>
-                );
-              })
+                  );
+                })
               )}
             </div>
 
-            <div className="border-t border-theme-border pt-5">
-              <h4 className="text-xs font-bold uppercase font-sans tracking-wider text-theme-secondary mb-3">Health Indicators</h4>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs text-theme-secondary leading-normal">
+            <div className="border-t-2 border-theme-border pt-5">
+              <h4 className="text-xs font-extrabold uppercase font-sans tracking-wider text-theme-secondary mb-4">Health Diagnostics</h4>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
                 {(() => {
-                  const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
-                  const stagnantDeals = openDeals.filter(d => {
-                    const entered = new Date(d.stage_entered_at);
-                    return entered < new Date(Date.now() - 14 * 24 * 60 * 60 * 1000);
-                  });
-                  const recentlyWon = wonDeals.filter(d => {
-                    const wonAt = d.won_at ? new Date(d.won_at) : null;
-                    return wonAt && wonAt > thirtyDaysAgo;
-                  });
-                  const recentlyLost = lostDeals.filter(d => {
-                    const lostAt = d.lost_at ? new Date(d.lost_at) : null;
-                    return lostAt && lostAt > thirtyDaysAgo;
-                  });
-
+                  const stagnantDeals = openDeals.filter(d => new Date(d.stage_entered_at) < new Date(Date.now() - 14 * 24 * 60 * 60 * 1000));
+                  const recentWon = wonDeals.filter(d => d.won_at && new Date(d.won_at) > new Date(Date.now() - 30 * 24 * 60 * 60 * 1000));
+                  const recentLost = lostDeals.filter(d => d.lost_at && new Date(d.lost_at) > new Date(Date.now() - 30 * 24 * 60 * 60 * 1000));
                   return (
                     <>
                       {stagnantDeals.length > 0 && (
-                        <div className="p-4 bg-theme-accent/5 rounded-lg border border-theme-accent/15 flex gap-3">
-                          <div className="text-theme-accent shrink-0 text-base">⚠️</div>
+                        <div className="p-4 bg-warning-soft border border-warning/20 rounded flex gap-3 items-start">
+                          <AlertTriangle className="w-5 h-5 text-warning shrink-0 mt-0.5" />
                           <div>
-                            <span className="font-semibold block text-theme-primary">Stagnant Deal{stagnantDeals.length > 1 ? 's' : ''} Detected</span>
-                            {stagnantDeals.length} deal{stagnantDeals.length > 1 ? 's' : ''} stuck in current stage for over 14 days. Review "{stagnantDeals[0].name}"{stagnantDeals.length > 1 ? `and ${stagnantDeals.length - 1} other${stagnantDeals.length > 2 ? 's' : ''}` : ''} to prevent pipeline stall.
+                            <p className="font-extrabold text-theme-primary">Stagnant Deal{stagnantDeals.length > 1 ? 's' : ''} Detected</p>
+                            <p className="text-theme-secondary mt-1 leading-relaxed">
+                              {stagnantDeals.length} deal{stagnantDeals.length > 1 ? 's' : ''} stuck in current stage over 14 days.
+                              Review <strong>"{stagnantDeals[0].name}"</strong>{stagnantDeals.length > 1 ? ` and ${stagnantDeals.length - 1} other${stagnantDeals.length > 2 ? 's' : ''}` : ''}.
+                            </p>
                           </div>
                         </div>
                       )}
-                      <div className="p-4 bg-theme-accent/10 rounded-lg border border-theme-accent/20 flex gap-3">
-                        <div className="text-theme-accent shrink-0 text-base">{recentlyWon.length > 0 ? '✅' : '📊'}</div>
+                      <div className="p-4 bg-info-soft border border-info/20 rounded flex gap-3 items-start">
+                        <Target className="w-5 h-5 text-info shrink-0 mt-0.5" />
                         <div>
-                          <span className="font-semibold block text-theme-primary">Pipeline Velocity</span>
-                          {recentlyWon.length > 0
-                            ? `${recentlyWon.length} deal${recentlyWon.length > 1 ? 's' : ''} won in last 30 days. `
-                            : 'No deals won in last 30 days. '}
-                          {recentlyLost.length > 0
-                            ? `${recentlyLost.length} deal${recentlyLost.length > 1 ? 's' : ''} lost. `
-                            : 'No recent losses. '}
-                          Total pipeline value: ${totalOpenValue.toLocaleString()}.
+                          <p className="font-extrabold text-theme-primary">Pipeline Velocity</p>
+                          <p className="text-theme-secondary mt-1 leading-relaxed">
+                            {recentWon.length > 0 ? `${recentWon.length} won in last 30 days. ` : 'No deals won in last 30 days. '}
+                            {recentLost.length > 0 ? `${recentLost.length} lost. ` : 'No recent losses. '}
+                            Open pipeline: <strong>${totalOpenValue.toLocaleString()}</strong>
+                          </p>
                         </div>
                       </div>
                     </>
@@ -583,222 +463,149 @@ export default function ReportsModule() {
           </div>
         )}
 
-        {/* SUB TAB: WIN/LOSS ANALYSIS */}
+        {/* ═══════════ SUB TAB: WIN/LOSS ═══════════ */}
         {activeSubTab === 'winloss' && (
-          <div className="bg-theme-card p-6 rounded-xl shadow-xs border border-theme-border space-y-6">
+          <div className="bg-white rounded shadow-sm border border-theme-border p-6 space-y-7">
             <div>
-              <h3 className="text-base font-bold text-theme-primary flex items-center gap-1.5">
-                <PieChart className="w-5 h-5 text-theme-accent" />
-                Win / Loss Analysis & Competitor Intel
+              <h3 className="text-base font-extrabold text-theme-primary flex items-center gap-2">
+                <span className="w-8 h-8 rounded bg-theme-accent/10 flex items-center justify-center"><PieChart className="w-4 h-4 text-theme-accent" /></span>
+                Win / Loss Analysis
               </h3>
-              <p className="text-xs text-theme-secondary mt-1">
-                Deconstructing deal metrics by outcomes, competitors, and underlying reasons.
-              </p>
+              <p className="text-xs text-theme-secondary mt-1 ml-10">Deal outcomes, competitor intelligence, and lost reason breakdown.</p>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               {/* Lost Reason Breakdown */}
-              <div className="p-4 bg-theme-base/30 rounded-lg border border-theme-border">
-                <h4 className="text-xs font-bold uppercase font-sans tracking-wider text-theme-secondary mb-3">Lost Reason Attribution</h4>
-                
-                <div className="space-y-3">
-                  {(() => {
-                    const lostWithReasons = lostDeals.filter(d => d.lost_reason);
-                    if (lostWithReasons.length === 0) {
-                      return <p className="text-xs text-theme-secondary">No lost deal data available yet.</p>;
-                    }
-                    const reasonCounts: Record<string, number> = {};
-                    lostWithReasons.forEach(d => {
-                      const reason = d.lost_reason || 'Unspecified';
-                      reasonCounts[reason] = (reasonCounts[reason] || 0) + 1;
-                    });
-                    const total = lostWithReasons.length;
-                    const opacities = ['bg-theme-accent/70', 'bg-theme-accent/45', 'bg-theme-secondary/40', 'bg-theme-secondary/30'];
-                    return Object.entries(reasonCounts)
-                      .sort(([, a], [, b]) => b - a)
-                      .slice(0, 5)
-                      .map(([reason, count], i) => {
-                        const pct = (count / total) * 100;
-                        return (
-                          <div key={reason}>
-                            <div className="flex justify-between text-xs text-theme-secondary font-semibold mb-1">
-                              <span>{reason}</span>
-                              <span>{pct.toFixed(0)}%</span>
-                            </div>
-                            <div className="w-full bg-theme-base h-2 rounded-full overflow-hidden">
-                              <div className={`${opacities[i] || 'bg-theme-accent/30'} h-full rounded-full`} style={{ width: `${pct}%` }} />
-                            </div>
-                          </div>
-                        );
-                      });
-                  })()}
-                </div>
+              <div className="p-5 bg-theme-inset/30 rounded border border-theme-border">
+                <h4 className="text-xs font-extrabold uppercase font-sans tracking-wider text-theme-secondary mb-4">Lost Reason Attribution</h4>
+                {(() => {
+                  const lostWithReasons = lostDeals.filter(d => d.lost_reason);
+                  if (lostWithReasons.length === 0) return <p className="text-xs text-theme-secondary py-4">No lost deal data available yet.</p>;
+                  const reasonCounts: Record<string, number> = {};
+                  lostWithReasons.forEach(d => { const r = d.lost_reason || 'Unspecified'; reasonCounts[r] = (reasonCounts[r] || 0) + 1; });
+                  const total = lostWithReasons.length;
+                  return Object.entries(reasonCounts).sort(([,a],[,b]) => b - a).slice(0, 6).map(([reason, count], i) => {
+                    const pct = Math.round((count / total) * 100);
+                    return (
+                      <div key={reason} className="mb-3 last:mb-0">
+                        <div className="flex justify-between text-xs font-semibold mb-1"><span className="text-theme-primary">{reason}</span><span className="text-theme-secondary">{pct}%</span></div>
+                        <div className="w-full bg-theme-base h-2.5 rounded-full overflow-hidden"><div className="bg-theme-accent h-full rounded-full transition-all" style={{ width: `${pct}%`, opacity: 1 - i * 0.12 }} /></div>
+                      </div>
+                    );
+                  });
+                })()}
               </div>
 
               {/* Competitor Standings */}
-              <div className="p-4 bg-theme-base/30 rounded-lg border border-theme-border flex flex-col justify-between">
-                <div>
-                  <h4 className="text-xs font-bold uppercase font-sans tracking-wider text-theme-secondary mb-3">Key Competitor Head-to-Head</h4>
-                  <p className="text-[11px] text-theme-secondary/80">Winning rates where competitors are logged</p>
-                </div>
-
-                <div className="space-y-2 mt-3 text-xs">
-                  {(() => {
-                    // Extract competitors dynamically from deal custom fields
-                    const competitorStats: Record<string, { won: number; closed: number }> = {};
-                    
-                    scopedDeals.forEach(d => {
-                      const compName = d.custom_fields?.competitor_name;
-                      if (!compName || typeof compName !== 'string') return;
-                      
-                      const normalizedName = compName.trim();
-                      if (!normalizedName) return;
-                      
-                      const stage = stages.find(s => s.id === d.stage_id);
-                      if (!stage) return;
-                      
-                      if (!competitorStats[normalizedName]) {
-                        competitorStats[normalizedName] = { won: 0, closed: 0 };
-                      }
-                      
-                      if (stage.type === 'won') {
-                        competitorStats[normalizedName].won += 1;
-                        competitorStats[normalizedName].closed += 1;
-                      } else if (stage.type === 'lost') {
-                        competitorStats[normalizedName].closed += 1;
-                      }
-                    });
-
-                    const statsArray = Object.entries(competitorStats);
-
-                    if (statsArray.length === 0) {
-                      return (
-                        <div className="text-center py-6 text-[11px] text-theme-secondary">
-                          No competitor interactions logged in active opportunities.
+              <div className="p-5 bg-theme-inset/30 rounded border border-theme-border">
+                <h4 className="text-xs font-extrabold uppercase font-sans tracking-wider text-theme-secondary mb-4">Competitor Head-to-Head</h4>
+                {(() => {
+                  const compStats: Record<string, { won: number; lost: number }> = {};
+                  scopedDeals.forEach(d => {
+                    const name = d.custom_fields?.competitor_name;
+                    if (!name || typeof name !== 'string') return;
+                    const s = stages.find(x => x.id === d.stage_id);
+                    if (!s) return;
+                    const key = name.trim();
+                    if (!key || !compStats[key]) compStats[key] = { won: 0, lost: 0 };
+                    if (s.type === 'won') compStats[key].won++;
+                    else if (s.type === 'lost') compStats[key].lost++;
+                  });
+                  const arr = Object.entries(compStats);
+                  if (!arr.length) return <p className="text-xs text-theme-secondary py-6 text-center">No competitor data logged yet.</p>;
+                  return arr.sort(([,a],[,b]) => (b.won + b.lost) - (a.won + a.lost)).slice(0, 8).map(([name, s]) => {
+                    const total = s.won + s.lost;
+                    const wr = total > 0 ? Math.round((s.won / total) * 100) : 0;
+                    return (
+                      <div key={name} className="flex items-center justify-between py-2.5 px-3 rounded border border-theme-border bg-white mb-2 last:mb-0">
+                        <span className="text-xs font-bold text-theme-primary">{name}</span>
+                        <div className="flex items-center gap-3 text-2xs font-bold">
+                          <span className="flex items-center gap-1 text-success"><CheckCircle className="w-3 h-3" />{s.won} won</span>
+                          <span className="flex items-center gap-1 text-danger"><XCircle className="w-3 h-3" />{s.lost} lost</span>
+                          <span className="bg-theme-accent/10 text-theme-accent px-2 py-0.5 rounded font-extrabold">{wr}%</span>
                         </div>
-                      );
-                    }
-
-                    return statsArray.map(([name, stats]) => {
-                      const winRate = stats.closed > 0 ? (stats.won / stats.closed) * 100 : 0;
-                      return (
-                        <div key={name} className="p-2 bg-theme-card rounded border border-theme-border flex justify-between items-center">
-                          <span className="font-semibold text-theme-primary">{name}</span>
-                          <span className="bg-theme-accent/10 text-theme-primary px-1.5 py-0.5 rounded text-[10px] font-bold font-sans">
-                            {winRate.toFixed(0)}% Win Rate ({stats.closed} closed)
-                          </span>
-                        </div>
-                      );
-                    });
-                  })()}
-                </div>
+                      </div>
+                    );
+                  });
+                })()}
               </div>
             </div>
           </div>
         )}
 
-        {/* SUB TAB: CUSTOM REPORT BUILDER */}
+        {/* ═══════════ SUB TAB: CUSTOM REPORT BUILDER ═══════════ */}
         {activeSubTab === 'builder' && (
           <div className="space-y-6">
-            <div className="bg-theme-card p-6 rounded-xl shadow-xs border border-theme-border">
-              <h3 className="text-base font-bold text-theme-primary flex items-center gap-1.5">
-                <Sparkles className="w-5 h-5 text-theme-accent" />
-                Dynamic Custom Report Configurator
+            <div className="bg-white rounded shadow-sm border border-theme-border p-6">
+              <h3 className="text-base font-extrabold text-theme-primary flex items-center gap-2">
+                <span className="w-8 h-8 rounded bg-theme-accent/10 flex items-center justify-center"><Sparkles className="w-4 h-4 text-theme-accent" /></span>
+                Custom Report Builder
               </h3>
-              <p className="text-xs text-theme-secondary mt-1">
-                Construct bespoke analytical spreadsheets. Segment by users, accounts, or dates instantly.
-              </p>
+              <p className="text-xs text-theme-secondary mt-1 ml-10">Build analytical spreadsheets segmented by users, accounts, or stages.</p>
 
-              {/* Builder Controls */}
-              <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mt-6 p-4 bg-theme-base/30 rounded-lg border border-theme-border">
-                <div className="space-y-1">
-                  <label className="block text-[10px] font-bold uppercase font-sans text-theme-secondary">Query Entity</label>
-                  <select 
-                    value={reportEntity} 
-                    onChange={(e) => setReportEntity(e.target.value as any)}
-                    className="w-full bg-theme-card text-theme-primary rounded border border-theme-border px-2.5 py-2 text-xs focus:ring-1 focus:ring-theme-accent focus:outline-none"
-                  >
-                    <option value="deal">Sales Opportunities (Deals)</option>
-                    <option value="contact">Business Contacts</option>
-                    <option value="task">Tasks & Due Dates</option>
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mt-6 p-5 bg-theme-inset/30 rounded border border-theme-border">
+                <div className="space-y-1.5">
+                  <label className="text-2xs font-extrabold uppercase tracking-wider text-theme-secondary font-sans">Entity</label>
+                  <select value={reportEntity} onChange={(e) => setReportEntity(e.target.value as any)} className="w-full bg-white text-theme-primary rounded border border-theme-border px-3 py-2 text-sm font-semibold focus:border-theme-accent focus:outline-none h-10">
+                    <option value="deal">Deals</option>
+                    <option value="contact">Contacts</option>
+                    <option value="task">Tasks</option>
                   </select>
                 </div>
-
-                <div className="space-y-1">
-                  <label className="block text-[10px] font-bold uppercase font-sans text-theme-secondary">Grouping Column</label>
-                  <select 
-                    value={reportGrouping} 
-                    onChange={(e) => setReportGrouping(e.target.value)}
-                    className="w-full bg-theme-card text-theme-primary rounded border border-theme-border px-2.5 py-2 text-xs focus:ring-1 focus:ring-theme-accent focus:outline-none"
-                  >
-                    <option value="owner_id">Assigned Owner (Sales Rep)</option>
-                    {reportEntity === 'deal' && <option value="stage_id">Opportunity Stage</option>}
-                    {(reportEntity === 'deal' || reportEntity === 'contact') && <option value="account_id">Account (Company)</option>}
+                <div className="space-y-1.5">
+                  <label className="text-2xs font-extrabold uppercase tracking-wider text-theme-secondary font-sans">Group By</label>
+                  <select value={reportGrouping} onChange={(e) => setReportGrouping(e.target.value)} className="w-full bg-white text-theme-primary rounded border border-theme-border px-3 py-2 text-sm font-semibold focus:border-theme-accent focus:outline-none h-10">
+                    <option value="owner_id">Owner</option>
+                    {reportEntity === 'deal' && <option value="stage_id">Stage</option>}
+                    {(reportEntity === 'deal' || reportEntity === 'contact') && <option value="account_id">Account</option>}
                     {reportEntity === 'task' && <option value="type">Task Type</option>}
                   </select>
                 </div>
-
-                <div className="space-y-1">
-                  <label className="block text-[10px] font-bold uppercase font-sans text-theme-secondary">Aggregated Metric</label>
-                  <select 
-                    value={reportMetric} 
-                    onChange={(e) => setReportMetric(e.target.value as any)}
-                    className="w-full bg-theme-card text-theme-primary rounded border border-theme-border px-2.5 py-2 text-xs focus:ring-1 focus:ring-theme-accent focus:outline-none"
-                  >
-                    <option value="count">Count (Total Records)</option>
-                    {reportEntity === 'deal' && <option value="sum_value">Sum of Monetary Value ($)</option>}
+                <div className="space-y-1.5">
+                  <label className="text-2xs font-extrabold uppercase tracking-wider text-theme-secondary font-sans">Metric</label>
+                  <select value={reportMetric} onChange={(e) => setReportMetric(e.target.value as any)} className="w-full bg-white text-theme-primary rounded border border-theme-border px-3 py-2 text-sm font-semibold focus:border-theme-accent focus:outline-none h-10">
+                    <option value="count">Count</option>
+                    {reportEntity === 'deal' && <option value="sum_value">Total Value ($)</option>}
                   </select>
                 </div>
-
                 <div className="flex items-end">
-                  <button
-                    onClick={handleGenerateReport}
-                    className="w-full bg-theme-accent hover:opacity-90 text-white font-semibold py-2 px-4 rounded text-xs transition-colors cursor-pointer flex items-center justify-center gap-1.5"
-                  >
-                    <RefreshCw className="w-3.5 h-3.5" /> Compile Report
+                  <button onClick={handleGenerateReport}
+                    className="w-full bg-theme-accent hover:brightness-95 text-white font-extrabold py-2.5 px-4 rounded text-sm transition-all cursor-pointer flex items-center justify-center gap-2 h-10 shadow-sm">
+                    <RefreshCw className="w-4 h-4" /> Compile Report
                   </button>
                 </div>
               </div>
             </div>
 
-            {/* Generated Report Display */}
             {reportGenerated && (
-              <div className="bg-theme-card p-5 rounded-xl shadow-xs border border-theme-border space-y-4">
+              <div className="bg-white rounded shadow-sm border border-theme-border p-5 space-y-4">
                 <div className="flex justify-between items-center">
-                  <h4 className="text-xs font-bold uppercase font-sans tracking-wider text-theme-secondary">Report Output</h4>
-                  <button
-                    onClick={handleExportCsv}
-                    className="text-xs text-theme-accent hover:opacity-80 font-medium flex items-center gap-1 cursor-pointer"
-                  >
-                    <FileDown className="w-3.5 h-3.5" /> Export as CSV
+                  <h4 className="text-sm font-extrabold uppercase font-sans tracking-wider text-theme-primary">Report Output</h4>
+                  <button onClick={handleExportCsv} className="flex items-center gap-1.5 text-sm font-bold text-theme-accent hover:opacity-80 cursor-pointer">
+                    <FileDown className="w-4 h-4" /> Export CSV
                   </button>
                 </div>
-
-                <div className="overflow-x-auto rounded-lg border border-theme-border">
-                  <table className="w-full text-left text-xs divide-y divide-theme-border">
-                    <thead className="bg-theme-base font-bold text-theme-secondary uppercase font-sans text-[10px]">
+                <div className="overflow-x-auto rounded border border-theme-border">
+                  <table className="w-full text-left text-sm divide-y divide-theme-border">
+                    <thead className="bg-theme-inset font-extrabold text-theme-secondary uppercase font-sans text-xs">
                       <tr>
-                        <th className="px-4 py-3">Group Matrix</th>
-                        <th className="px-4 py-3 text-right">Volume</th>
-                        {reportEntity === 'deal' && reportMetric === 'sum_value' && <th className="px-4 py-3 text-right">Total Financial Value</th>}
+                        <th className="px-5 py-3">Group</th>
+                        <th className="px-5 py-3 text-right">Count</th>
+                        {reportEntity === 'deal' && reportMetric === 'sum_value' && <th className="px-5 py-3 text-right">Total Value</th>}
                       </tr>
                     </thead>
-                    <tbody className="divide-y divide-theme-border text-theme-secondary">
+                    <tbody className="divide-y divide-theme-border">
                       {reportResult.length === 0 ? (
-                        <tr>
-                          <td colSpan={3} className="px-4 py-6 text-center text-theme-secondary/70">No matching record aggregates</td>
+                        <tr><td colSpan={3} className="px-5 py-10 text-center text-theme-secondary font-medium">No matching records</td></tr>
+                      ) : reportResult.map((row, idx) => (
+                        <tr key={idx} className="hover:bg-theme-hover/50 transition-colors">
+                          <td className="px-5 py-3 font-bold text-theme-primary">{row.groupName}</td>
+                          <td className="px-5 py-3 text-right font-semibold">{row.count}</td>
+                          {reportEntity === 'deal' && reportMetric === 'sum_value' && (
+                            <td className="px-5 py-3 text-right font-extrabold text-theme-accent">${row.value.toLocaleString()}</td>
+                          )}
                         </tr>
-                      ) : (
-                        reportResult.map((row, idx) => (
-                          <tr key={idx} className="hover:bg-theme-base/30">
-                            <td className="px-4 py-3 font-semibold text-theme-primary">{row.groupName}</td>
-                            <td className="px-4 py-3 text-right font-sans">{row.count}</td>
-                            {reportEntity === 'deal' && reportMetric === 'sum_value' && (
-                              <td className="px-4 py-3 text-right font-sans font-bold text-theme-primary">${row.value.toLocaleString()}</td>
-                            )}
-                          </tr>
-                        ))
-                      )}
+                      ))}
                     </tbody>
                   </table>
                 </div>

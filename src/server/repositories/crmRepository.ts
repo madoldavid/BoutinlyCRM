@@ -18,11 +18,13 @@ import type {
   Account,
   Activity,
   AuditLog,
+  CalendarTokenRecord,
   Contact,
   CustomFieldDefinition,
   Deal,
   EmailCampaign,
   EmailTemplate,
+  FileRecord,
   Notification,
   Organization,
   Pipeline,
@@ -61,9 +63,20 @@ export interface UpdateTaskInput extends Partial<Omit<Task, 'id' | 'created_by_i
 export interface CreateActivityInput extends Omit<Activity, 'id' | 'created_at'> {}
 export interface CreateNotificationInput extends Omit<Notification, 'id' | 'created_at'> {}
 export interface CreateEmailTemplateInput extends Omit<EmailTemplate, 'id'> {}
-export interface CreateEmailCampaignInput extends Omit<EmailCampaign, 'id'> {}
+export interface CreateEmailCampaignInput extends Omit<EmailCampaign, 'id'> { id?: string; }
 export interface CreateCustomFieldInput extends Omit<CustomFieldDefinition, 'id'> {}
 export interface CreateAuditLogInput extends Omit<AuditLog, 'id' | 'created_at'> {}
+export interface CreateFileInput {
+  user_id: string;
+  entity_type: FileRecord['entity_type'];
+  entity_id: string;
+  filename: string;
+  original_name: string;
+  mime_type: string;
+  size_bytes: number;
+  storage_provider: string;
+  storage_path: string;
+}
 export interface CreateUserInput {
   name: string;
   email: string;
@@ -163,7 +176,17 @@ export interface CrmRepository {
   listPipelines(): Promise<Pipeline[]>;
   listStages(): Promise<Stage[]>;
   addPipeline(input: { name: string; is_default: boolean }): Promise<Pipeline>;
+  updatePipeline(id: string, input: { name?: string; is_default?: boolean; is_archived?: boolean }): Promise<Pipeline | null>;
+  deletePipeline(id: string): Promise<boolean>;
   addStage(input: { pipeline_id: string; name: string; probability: number; order: number; type: 'open' | 'won' | 'lost' }): Promise<Stage>;
+  updateStage(id: string, input: { name?: string; probability?: number; order?: number; type?: 'open' | 'won' | 'lost' }): Promise<Stage | null>;
+  deleteStage(id: string): Promise<boolean>;
+
+  // Files
+  addFile(input: CreateFileInput): Promise<FileRecord>;
+  getFileById(id: string): Promise<FileRecord | null>;
+  listFiles(params?: { entity_type?: string; entity_id?: string; page?: number; limit?: number }): Promise<FileRecord[]>;
+  deleteFile(id: string): Promise<boolean>;
 
   // Audit Logs
   listAuditLogs(params?: PaginationParams): Promise<AuditLog[]>;
@@ -171,6 +194,15 @@ export interface CrmRepository {
 
   // Snapshot (for bootstrap / initial load)
   snapshot(): Promise<CrmSnapshot>;
+
+  // Email tracking
+  incrementCampaignOpens(campaignId: string): Promise<void>;
+  incrementCampaignClicks(campaignId: string): Promise<void>;
+
+  // Calendar tokens
+  upsertCalendarToken(token: CalendarTokenRecord): Promise<void>;
+  getCalendarTokens(userId: string): Promise<CalendarTokenRecord[]>;
+  deleteCalendarToken(userId: string, provider: string): Promise<void>;
 
   // GDPR
   exportUserData(userId: string): Promise<Record<string, unknown>>;
@@ -196,6 +228,8 @@ export class InMemoryCrmRepository implements CrmRepository {
   private emailTemplates = clone(INITIAL_TEMPLATES);
   private emailCampaigns = clone(INITIAL_CAMPAIGNS);
   private auditLogs = clone(INITIAL_AUDIT_LOGS);
+  private files: FileRecord[] = [];
+  private calendarTokens: CalendarTokenRecord[] = [];
   private passwordHashes = new Map<string, string>();
   private resetTokens = new Map<string, { userId: string; expiresAt: number }>(); // sha256(token) → { userId, expiresAt }
   private totpSecrets = new Map<string, string>(); // userId → secret
@@ -323,6 +357,7 @@ export class InMemoryCrmRepository implements CrmRepository {
   async addUser(input: CreateUserInput) {
     const user: User = {
       id: `usr-${randomUUID().substring(0, 12)}`,
+      organization_id: getCurrentOrgId() || '',
       email: input.email,
       name: input.name,
       role: input.role,
@@ -730,7 +765,7 @@ export class InMemoryCrmRepository implements CrmRepository {
   async createEmailCampaign(input: CreateEmailCampaignInput) {
     const campaign: EmailCampaign = {
       ...input,
-      id: `cmp-${randomUUID()}`,
+      id: input.id || `cmp-${randomUUID()}`,
     };
     this.emailCampaigns.unshift(campaign);
     return clone(campaign);
@@ -790,6 +825,76 @@ export class InMemoryCrmRepository implements CrmRepository {
     };
     this.stages.push(stage);
     return clone(stage);
+  }
+
+  async updatePipeline(id: string, input: { name?: string; is_default?: boolean; is_archived?: boolean }): Promise<Pipeline | null> {
+    const idx = this.pipelines.findIndex(p => p.id === id);
+    if (idx === -1) return null;
+    if (input.is_default) {
+      // Unset other defaults
+      this.pipelines.forEach(p => { if (p.id !== id) p.is_default = false; });
+    }
+    this.pipelines[idx] = { ...this.pipelines[idx], ...input };
+    return clone(this.pipelines[idx]);
+  }
+
+  async deletePipeline(id: string): Promise<boolean> {
+    const idx = this.pipelines.findIndex(p => p.id === id);
+    if (idx === -1) return false;
+    this.pipelines.splice(idx, 1);
+    // Cascade delete stages
+    this.stages = this.stages.filter(s => s.pipeline_id !== id);
+    return true;
+  }
+
+  async updateStage(id: string, input: { name?: string; probability?: number; order?: number; type?: 'open' | 'won' | 'lost' }): Promise<Stage | null> {
+    const idx = this.stages.findIndex(s => s.id === id);
+    if (idx === -1) return null;
+    this.stages[idx] = { ...this.stages[idx], ...input };
+    return clone(this.stages[idx]);
+  }
+
+  async deleteStage(id: string): Promise<boolean> {
+    const idx = this.stages.findIndex(s => s.id === id);
+    if (idx === -1) return false;
+    this.stages.splice(idx, 1);
+    return true;
+  }
+
+  // ─── Files ──────────────────────────────────────────
+
+  async addFile(input: CreateFileInput): Promise<FileRecord> {
+    const file: FileRecord = {
+      ...input,
+      id: `file-${randomBytes(8).toString('hex')}`,
+      created_at: new Date().toISOString(),
+    };
+    this.files.unshift(file);
+    return clone(file);
+  }
+
+  async getFileById(id: string): Promise<FileRecord | null> {
+    const file = this.files.find(f => f.id === id);
+    return file ? clone(file) : null;
+  }
+
+  async listFiles(params?: { entity_type?: string; entity_id?: string; page?: number; limit?: number }): Promise<FileRecord[]> {
+    let result = clone(this.files);
+    if (params?.entity_type) result = result.filter(f => f.entity_type === params.entity_type);
+    if (params?.entity_id) result = result.filter(f => f.entity_id === params.entity_id);
+    result = this.filterByOrg(result);
+    if (params?.page && params?.limit) {
+      const offset = (params.page - 1) * params.limit;
+      result = result.slice(offset, offset + params.limit);
+    }
+    return result;
+  }
+
+  async deleteFile(id: string): Promise<boolean> {
+    const idx = this.files.findIndex(f => f.id === id);
+    if (idx === -1) return false;
+    this.files.splice(idx, 1);
+    return true;
   }
 
   // ─── Audit Logs ─────────────────────────────────────
@@ -856,6 +961,41 @@ export class InMemoryCrmRepository implements CrmRepository {
       emailCampaigns: this.filterByOrg(all.emailCampaigns),
       auditLogs: this.filterByOrg(all.auditLogs),
     };
+  }
+
+  // ─── Email Tracking ────────────────────────────────
+
+  async incrementCampaignOpens(campaignId: string): Promise<void> {
+    const campaign = this.emailCampaigns.find(c => c.id === campaignId);
+    if (campaign) campaign.opened_count += 1;
+  }
+
+  async incrementCampaignClicks(campaignId: string): Promise<void> {
+    const campaign = this.emailCampaigns.find(c => c.id === campaignId);
+    if (campaign) campaign.clicked_count += 1;
+  }
+
+  // ─── Calendar Tokens ───────────────────────────────
+
+  async upsertCalendarToken(token: CalendarTokenRecord): Promise<void> {
+    const idx = this.calendarTokens.findIndex(
+      t => t.user_id === token.user_id && t.provider === token.provider && t.email === token.email
+    );
+    if (idx >= 0) {
+      this.calendarTokens[idx] = { ...token, updated_at: new Date().toISOString() };
+    } else {
+      this.calendarTokens.push(token);
+    }
+  }
+
+  async getCalendarTokens(userId: string): Promise<CalendarTokenRecord[]> {
+    return clone(this.calendarTokens.filter(t => t.user_id === userId));
+  }
+
+  async deleteCalendarToken(userId: string, provider: string): Promise<void> {
+    this.calendarTokens = this.calendarTokens.filter(
+      t => !(t.user_id === userId && t.provider === provider)
+    );
   }
 
   // ─── GDPR ───────────────────────────────────────────

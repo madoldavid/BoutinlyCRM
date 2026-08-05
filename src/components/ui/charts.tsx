@@ -5,7 +5,7 @@
  * Dependency-free SVG charts, themed via CSS variables.
  */
 
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 
 const PALETTE = [
   'var(--accent)',
@@ -107,7 +107,7 @@ export function DonutChart({
             fill="none"
             stroke={s.color || PALETTE[s.i % PALETTE.length]}
             strokeWidth={hovered === s.i ? STROKE + 3 : STROKE}
-            strokeDasharray={`${Math.max(s.frac * C - 2, 0)} ${C}`}
+            strokeDasharray={`${s.frac > 0 ? Math.max(s.frac * C - 2, 1) : 0} ${C}`}
             strokeDashoffset={-s.offset * C}
             transform="rotate(-90 80 80)"
             strokeLinecap="butt"
@@ -178,6 +178,7 @@ export function TrendLine({
   height?: number;
 }) {
   const [hovered, setHovered] = useState<number | null>(null);
+  const gradientId = useMemo(() => `trend-fill-${Math.random().toString(36).substring(2, 9)}`, []);
   const W = 400;
   const H = height;
   const PAD = 8;
@@ -204,7 +205,7 @@ export function TrendLine({
         onMouseLeave={() => setHovered(null)}
       >
         <defs>
-          <linearGradient id="trend-fill" x1="0" y1="0" x2="0" y2="1">
+          <linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">
             <stop offset="0%" stopColor="var(--accent)" stopOpacity="0.18" />
             <stop offset="100%" stopColor="var(--accent)" stopOpacity="0.01" />
           </linearGradient>
@@ -224,7 +225,7 @@ export function TrendLine({
           />
         ))}
 
-        <path d={area} fill="url(#trend-fill)" />
+        <path d={area} fill={`url(#${gradientId})`} />
         <path d={line} fill="none" stroke="var(--accent)" strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" />
 
         {xy.map(([x, y], i) => (

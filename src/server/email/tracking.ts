@@ -7,8 +7,17 @@
  * Tracks per-campaign, per-contact in memory (production should use Redis/DB).
  */
 
+import type { CrmRepository } from '../repositories/crmRepository.js';
+
 const openTracked = new Map<string, Set<string>>(); // campaignId -> Set<contactId>
 const clickTracked = new Map<string, Map<string, number>>(); // campaignId -> Map<contactId, clicks>
+
+let trackingRepository: CrmRepository | null = null;
+
+/** Set the repository for write-through persistence of tracking events. */
+export function setTrackingRepository(repo: CrmRepository): void {
+  trackingRepository = repo;
+}
 
 const TRACKING_BASE_URL = process.env.API_URL || 'http://localhost:8080';
 
@@ -44,12 +53,24 @@ export function injectClickTracking(html: string, campaignId: string, contactId:
 export function recordOpen(campaignId: string, contactId: string): void {
   if (!openTracked.has(campaignId)) openTracked.set(campaignId, new Set());
   openTracked.get(campaignId)!.add(contactId);
+  // Write-through to DB when repository is available
+  if (trackingRepository) {
+    trackingRepository.incrementCampaignOpens(campaignId).catch((err) => {
+      console.error(`Failed to persist campaign open for ${campaignId}:`, err);
+    });
+  }
 }
 
 export function recordClick(campaignId: string, contactId: string): void {
   if (!clickTracked.has(campaignId)) clickTracked.set(campaignId, new Map());
   const campaign = clickTracked.get(campaignId)!;
   campaign.set(contactId, (campaign.get(contactId) || 0) + 1);
+  // Write-through to DB when repository is available
+  if (trackingRepository) {
+    trackingRepository.incrementCampaignClicks(campaignId).catch((err) => {
+      console.error(`Failed to persist campaign click for ${campaignId}:`, err);
+    });
+  }
 }
 
 export function getCampaignMetrics(campaignId: string) {

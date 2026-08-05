@@ -13,23 +13,28 @@ export function registerActivitiesRoutes(
 ) {
   app.get('/api/activities', authenticate(config), asyncHandler<AuthenticatedRequest>(async (req, res) => {
     const query = activityQuerySchema.parse(req.query);
-    const snapshot = await repository.snapshot();
-    const scoped = scopeSnapshot(snapshot, req.principal);
 
-    let activities = scoped.activities;
-    if (query.contact_id) {
-      activities = activities.filter(a => a.contact_id === query.contact_id);
-    }
-    if (query.deal_id) {
-      activities = activities.filter(a => a.deal_id === query.deal_id);
-    }
-    if (query.user_id) {
-      activities = activities.filter(a => a.user_id === query.user_id);
-    }
+    // Load activities with repository-side filters (DB-side WHERE for Postgres)
+    const activities = await repository.listActivities({
+      contact_id: query.contact_id,
+      deal_id: query.deal_id,
+      user_id: query.user_id,
+    });
 
-    const total = activities.length;
+    // RBAC scoping: load users, contacts, deals for visibility checks
+    const users = await repository.listUsers();
+    const contacts = await repository.listContacts();
+    const deals = await repository.listDeals();
+    const scoped = scopeSnapshot({
+      users, contacts, deals, activities,
+      accounts: [], pipelines: [], stages: [], tasks: [],
+      notifications: [], customFields: [], emailTemplates: [], emailCampaigns: [], auditLogs: [],
+    }, req.principal);
+
+    // Paginate after scoping
+    const total = scoped.activities.length;
     const offset = (query.page - 1) * query.limit;
-    const paged = activities.slice(offset, offset + query.limit);
+    const paged = scoped.activities.slice(offset, offset + query.limit);
 
     res.json({ activities: paged, total, page: query.page, limit: query.limit });
   }));

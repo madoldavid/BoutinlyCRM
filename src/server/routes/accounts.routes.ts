@@ -17,21 +17,22 @@ export function registerAccountsRoutes(
 ) {
   app.get('/api/accounts', authenticate(config), asyncHandler<AuthenticatedRequest>(async (req, res) => {
     const query = paginationSchema.parse(req.query);
-    const snapshot = await repository.snapshot();
-    const scoped = scopeSnapshot(snapshot, req.principal);
 
-    let accounts = scoped.accounts;
-    if (query.search) {
-      const q = query.search.toLowerCase();
-      accounts = accounts.filter(a =>
-        a.name.toLowerCase().includes(q) ||
-        (a.domain || '').toLowerCase().includes(q)
-      );
-    }
+    // Load accounts with repository-side search (DB-side WHERE for Postgres)
+    const accounts = await repository.listAccounts({ search: query.search });
 
-    const total = accounts.length;
+    // RBAC scoping: load users for visibility checks
+    const users = await repository.listUsers();
+    const scoped = scopeSnapshot({
+      users, accounts,
+      contacts: [], deals: [], pipelines: [], stages: [], tasks: [], activities: [],
+      notifications: [], customFields: [], emailTemplates: [], emailCampaigns: [], auditLogs: [],
+    }, req.principal);
+
+    // Paginate after scoping
+    const total = scoped.accounts.length;
     const offset = (query.page - 1) * query.limit;
-    const paged = accounts.slice(offset, offset + query.limit);
+    const paged = scoped.accounts.slice(offset, offset + query.limit);
 
     res.json({ accounts: paged, total, page: query.page, limit: query.limit });
   }));
@@ -45,8 +46,7 @@ export function registerAccountsRoutes(
   app.post('/api/accounts', authenticate(config), asyncHandler<AuthenticatedRequest>(async (req, res) => {
     requireWriteAccess(req);
     const body = createAccountSchema.parse(req.body);
-    const snapshot = await repository.snapshot();
-    const owner = snapshot.users.find(user => user.id === body.owner_id);
+    const owner = await repository.getUserById(body.owner_id);
 
     if (!owner) throw new ApiError(400, 'Account owner does not exist.', 'invalid_owner');
     if (!canAccessOwner(req.principal, body.owner_id, owner.team_id)) {

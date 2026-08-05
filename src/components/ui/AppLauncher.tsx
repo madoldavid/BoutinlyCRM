@@ -56,7 +56,8 @@ export default function AppLauncher({ apps, activeAppId, onSelect, currentUserRo
   useEffect(() => {
     if (open) {
       const input = ref.current?.querySelector('input');
-      setTimeout(() => input?.focus(), 50);
+      const timer = setTimeout(() => input?.focus(), 50);
+      return () => clearTimeout(timer);
     }
   }, [open]);
 

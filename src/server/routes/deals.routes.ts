@@ -19,27 +19,29 @@ export function registerDealsRoutes(
 ) {
   app.get('/api/deals', authenticate(config), asyncHandler<AuthenticatedRequest>(async (req, res) => {
     const query = dealQuerySchema.parse(req.query);
-    const snapshot = await repository.snapshot();
-    const scoped = scopeSnapshot(snapshot, req.principal);
 
-    let deals = scoped.deals;
-    if (query.pipeline_id) {
-      deals = deals.filter(d => d.pipeline_id === query.pipeline_id);
-    }
-    if (query.stage_id) {
-      deals = deals.filter(d => d.stage_id === query.stage_id);
-    }
-    if (query.owner_id) {
-      deals = deals.filter(d => d.owner_id === query.owner_id);
-    }
-    if (query.search) {
-      const q = query.search.toLowerCase();
-      deals = deals.filter(d => d.name.toLowerCase().includes(q));
-    }
+    // Load deals with repository-side search + filters (DB-side WHERE clauses for Postgres)
+    const deals = await repository.listDeals({
+      pipeline_id: query.pipeline_id,
+      stage_id: query.stage_id,
+      owner_id: query.owner_id,
+      search: query.search,
+    });
 
-    const total = deals.length;
+    // Lightweight RBAC scoping: load users + accounts for visibility checks
+    const users = await repository.listUsers();
+    const accounts = await repository.listAccounts();
+    const scoped = scopeSnapshot({
+      users, accounts,
+      deals,
+      contacts: [], pipelines: [], stages: [], tasks: [], activities: [],
+      notifications: [], customFields: [], emailTemplates: [], emailCampaigns: [], auditLogs: [],
+    }, req.principal);
+
+    // Paginate after scoping
+    const total = scoped.deals.length;
     const offset = (query.page - 1) * query.limit;
-    const paged = deals.slice(offset, offset + query.limit);
+    const paged = scoped.deals.slice(offset, offset + query.limit);
 
     res.json({ deals: paged, total, page: query.page, limit: query.limit });
   }));

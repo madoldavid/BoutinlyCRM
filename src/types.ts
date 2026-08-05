@@ -13,7 +13,7 @@ export enum UserRole {
 
 export interface User {
   id: string;
-  organization_id?: string;
+  organization_id: string;
   email: string;
   name: string;
   avatar_url?: string;
@@ -202,6 +202,34 @@ export interface EmailCampaign {
   bounced_count: number;
   unsubscribed_count: number;
   created_by_id: string;
+}
+
+export interface FileRecord {
+  id: string;
+  organization_id?: string;
+  user_id: string;
+  entity_type: 'contact' | 'account' | 'deal' | 'task';
+  entity_id: string;
+  filename: string;
+  original_name: string;
+  mime_type: string;
+  size_bytes: number;
+  storage_provider: string;
+  storage_path: string;
+  created_at: string;
+}
+
+export interface CalendarTokenRecord {
+  id: string;
+  user_id: string;
+  provider: 'google' | 'microsoft';
+  email: string;
+  access_token: string;
+  refresh_token: string | null;
+  expires_at: string;
+  scope: string;
+  created_at: string;
+  updated_at: string;
 }
 
 export interface AuditLog {

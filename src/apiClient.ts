@@ -97,32 +97,54 @@ function getCsrfToken(): string | null {
 // ─── Token management ──────────────────────────────────
 
 const TOKEN_KEY = 'boutinly_token';
-let refreshTimer: ReturnType<typeof setTimeout> | null = null;
+const REFRESH_KEY = 'boutinly_refresh_token';
+const USER_KEY = 'boutinly_current_user';
+
+// Use localStorage for cross-session persistence (not sessionStorage — doesn't survive browser restart)
+function storageGet(key: string): string | null {
+  try { return localStorage.getItem(key) || sessionStorage.getItem(key); }
+  catch { return null; }
+}
+function storageSet(key: string, value: string): void {
+  try { localStorage.setItem(key, value); sessionStorage.setItem(key, value); }
+  catch { /* quota or unavailable */ }
+}
+function storageRemove(key: string): void {
+  try { localStorage.removeItem(key); sessionStorage.removeItem(key); }
+  catch { /* ignore */ }
+}
 
 function getStoredToken(): string | null {
-  try {
-    return sessionStorage.getItem(TOKEN_KEY);
-  } catch {
-    return null;
-  }
+  return storageGet(TOKEN_KEY);
+}
+
+function getStoredRefreshToken(): string | null {
+  return storageGet(REFRESH_KEY);
+}
+
+function getStoredUser(): string | null {
+  return storageGet(USER_KEY);
 }
 
 function setStoredToken(token: string | null) {
-  try {
-    if (token) {
-      sessionStorage.setItem(TOKEN_KEY, token);
-    } else {
-      sessionStorage.removeItem(TOKEN_KEY);
-    }
-  } catch {
-    // sessionStorage unavailable (private browsing, etc.)
-  }
+  if (token) storageSet(TOKEN_KEY, token);
+  else storageRemove(TOKEN_KEY);
+}
+
+function setStoredRefreshToken(token: string | null) {
+  if (token) storageSet(REFRESH_KEY, token);
+  else storageRemove(REFRESH_KEY);
+}
+
+function setStoredUser(userJson: string | null) {
+  if (userJson) storageSet(USER_KEY, userJson);
+  else storageRemove(USER_KEY);
 }
 
 // ─── ApiClient class ───────────────────────────────────
 
 export class ApiClient {
-  private refreshToken: string | null = null;
+  private refreshToken: string | null = getStoredRefreshToken();
 
   constructor(
     private readonly baseUrl = runtimeConfig.apiUrl,
@@ -136,10 +158,21 @@ export class ApiClient {
 
   setRefreshToken(token: string | null) {
     this.refreshToken = token;
+    setStoredRefreshToken(token);
   }
 
   isAuthenticated(): boolean {
-    return this.token !== null;
+    // Check for either active access token or refresh token (can auto-refresh)
+    return this.token !== null || this.refreshToken !== null;
+  }
+
+  /** Returns true if we have access to stored credentials (even if expired) */
+  hasStoredSession(): boolean {
+    return getStoredToken() !== null || getStoredRefreshToken() !== null;
+  }
+
+  getStoredUserInfo(): string | null {
+    return getStoredUser();
   }
 
   // ─── Auth ──────────────────────────────────────────
@@ -158,7 +191,7 @@ export class ApiClient {
     const loginRes = res as LoginResponse;
     this.setToken(loginRes.token);
     this.setRefreshToken(loginRes.refresh_token);
-    sessionStorage.setItem('current_user', JSON.stringify(loginRes.user));
+    setStoredUser(JSON.stringify(loginRes.user));
     return loginRes;
   }
 
@@ -169,7 +202,7 @@ export class ApiClient {
     }, false);
     this.setToken(res.token);
     this.setRefreshToken(res.refresh_token);
-    sessionStorage.setItem('current_user', JSON.stringify(res.user));
+    setStoredUser(JSON.stringify(res.user));
     return res;
   }
 
@@ -180,7 +213,7 @@ export class ApiClient {
     }, false);
     this.setToken(res.token);
     this.setRefreshToken(res.refresh_token);
-    sessionStorage.setItem('current_user', JSON.stringify(res.user));
+    setStoredUser(JSON.stringify(res.user));
     return res;
   }
 
@@ -231,7 +264,7 @@ export class ApiClient {
     await this.request<{ ok: boolean }>('/api/auth/logout', { method: 'POST' }).catch(() => {});
     this.setToken(null);
     this.setRefreshToken(null);
-    sessionStorage.removeItem('current_user');
+    setStoredUser(null);
   }
 
   async getMe(): Promise<User> {
@@ -523,6 +556,13 @@ export class ApiClient {
     });
   }
 
+  // ─── Feature Flags ──────────────────────────────────
+
+  async getFlags(): Promise<Array<{ key: string; description: string; defaultEnabled: boolean; enabled: boolean; source: string }>> {
+    const res = await this.request<{ flags: Array<{ key: string; description: string; defaultEnabled: boolean; enabled: boolean; source: string }> }>('/api/flags');
+    return res.flags;
+  }
+
   // ─── Helpers ───────────────────────────────────────
 
   private toQuery(params?: Record<string, unknown>): string {
@@ -563,9 +603,12 @@ export class ApiClient {
     const csrfHeader = response.headers.get('X-CSRF-Token');
     if (csrfHeader) {
       try {
-        const secure = window.location.protocol === 'https:' ? '; Secure' : '';
-        // Use the bare cookie name matching the dev server (without __Host-)
-        document.cookie = `boutinly-csrf=${encodeURIComponent(csrfHeader)}; path=/; SameSite=Strict${secure}; max-age=86400`;
+        const isSecure = window.location.protocol === 'https:';
+        const secure = isSecure ? '; Secure' : '';
+        // Use __Host- prefix on HTTPS (matching server's production cookie name),
+        // bare name on HTTP (matching dev server)
+        const cookieName = isSecure ? '__Host-boutinly-csrf' : 'boutinly-csrf';
+        document.cookie = `${cookieName}=${encodeURIComponent(csrfHeader)}; path=/; SameSite=Strict${secure}; max-age=86400`;
       } catch { /* cookie may be blocked */ }
     }
 
@@ -596,7 +639,7 @@ export class ApiClient {
         if (e instanceof ApiError && e.status === 401) {
           this.setToken(null);
           this.setRefreshToken(null);
-          sessionStorage.removeItem('current_user');
+          setStoredUser(null);
         }
         throw e;
       }

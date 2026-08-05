@@ -64,19 +64,22 @@ export function registerEmailRoutes(
     // Get template for email content
     const template = await repository.getEmailTemplateById(body.template_id);
 
-    // Send email to each recipient, resolving template variables per contact
+    // Generate a campaign ID for tracking before sending, then create the DB record after
+    const campaignId = `camp-${require('node:crypto').randomUUID()}`;
+
+    // Send email to each recipient with concurrency limit
     let sent = 0;
     let bounced = 0;
     const sender = { name: req.principal.email, email: req.principal.email };
+    const CONCURRENCY = 5;
 
-    for (const contactId of body.recipient_ids) {
+    async function sendToOneRecipient(contactId: string): Promise<void> {
       const contact = await repository.getContactById(contactId);
       if (!contact || contact.unsubscribed) {
         bounced++;
-        continue;
+        return;
       }
 
-      // Resolve template variables against this contact + their account
       const account = await repository.getAccountById(contact.account_id).catch(() => null);
       const baseHtml = template?.body_html || '';
       const baseSubject = template?.subject || body.name;
@@ -84,37 +87,47 @@ export function registerEmailRoutes(
       const renderedHtml = renderTemplate(baseHtml, ctx);
       const renderedSubject = renderTemplate(baseSubject, ctx);
 
-      // Inject open tracking pixel and click-tracking links
-      // (use a placeholder campaign ID — the real one is assigned after send)
       const trackingHtml = injectClickTracking(
-        injectTrackingPixel(renderedHtml, body.name, contactId),
-        body.name, contactId,
+        injectTrackingPixel(renderedHtml, campaignId, contactId),
+        campaignId, contactId,
       );
 
-      try {
-        await emailService.send({
-          to: contact.email,
-          subject: renderedSubject,
-          html: trackingHtml,
-          text: htmlToText(renderedHtml),
-        });
-        sent++;
+      await emailService.send({
+        to: contact.email,
+        subject: renderedSubject,
+        html: trackingHtml,
+        text: htmlToText(renderedHtml),
+      });
+      sent++;
 
-        await repository.addActivity({
-          type: 'email_sent',
-          title: `Campaign Email Sent: ${body.name}`,
-          body: `Sent personalized email via campaign "${body.name}" to ${contact.email}.`,
-          user_id: req.principal.userId,
-          contact_id: contactId,
-          metadata: { variables: extractVariables(baseHtml) },
-        });
-      } catch (err) {
-        bounced++;
-        req.log?.error?.({ err, contactId, campaign: body.name }, 'Failed to send campaign email to contact');
+      // Log activity best-effort (email was already sent)
+      repository.addActivity({
+        type: 'email_sent',
+        title: `Campaign Email Sent: ${body.name}`,
+        body: `Sent personalized email via campaign "${body.name}" to ${contact.email}.`,
+        user_id: req.principal.userId,
+        contact_id: contactId,
+        metadata: { variables: extractVariables(baseHtml) },
+      }).catch(() => {});
+    }
+
+    // Process recipients in concurrent batches
+    for (let i = 0; i < body.recipient_ids.length; i += CONCURRENCY) {
+      const batch = body.recipient_ids.slice(i, i + CONCURRENCY);
+      const results = await Promise.allSettled(
+        batch.map(contactId => sendToOneRecipient(contactId)),
+      );
+      for (const result of results) {
+        if (result.status === 'rejected') {
+          bounced++;
+          req.log?.error?.({ err: result.reason, campaign: body.name }, 'Failed to send campaign email to contact');
+        }
       }
     }
 
+    // Create the campaign record with the pre-generated ID that was used for tracking
     const campaign = await repository.createEmailCampaign({
+      id: campaignId,
       name: body.name,
       template_id: body.template_id,
       status: 'sent',

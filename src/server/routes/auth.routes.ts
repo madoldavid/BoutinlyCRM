@@ -6,7 +6,7 @@ import type { EmailService } from '../email/service.js';
 import type { CrmRepository } from '../repositories/crmRepository.js';
 import { authenticate, type AuthenticatedRequest } from '../security/rbac.js';
 import { hashPassword } from '../security/password.js';
-import { issueToken, issueMfaChallengeToken, verifyMfaChallengeToken, verifyRefreshToken, issueRefreshToken } from '../security/token.js';
+import { issueTokenWithKey, issueMfaChallengeToken, verifyMfaChallengeToken, verifyRefreshToken, issueRefreshToken } from '../security/token.js';
 import { validatePasswordPolicy } from '../security/passwordPolicy.js';
 import { generateTotpSecret, generateTotpUri, verifyTotp } from '../security/totp.js';
 import type { AccountLockoutService } from '../security/lockout.js';
@@ -116,8 +116,8 @@ export function registerAuthRoutes(
       });
 
       const principal = makePrincipal(user);
-      const token = issueToken(principal, config.JWT_SECRET, config.ACCESS_TOKEN_TTL_SECONDS, generateJti());
-      const refreshToken = issueRefreshToken(principal, config.JWT_SECRET, config.REFRESH_TOKEN_TTL_SECONDS);
+      const token = issueTokenWithKey(principal, keyManager, config.ACCESS_TOKEN_TTL_SECONDS, generateJti());
+      const refreshToken = issueRefreshToken(principal, config.JWT_SECRET, config.REFRESH_TOKEN_TTL_SECONDS, generateJti());
 
       return { token, refresh_token: refreshToken, user };
     });
@@ -180,8 +180,8 @@ export function registerAuthRoutes(
       return;
     }
 
-    const token = issueToken(principal, config.JWT_SECRET, config.ACCESS_TOKEN_TTL_SECONDS, generateJti());
-    const refreshToken = issueRefreshToken(principal, config.JWT_SECRET, config.REFRESH_TOKEN_TTL_SECONDS);
+    const token = issueTokenWithKey(principal, keyManager, config.ACCESS_TOKEN_TTL_SECONDS, generateJti());
+    const refreshToken = issueRefreshToken(principal, config.JWT_SECRET, config.REFRESH_TOKEN_TTL_SECONDS, generateJti());
 
     res.json({ token, refresh_token: refreshToken, user });
   }));
@@ -201,8 +201,8 @@ export function registerAuthRoutes(
     }
 
     const newPrincipal = makePrincipal(user);
-    const token = issueToken(newPrincipal, config.JWT_SECRET, config.ACCESS_TOKEN_TTL_SECONDS, generateJti());
-    const refreshToken = issueRefreshToken(newPrincipal, config.JWT_SECRET, config.REFRESH_TOKEN_TTL_SECONDS);
+    const token = issueTokenWithKey(newPrincipal, keyManager, config.ACCESS_TOKEN_TTL_SECONDS, generateJti());
+    const refreshToken = issueRefreshToken(newPrincipal, config.JWT_SECRET, config.REFRESH_TOKEN_TTL_SECONDS, generateJti());
 
     res.json({ token, refresh_token: refreshToken, user });
   }));
@@ -259,8 +259,8 @@ export function registerAuthRoutes(
         // Log but don't reveal failure to the caller
         req.log?.error?.({ err }, 'Failed to send password reset email');
       }
-      // In non-production, also return the token for debugging
-      if (config.NODE_ENV !== 'production') {
+      // Only expose debug tokens in development with explicit opt-in
+      if (config.NODE_ENV === 'development' && process.env.DEBUG_AUTH === 'true') {
         res.json({ message: 'If the email is registered, a reset link has been sent.', debug_token: rawToken });
         return;
       }
@@ -294,9 +294,21 @@ export function registerAuthRoutes(
       throw new ApiError(401, 'User no longer active.', 'user_inactive');
     }
 
+    // Blocklist the old refresh token (rotation)
+    try {
+      const parts = body.refreshToken.split('.');
+      if (parts.length === 3) {
+        const payload = JSON.parse(Buffer.from(parts[1], 'base64url').toString());
+        if (payload.jti) {
+          const ttl = Math.max(0, Number(payload.exp) - Math.floor(Date.now() / 1000));
+          tokenBlocklist.add(payload.jti, principal.userId, ttl, 'refresh');
+        }
+      }
+    } catch { /* best effort */ }
+
     const newPrincipal = makePrincipal(user);
-    const token = issueToken(newPrincipal, config.JWT_SECRET, config.ACCESS_TOKEN_TTL_SECONDS, generateJti());
-    const refreshToken = issueRefreshToken(newPrincipal, config.JWT_SECRET, config.REFRESH_TOKEN_TTL_SECONDS);
+    const token = issueTokenWithKey(newPrincipal, keyManager, config.ACCESS_TOKEN_TTL_SECONDS, generateJti());
+    const refreshToken = issueRefreshToken(newPrincipal, config.JWT_SECRET, config.REFRESH_TOKEN_TTL_SECONDS, generateJti());
 
     res.json({ token, refresh_token: refreshToken });
   }));

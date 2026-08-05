@@ -17,26 +17,27 @@ export function registerTasksRoutes(
 ) {
   app.get('/api/tasks', authenticate(config), asyncHandler<AuthenticatedRequest>(async (req, res) => {
     const query = taskQuerySchema.parse(req.query);
-    const snapshot = await repository.snapshot();
-    const scoped = scopeSnapshot(snapshot, req.principal);
 
-    let tasks = scoped.tasks;
-    if (query.assigned_to_id) {
-      tasks = tasks.filter(t => t.assigned_to_id === query.assigned_to_id);
-    }
-    if (query.status === 'open') {
-      tasks = tasks.filter(t => !t.completed_at);
-    } else if (query.status === 'completed') {
-      tasks = tasks.filter(t => !!t.completed_at);
-    }
-    if (query.search) {
-      const q = query.search.toLowerCase();
-      tasks = tasks.filter(t => t.title.toLowerCase().includes(q));
-    }
+    // Load tasks with repository-side filters (DB-side WHERE for Postgres)
+    const tasks = await repository.listTasks({
+      assigned_to_id: query.assigned_to_id,
+      status: query.status,
+      search: query.search,
+    });
 
-    const total = tasks.length;
+    // RBAC scoping: load users for visibility checks
+    const users = await repository.listUsers();
+    const scoped = scopeSnapshot({
+      users,
+      tasks,
+      accounts: [], contacts: [], deals: [], pipelines: [], stages: [], activities: [],
+      notifications: [], customFields: [], emailTemplates: [], emailCampaigns: [], auditLogs: [],
+    }, req.principal);
+
+    // Paginate after scoping
+    const total = scoped.tasks.length;
     const offset = (query.page - 1) * query.limit;
-    const paged = tasks.slice(offset, offset + query.limit);
+    const paged = scoped.tasks.slice(offset, offset + query.limit);
 
     res.json({ tasks: paged, total, page: query.page, limit: query.limit });
   }));

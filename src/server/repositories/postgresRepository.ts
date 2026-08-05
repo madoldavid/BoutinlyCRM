@@ -3,11 +3,13 @@ import type {
   Account,
   Activity,
   AuditLog,
+  CalendarTokenRecord,
   Contact,
   CustomFieldDefinition,
   Deal,
   EmailCampaign,
   EmailTemplate,
+  FileRecord,
   Notification,
   Organization,
   Pipeline,
@@ -30,6 +32,7 @@ import type {
   CreateDealInput,
   CreateEmailCampaignInput,
   CreateEmailTemplateInput,
+  CreateFileInput,
   CreateTaskInput,
   CreateUserInput,
   PaginationParams,
@@ -727,7 +730,7 @@ export class PostgresCrmRepository implements CrmRepository {
       `INSERT INTO email_campaigns (id, organization_id, template_id, created_by_id, name, status, scheduled_at, sent_at, total_recipients, delivered_count, opened_count, clicked_count, bounced_count, unsubscribed_count)
        VALUES ($1, current_setting('app.organization_id'), $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
        RETURNING *`,
-      [randomUUID(), input.template_id, input.created_by_id, input.name, input.status || 'draft',
+      [input.id || randomUUID(), input.template_id, input.created_by_id, input.name, input.status || 'draft',
        input.scheduled_at || null, input.sent_at || null, input.total_recipients || 0,
        input.delivered_count || 0, input.opened_count || 0, input.clicked_count || 0,
        input.bounced_count || 0, input.unsubscribed_count || 0],
@@ -815,6 +818,104 @@ export class PostgresCrmRepository implements CrmRepository {
     };
   }
 
+  async updatePipeline(id: string, input: { name?: string; is_default?: boolean; is_archived?: boolean }): Promise<Pipeline | null> {
+    if (input.is_default) {
+      await query(`UPDATE pipelines SET is_default = false WHERE id != $1`, [id]);
+    }
+    const fields: string[] = [];
+    const values: unknown[] = [id];
+    let idx = 2;
+    if (input.name !== undefined) { fields.push(`name = $${idx++}`); values.push(input.name); }
+    if (input.is_default !== undefined) { fields.push(`is_default = $${idx++}`); values.push(input.is_default); }
+    if (input.is_archived !== undefined) { fields.push(`is_archived = $${idx++}`); values.push(input.is_archived); }
+    if (fields.length === 0) {
+      const r = await query('SELECT * FROM pipelines WHERE id = $1', [id]);
+      return r.rows.length > 0 ? { id: r.rows[0].id, name: r.rows[0].name, is_default: r.rows[0].is_default, is_archived: r.rows[0].is_archived } : null;
+    }
+    const result = await query(
+      `UPDATE pipelines SET ${fields.join(', ')} WHERE id = $1 RETURNING id, name, is_default, is_archived`,
+      values,
+    );
+    if (result.rows.length === 0) return null;
+    return { id: result.rows[0].id, name: result.rows[0].name, is_default: result.rows[0].is_default, is_archived: result.rows[0].is_archived };
+  }
+
+  async deletePipeline(id: string): Promise<boolean> {
+    await query('DELETE FROM stages WHERE pipeline_id = $1', [id]);
+    const result = await query('DELETE FROM pipelines WHERE id = $1', [id]);
+    return (result.rowCount || 0) > 0;
+  }
+
+  async updateStage(id: string, input: { name?: string; probability?: number; order?: number; type?: 'open' | 'won' | 'lost' }): Promise<Stage | null> {
+    const fields: string[] = [];
+    const values: unknown[] = [id];
+    let idx = 2;
+    if (input.name !== undefined) { fields.push(`name = $${idx++}`); values.push(input.name); }
+    if (input.probability !== undefined) { fields.push(`probability = $${idx++}`); values.push(input.probability); }
+    if (input.order !== undefined) { fields.push(`stage_order = $${idx++}`); values.push(input.order); }
+    if (input.type !== undefined) { fields.push(`type = $${idx++}`); values.push(input.type); }
+    if (fields.length === 0) {
+      const r = await query('SELECT * FROM stages WHERE id = $1', [id]);
+      return r.rows.length > 0 ? { id: r.rows[0].id, pipeline_id: r.rows[0].pipeline_id, name: r.rows[0].name, probability: r.rows[0].probability, order: r.rows[0].stage_order, type: r.rows[0].type } : null;
+    }
+    const result = await query(
+      `UPDATE stages SET ${fields.join(', ')} WHERE id = $1 RETURNING id, pipeline_id, name, probability, stage_order, type`,
+      values,
+    );
+    if (result.rows.length === 0) return null;
+    return { id: result.rows[0].id, pipeline_id: result.rows[0].pipeline_id, name: result.rows[0].name, probability: result.rows[0].probability, order: result.rows[0].stage_order, type: result.rows[0].type };
+  }
+
+  async deleteStage(id: string): Promise<boolean> {
+    const result = await query('DELETE FROM stages WHERE id = $1', [id]);
+    return (result.rowCount || 0) > 0;
+  }
+
+  // ─── Files ──────────────────────────────────────────
+
+  async addFile(input: CreateFileInput): Promise<FileRecord> {
+    const result = await query(
+      `INSERT INTO files (id, organization_id, user_id, entity_type, entity_id, filename, original_name, mime_type, size_bytes, storage_provider, storage_path)
+       VALUES ($1, current_setting('app.organization_id'), $2, $3, $4, $5, $6, $7, $8, $9, $10)
+       RETURNING *`,
+      [randomUUID(), input.user_id, input.entity_type, input.entity_id,
+       input.filename, input.original_name, input.mime_type, input.size_bytes,
+       input.storage_provider, input.storage_path],
+    );
+    return this.rowToFile(result.rows[0]);
+  }
+
+  async getFileById(id: string): Promise<FileRecord | null> {
+    const result = await query('SELECT * FROM files WHERE id = $1', [id]);
+    return result.rows.length > 0 ? this.rowToFile(result.rows[0]) : null;
+  }
+
+  async listFiles(params?: { entity_type?: string; entity_id?: string; page?: number; limit?: number }): Promise<FileRecord[]> {
+    let sql = `SELECT * FROM files`;
+    const conditions: string[] = [];
+    const values: unknown[] = [];
+    let paramIdx = 1;
+
+    if (params?.entity_type) { conditions.push(`entity_type = $${paramIdx++}`); values.push(params.entity_type); }
+    if (params?.entity_id) { conditions.push(`entity_id = $${paramIdx++}`); values.push(params.entity_id); }
+
+    if (conditions.length > 0) sql += ` WHERE ` + conditions.join(' AND ');
+    sql += ` ORDER BY created_at DESC`;
+
+    if (params?.page && params?.limit) {
+      sql += ` LIMIT $${paramIdx} OFFSET $${paramIdx + 1}`;
+      values.push(params.limit, (params.page - 1) * params.limit);
+    }
+
+    const result = await query(sql, values);
+    return result.rows.map((row: DbRow) => this.rowToFile(row));
+  }
+
+  async deleteFile(id: string): Promise<boolean> {
+    const result = await query('DELETE FROM files WHERE id = $1', [id]);
+    return (result.rowCount || 0) > 0;
+  }
+
   // ─── Audit Logs ─────────────────────────────────────
 
   async listAuditLogs(params?: PaginationParams): Promise<AuditLog[]> {
@@ -873,6 +974,58 @@ export class PostgresCrmRepository implements CrmRepository {
     ]);
 
     return { users, accounts, contacts, pipelines, stages, deals, tasks, activities, notifications, customFields, emailTemplates, emailCampaigns, auditLogs };
+  }
+
+  // ─── Email Tracking ────────────────────────────────
+
+  async incrementCampaignOpens(campaignId: string): Promise<void> {
+    await query(
+      'UPDATE email_campaigns SET opened_count = opened_count + 1 WHERE id = $1',
+      [campaignId],
+    );
+  }
+
+  async incrementCampaignClicks(campaignId: string): Promise<void> {
+    await query(
+      'UPDATE email_campaigns SET clicked_count = clicked_count + 1 WHERE id = $1',
+      [campaignId],
+    );
+  }
+
+  // ─── Calendar Tokens ───────────────────────────────
+
+  async upsertCalendarToken(token: CalendarTokenRecord): Promise<void> {
+    await query(
+      `INSERT INTO calendar_tokens (id, user_id, provider, email, access_token, refresh_token, expires_at, scope)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+       ON CONFLICT (user_id, provider, email) DO UPDATE SET
+         access_token = $5, refresh_token = $6, expires_at = $7, scope = $8, updated_at = NOW()`,
+      [token.id, token.user_id, token.provider, token.email,
+       token.access_token, token.refresh_token, token.expires_at, token.scope],
+    );
+  }
+
+  async getCalendarTokens(userId: string): Promise<CalendarTokenRecord[]> {
+    const result = await query(
+      'SELECT * FROM calendar_tokens WHERE user_id = $1 ORDER BY created_at',
+      [userId],
+    );
+    return result.rows.map((row: DbRow) => ({
+      id: row.id,
+      user_id: row.user_id,
+      provider: row.provider,
+      email: row.email,
+      access_token: row.access_token,
+      refresh_token: row.refresh_token,
+      expires_at: row.expires_at instanceof Date ? row.expires_at.toISOString() : String(row.expires_at),
+      scope: row.scope,
+      created_at: row.created_at instanceof Date ? row.created_at.toISOString() : String(row.created_at),
+      updated_at: row.updated_at instanceof Date ? row.updated_at.toISOString() : String(row.updated_at),
+    }));
+  }
+
+  async deleteCalendarToken(userId: string, provider: string): Promise<void> {
+    await query('DELETE FROM calendar_tokens WHERE user_id = $1 AND provider = $2', [userId, provider]);
   }
 
   // ─── GDPR ───────────────────────────────────────────
@@ -1108,6 +1261,23 @@ export class PostgresCrmRepository implements CrmRepository {
       is_required: row.is_required || false,
       is_visible: row.is_visible !== false,
       order: row.display_order || 0,
+    };
+  }
+
+  private rowToFile(row: DbRow): FileRecord {
+    return {
+      id: row.id,
+      organization_id: row.organization_id,
+      user_id: row.user_id,
+      entity_type: row.entity_type,
+      entity_id: row.entity_id,
+      filename: row.filename,
+      original_name: row.original_name,
+      mime_type: row.mime_type,
+      size_bytes: Number(row.size_bytes),
+      storage_provider: row.storage_provider,
+      storage_path: row.storage_path,
+      created_at: row.created_at instanceof Date ? row.created_at.toISOString() : String(row.created_at),
     };
   }
 }

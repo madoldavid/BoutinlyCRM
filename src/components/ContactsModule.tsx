@@ -51,18 +51,16 @@ export default function ContactsModule() {
     contacts,
     getScopedContacts,
     getScopedAccounts,
-    getScopedDeals,
     addContact,
-    deleteContact,
     updateContact,
+    deleteContact,
     mergeContacts,
     addAccount,
-    deleteAccount,
     updateAccount,
+    deleteAccount,
     customFields,
     activities,
     addActivity,
-    deals,
   } = useCRM();
 
   const [activeTab, setActiveTab] = useState<'contacts' | 'accounts'>('contacts');
@@ -118,7 +116,7 @@ export default function ContactsModule() {
     title: '',
     linkedin_url: '',
     account_id: '',
-    owner_id: currentUser.id,
+    owner_id: currentUser?.id ?? '',
     tags: '',
     custom_values: {} as Record<string, any>
   });
@@ -129,8 +127,8 @@ export default function ContactsModule() {
     industry: '',
     size: '51-200' as Account['size'],
     website: '',
-    arr: 150000,
-    owner_id: currentUser.id,
+    arr: 0,
+    owner_id: currentUser?.id ?? '',
     tags: '',
     custom_values: {} as Record<string, any>
   });
@@ -243,7 +241,7 @@ export default function ContactsModule() {
         type: 'note',
         title: 'Meeting note logged',
         body: timelineNote,
-        user_id: currentUser.id,
+        user_id: currentUser?.id ?? '',
         contact_id: activeContact.id,
         metadata,
       });
@@ -253,7 +251,7 @@ export default function ContactsModule() {
         type: 'note',
         title: 'Account Executive update',
         body: timelineNote,
-        user_id: currentUser.id,
+        user_id: currentUser?.id ?? '',
         contact_id: primeContact?.id,
         metadata,
       });
@@ -325,7 +323,7 @@ export default function ContactsModule() {
       title: '',
       linkedin_url: '',
       account_id: '',
-      owner_id: currentUser.id,
+      owner_id: currentUser?.id ?? '',
       tags: '',
       custom_values: {},
     });
@@ -387,8 +385,8 @@ export default function ContactsModule() {
       industry: '',
       size: '51-200',
       website: '',
-      arr: 150000,
-      owner_id: currentUser.id,
+      arr: 0,
+      owner_id: currentUser?.id ?? '',
       tags: '',
       custom_values: {},
     });
@@ -433,7 +431,7 @@ export default function ContactsModule() {
             phone: '',
             title: '',
             account_id: '',
-            owner_id: currentUser.id,
+            owner_id: currentUser?.id ?? '',
             tags: ['CSV-Imported'],
             custom_fields: {},
             unsubscribed: false,
@@ -1260,15 +1258,17 @@ export default function ContactsModule() {
                   {f.field_type === 'number' ? (
                     <input
                       type="number"
+                      value={contactForm.custom_values?.[f.key] ?? ''}
                       onChange={(e) => setContactForm({
                         ...contactForm,
-                        custom_values: { ...contactForm.custom_values, [f.key]: Number(e.target.value) }
+                        custom_values: { ...contactForm.custom_values, [f.key]: e.target.value === '' ? undefined : Number(e.target.value) }
                       })}
                       className="w-full bg-theme-base text-theme-primary rounded border border-theme-border px-2.5 py-1.5 focus:ring-1 focus:ring-theme-accent focus:outline-none"
                     />
                   ) : (
                     <input
                       type="text"
+                      value={contactForm.custom_values?.[f.key] ?? ''}
                       onChange={(e) => setContactForm({
                         ...contactForm,
                         custom_values: { ...contactForm.custom_values, [f.key]: e.target.value }

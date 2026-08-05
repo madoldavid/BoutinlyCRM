@@ -98,7 +98,7 @@ export default function EmailsModule() {
         .replace(/\{\{first_name\}\}/g, contact.first_name)
         .replace(/\{\{company\}\}/g, companyName)
         .replace(/\{\{industry\}\}/g, industryName)
-        .replace(/\{\{sender_name\}\}/g, currentUser.name)
+        .replace(/\{\{sender_name\}\}/g, currentUser?.name ?? '')
         .replace(/<p>/g, '')
         .replace(/<\/p>/g, '\n\n')
         .replace(/<br\/>/g, '\n')
@@ -145,7 +145,7 @@ export default function EmailsModule() {
       body_html: templateForm.body_html,
       variables: ['first_name', 'company', 'sender_name'],
       is_shared: templateForm.is_shared,
-      created_by_id: currentUser.id,
+      created_by_id: currentUser?.id ?? '',
       category: templateForm.category
     });
     setShowCreateTemplate(false);

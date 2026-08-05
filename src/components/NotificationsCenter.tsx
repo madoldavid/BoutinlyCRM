@@ -211,10 +211,8 @@ export default function NotificationsCenter({ open, onClose }: { open: boolean; 
                   aria-label={`Toggle ${TYPE_META[type].label} notifications`}
                 >
                   <span
-                    className={`block w-3.5 h-3.5 rounded-full bg-white shadow-sm transition-transform ${
-                      prefs[type] !== false ? 'translate-x-[18px]' : 'translate-x-[2px]'
-                    }`}
-                    style={{ transform: prefs[type] !== false ? 'translateX(16px)' : 'translateX(2px)' }}
+                    className="block w-3.5 h-3.5 rounded-full bg-white shadow-sm transition-transform"
+                    style={{ transform: prefs[type] !== false ? 'translateX(18px)' : 'translateX(2px)' }}
                     aria-hidden="true"
                   />
                 </button>

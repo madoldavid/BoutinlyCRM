@@ -63,6 +63,11 @@ export default function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
     n => n.user_id === currentUser.id && !n.read_at
   );
 
+  // Compute overdue task count for sidebar badge (computed once, not twice inline)
+  const overdueCount = tasks.filter(
+    t => t.assigned_to_id === currentUser?.id && !t.completed_at && new Date(t.due_at) < new Date()
+  ).length;
+
   const navigationItems = [
     { id: 'dashboard', label: 'Reports & Dashboards', icon: LayoutDashboard },
     { id: 'contacts', label: 'Contacts & Accounts', icon: Users },
@@ -112,17 +117,17 @@ export default function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
   };
 
   return (
-    <aside className={`${collapsed ? 'w-16' : 'w-64'} bg-theme-card text-theme-primary flex flex-col h-screen border-r border-theme-border shrink-0 select-none transition-[width] duration-200`}>
+    <aside className={`${collapsed ? 'w-16' : 'w-64'} bg-white text-theme-primary flex flex-col h-screen border-r-2 border-theme-border shrink-0 select-none transition-[width] duration-200 shadow-sm`}>
       {/* Brand Header */}
-      <div className={`border-b border-theme-border flex items-center ${collapsed ? 'p-3 justify-center' : 'p-5 justify-between'}`}>
-        <div className="flex items-center gap-2">
-          <div className="p-1.5 bg-theme-accent/10 rounded text-theme-accent">
-            <ShieldCheck className="w-5 h-5" />
+      <div className={`flex items-center border-b-2 border-theme-border ${collapsed ? 'p-3 justify-center' : 'px-5 py-4 justify-between'}`}>
+        <div className="flex items-center gap-3">
+          <div className="w-9 h-9 bg-theme-accent rounded flex items-center justify-center shadow-sm ring-2 ring-theme-accent/20">
+            <ShieldCheck className="w-5 h-5 text-white" />
           </div>
           {!collapsed && (
             <div>
-              <h1 className="font-display font-extrabold text-sm tracking-tight text-theme-primary">Boutinly</h1>
-              <span className="text-[10px] text-theme-secondary font-sans">Sovereign CRM</span>
+              <h1 className="font-sans font-extrabold text-sm tracking-tight text-theme-primary uppercase">Boutinly</h1>
+              <span className="text-[10px] text-theme-accent font-sans font-bold tracking-widest uppercase">CRM</span>
             </div>
           )}
         </div>
@@ -131,7 +136,7 @@ export default function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
         <div className="relative">
           <button
             onClick={() => setShowNotifications(!showNotifications)}
-            className="p-1.5 hover:bg-theme-hover rounded-md text-theme-secondary hover:text-theme-primary transition-colors relative cursor-pointer"
+            className="p-1.5 hover:bg-theme-hover rounded transition-colors relative cursor-pointer text-theme-secondary hover:text-theme-primary"
             id="notification-bell-btn"
             aria-label={`Notifications, ${unreadNotifications.length} unread`}
             aria-expanded={showNotifications}
@@ -144,7 +149,7 @@ export default function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
 
           {/* Notifications Dropdown Panel */}
           {showNotifications && (
-            <div className="absolute right-0 mt-2 w-80 bg-theme-card rounded-[10px] shadow-overlay border border-theme-border text-theme-primary z-50 overflow-hidden animate-overlay-in">
+            <div className="absolute right-0 mt-2 w-80 bg-theme-card rounded shadow-overlay border border-theme-border text-theme-primary z-50 overflow-hidden animate-overlay-in">
               <div className="p-3 bg-theme-inset border-b border-theme-border flex items-center justify-between">
                 <span className="text-xs font-semibold text-theme-primary">Notifications ({unreadNotifications.length})</span>
                 {unreadNotifications.length > 0 && (
@@ -191,39 +196,39 @@ export default function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
       </div>
 
       {/* Role Switcher & Profile Widget */}
-      <div className={`border-b border-theme-border bg-theme-base/50 relative ${collapsed ? 'p-2' : 'p-4'}`}>
+      <div className={`border-b-2 border-theme-border bg-theme-inset relative ${collapsed ? 'p-2' : 'px-4 py-3'}`}>
         <button
           onClick={() => (collapsed ? toggleCollapsed() : setShowUserMenu(!showUserMenu))}
-          className={`w-full flex items-center p-2 hover:bg-theme-base rounded-lg transition-colors text-left cursor-pointer group ${collapsed ? 'justify-center' : 'justify-between'}`}
+          className={`w-full flex items-center rounded transition-colors text-left cursor-pointer ${collapsed ? 'justify-center p-1.5 hover:bg-theme-hover' : 'justify-between p-2 -mx-2 hover:bg-black/5'}`}
           id="role-switcher-btn"
           title={collapsed ? `${currentUser.name} — expand sidebar` : undefined}
         >
-          <div className="flex items-center gap-2 min-w-0">
+          <div className="flex items-center gap-3 min-w-0">
             {currentUser.avatar_url ? (
               <img
                 src={currentUser.avatar_url}
                 alt={currentUser.name}
-                className="w-8 h-8 rounded-full border border-theme-border object-cover shrink-0"
+                className="w-9 h-9 rounded-full border-2 border-theme-border object-cover shrink-0"
               />
             ) : (
-              <div className="w-8 h-8 rounded-full border border-theme-border bg-theme-accent/10 flex items-center justify-center text-theme-accent text-xs font-bold shrink-0">
+              <div className="w-9 h-9 rounded-full bg-theme-accent flex items-center justify-center text-white text-sm font-bold shrink-0 shadow-sm">
                 {currentUser.name.charAt(0)}
               </div>
             )}
             {!collapsed && (
               <div className="min-w-0">
-                <p className="text-xs font-medium text-theme-primary truncate">{currentUser.name}</p>
-                <p className="text-[10px] text-theme-accent truncate uppercase tracking-wider font-sans font-semibold">
-                  {currentUser.role.replace('_', ' ')}
+                <p className="text-xs font-bold text-theme-primary truncate">{currentUser.name}</p>
+                <p className="text-[10px] text-theme-accent truncate uppercase tracking-wider font-sans font-extrabold">
+                  {currentUser.role.replace(/_/g, ' ')}
                 </p>
               </div>
             )}
           </div>
-          {!collapsed && <ChevronDown className="w-4 h-4 text-theme-secondary group-hover:text-theme-primary transition-colors shrink-0 ml-1" />}
+          {!collapsed && <ChevronDown className="w-4 h-4 text-theme-secondary shrink-0 ml-1" />}
         </button>
 
         {showUserMenu && (
-          <div className="absolute left-4 right-4 mt-2 bg-theme-card rounded-[10px] shadow-overlay border border-theme-border text-theme-primary z-50 py-1 divide-y divide-theme-border max-h-80 overflow-y-auto animate-overlay-in">
+          <div className="absolute left-4 right-4 mt-2 bg-theme-card rounded shadow-overlay border border-theme-border text-theme-primary z-50 py-1 divide-y divide-theme-border max-h-80 overflow-y-auto animate-overlay-in">
             <div className="px-3 py-2 text-[10px] text-theme-secondary font-semibold uppercase tracking-wider">
               {runtimeConfig.allowImpersonation ? 'Impersonate Role' : 'Switch View (demo)'}
             </div>
@@ -235,11 +240,11 @@ export default function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
                   setShowUserMenu(false);
                 }}
                 className={`w-full text-left px-3 py-2 text-xs flex items-center justify-between hover:bg-theme-base transition-colors cursor-pointer ${
-                  u.id === currentUser.id ? 'bg-theme-base text-theme-accent font-medium' : 'text-theme-primary'
+                  u.id === currentUser.id ? 'bg-theme-base text-theme-accent font-semibold' : 'text-theme-primary'
                 }`}
               >
                 <div>
-                  <span className="block font-medium">{u.name}</span>
+                  <span className="block font-semibold">{u.name}</span>
                   <span className="text-[10px] text-theme-secondary uppercase font-sans tracking-wide">
                     {u.role.replace('_', ' ')}
                   </span>
@@ -252,17 +257,17 @@ export default function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
 
         {/* Dynamic Role Capability Prompt */}
         {!collapsed && (
-        <div className="mt-2.5 px-2 py-1.5 bg-theme-base/60 rounded border border-theme-border flex gap-1.5 items-start">
+        <div className="mt-2.5 px-2.5 py-2 bg-theme-card rounded border border-theme-border flex gap-2 items-start shadow-sm">
           <Info className="w-3.5 h-3.5 text-theme-accent shrink-0 mt-0.5" />
           <p className="text-[10px] text-theme-secondary leading-normal font-sans">
-            <strong>Scope Alert:</strong> {roleDescriptions[currentUser.role]}
+            <strong className="text-theme-primary">Scope:</strong> {roleDescriptions[currentUser.role]}
           </p>
         </div>
         )}
       </div>
 
       {/* Navigation Modules */}
-      <nav className="flex-1 px-3 py-4 space-y-1 overflow-y-auto scrollbar-none">
+      <nav className="flex-1 px-2 py-3 space-y-0.5 overflow-y-auto scrollbar-none">
         {navigationItems.map(item => {
           // If item is restricted to specific roles, check permission
           if (item.roles && !item.roles.includes(currentUser.role)) {
@@ -276,28 +281,29 @@ export default function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
             <button
               key={item.id}
               onClick={() => handleModuleClick(item.id)}
-              className={`relative w-full flex items-center py-2.5 text-xs font-medium rounded-lg transition-all cursor-pointer group ${
-                collapsed ? 'justify-center px-0' : 'gap-3 px-3'
+              className={`relative w-full flex items-center text-xs font-semibold rounded transition-colors cursor-pointer ${
+                collapsed ? 'justify-center py-2.5 px-0' : 'gap-3 px-3 py-2.5'
               } ${
                 isActive
-                  ? 'bg-theme-accent-soft text-theme-accent'
-                  : 'text-theme-secondary hover:text-theme-primary hover:bg-theme-hover'
+                  ? 'bg-theme-accent text-white shadow-sm'
+                  : 'text-theme-primary hover:bg-theme-hover'
               }`}
               id={`nav-${item.id}`}
               aria-current={isActive ? 'page' : undefined}
               aria-label={item.label}
               title={collapsed ? item.label : undefined}
             >
-              {isActive && (
-                <span className="absolute left-0 top-1/2 -translate-y-1/2 w-0.5 h-4 bg-theme-accent rounded-full" aria-hidden="true" />
+              {/* Left accent bar — visible on active */}
+              {isActive && !collapsed && (
+                <span className="absolute left-0 top-1 bottom-1 w-1 bg-white/30 rounded-r-sm" aria-hidden="true" />
               )}
-              <Icon className={`w-4 h-4 shrink-0 ${isActive ? 'text-theme-accent' : 'text-theme-secondary/60 group-hover:text-theme-primary'}`} />
+              <Icon className={`w-4 h-4 shrink-0 ${isActive ? 'text-white' : 'text-theme-secondary'}`} />
               {!collapsed && <span className="truncate">{item.label}</span>}
 
               {/* Optional notifications bubble on side menu */}
-              {!collapsed && item.id === 'tasks' && tasks.filter(t => t.assigned_to_id === currentUser.id && !t.completed_at && new Date(t.due_at) < new Date()).length > 0 && (
-                <span className="ml-auto bg-danger-soft text-danger px-1.5 py-0.5 text-[9px] rounded-full font-sans font-bold tnum">
-                  {tasks.filter(t => t.assigned_to_id === currentUser.id && !t.completed_at && new Date(t.due_at) < new Date()).length} OVERDUE
+              {!collapsed && item.id === 'tasks' && overdueCount > 0 && (
+                <span className="ml-auto bg-danger text-white px-1.5 py-0.5 text-[9px] rounded-full font-sans font-extrabold tnum shadow-sm">
+                  {overdueCount}
                 </span>
               )}
             </button>
@@ -306,10 +312,10 @@ export default function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
       </nav>
 
       {/* Theme Switcher & Footer */}
-      <div className={`border-t border-theme-border bg-theme-base/30 space-y-3 ${collapsed ? 'p-2' : 'p-4'}`}>
+      <div className={`border-t-2 border-theme-border bg-theme-inset space-y-2.5 ${collapsed ? 'p-2' : 'p-3'}`}>
         <button
           onClick={toggleCollapsed}
-          className={`w-full flex items-center gap-2 py-2 text-xs font-medium text-theme-secondary hover:text-theme-primary hover:bg-theme-hover rounded-lg transition-colors cursor-pointer ${collapsed ? 'justify-center px-0' : 'px-3'}`}
+          className={`w-full flex items-center gap-2 py-2 text-xs font-semibold text-theme-secondary hover:text-theme-primary hover:bg-theme-hover rounded transition-colors cursor-pointer ${collapsed ? 'justify-center px-0' : 'px-3'}`}
           aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
           title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
         >
@@ -318,13 +324,11 @@ export default function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
         </button>
         {!collapsed && (
         <div className="flex items-center justify-between px-1">
-          <span className="text-[10px] text-theme-secondary font-semibold uppercase tracking-wider font-sans">Theme</span>
-          <div className="flex items-center gap-1.5" role="radiogroup" aria-label="Color theme">
+          <span className="text-[10px] text-theme-secondary font-extrabold uppercase tracking-wider font-sans">Theme</span>
+          <div className="flex items-center gap-2" role="radiogroup" aria-label="Color theme">
             {[
-              { id: 'dark', swatch: '#141418', label: 'Boutinly Dark (brand)' },
-              { id: 'heritage', swatch: '#1A2E6B', label: 'Boutinly Light' },
-              { id: 'artisan', swatch: '#C1751F', label: 'Artisan (warm)' },
-              { id: 'operator', swatch: '#3B6FB6', label: 'Operator (steel)' },
+              { id: 'light', swatch: '#0176D3', label: 'Salesforce Lightning' },
+              { id: 'dark', swatch: '#242426', label: 'Dark' },
             ].map(t => (
               <button
                 key={t.id}
@@ -333,9 +337,9 @@ export default function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
                 aria-checked={activeTheme === t.id}
                 aria-label={t.label}
                 title={t.label}
-                className={`w-4.5 h-4.5 rounded-full border-2 cursor-pointer transition-all ${
+                className={`w-5 h-5 rounded-full cursor-pointer transition-all border-2 ${
                   activeTheme === t.id
-                    ? 'border-theme-accent scale-110'
+                    ? 'border-theme-accent scale-110 shadow-sm'
                     : 'border-theme-border hover:border-theme-secondary'
                 }`}
                 style={{ backgroundColor: t.swatch }}
@@ -345,8 +349,8 @@ export default function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
         </div>
         )}
         {!collapsed && (
-        <div className="text-[10px] text-theme-secondary text-center font-sans">
-          Secure Environment &middot; boutinly.com
+        <div className="text-[10px] text-theme-secondary/60 text-center font-sans font-medium">
+          {currentUser?.email?.split('@')[1] ? `${currentUser.email.split('@')[1]}` : 'Secure Environment'}
         </div>
         )}
       </div>

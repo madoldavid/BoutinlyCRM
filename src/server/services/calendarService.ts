@@ -7,9 +7,11 @@
  * Requires GOOGLE_CLIENT_ID/GOOGLE_CLIENT_SECRET or MICROSOFT_CLIENT_ID/MICROSOFT_CLIENT_SECRET env vars.
  */
 
-import { randomBytes } from 'node:crypto';
+import { randomBytes, randomUUID } from 'node:crypto';
 import type { AppConfig } from '../config.js';
 import type { AppLogger } from '../logger.js';
+import type { CrmRepository } from '../repositories/crmRepository.js';
+import type { CalendarTokenRecord } from '../../types.js';
 
 export type CalendarProvider = 'google' | 'microsoft';
 
@@ -35,7 +37,6 @@ export interface CalendarEvent {
   attendees: string[];
 }
 
-// Simple in-memory token store — production should use DB with encrypted columns
 const tokenStore = new Map<string, CalendarToken[]>();
 
 const OAUTH_STATE_SECRET = process.env.JWT_SECRET || 'oauth-state-secret';
@@ -43,10 +44,12 @@ const OAUTH_STATE_SECRET = process.env.JWT_SECRET || 'oauth-state-secret';
 export class CalendarService {
   private baseUrl: string;
   private logger: AppLogger;
+  private repository: CrmRepository | null;
 
-  constructor(config: AppConfig, logger: AppLogger) {
+  constructor(config: AppConfig, logger: AppLogger, repository?: CrmRepository) {
     this.baseUrl = config.API_URL || 'http://localhost:8080';
     this.logger = logger;
+    this.repository = repository || null;
   }
 
   // ─── OAuth URL builders ────────────────────────────
@@ -150,19 +153,67 @@ export class CalendarService {
 
   // ─── Token storage ─────────────────────────────────
 
-  storeTokens(userId: string, token: CalendarToken): void {
+  async storeTokens(userId: string, token: CalendarToken): Promise<void> {
+    // Persist to database via repository when available
+    if (this.repository) {
+      try {
+        const record: CalendarTokenRecord = {
+          id: token.id,
+          user_id: token.userId,
+          provider: token.provider,
+          email: token.email,
+          access_token: token.accessToken,
+          refresh_token: token.refreshToken,
+          expires_at: token.expiresAt,
+          scope: token.scope,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        };
+        await this.repository.upsertCalendarToken(record);
+        this.logger.info({ userId, provider: token.provider, email: token.email }, 'Calendar tokens stored (DB)');
+        return;
+      } catch (err) {
+        this.logger.error({ err }, 'Failed to persist calendar token to DB, using memory fallback');
+      }
+    }
+    // In-memory fallback
     const existing = tokenStore.get(userId) || [];
     const filtered = existing.filter(t => !(t.provider === token.provider && t.email === token.email));
     filtered.push(token);
     tokenStore.set(userId, filtered);
-    this.logger.info({ userId, provider: token.provider, email: token.email }, 'Calendar tokens stored');
+    this.logger.info({ userId, provider: token.provider, email: token.email }, 'Calendar tokens stored (memory)');
   }
 
-  getTokens(userId: string): CalendarToken[] {
+  async getTokens(userId: string): Promise<CalendarToken[]> {
+    if (this.repository) {
+      try {
+        const records = await this.repository.getCalendarTokens(userId);
+        return records.map(r => ({
+          id: r.id,
+          userId: r.user_id,
+          provider: r.provider,
+          email: r.email,
+          accessToken: r.access_token,
+          refreshToken: r.refresh_token,
+          expiresAt: r.expires_at,
+          scope: r.scope,
+        }));
+      } catch (err) {
+        this.logger.error({ err }, 'Failed to load calendar tokens from DB, using memory fallback');
+      }
+    }
     return tokenStore.get(userId) || [];
   }
 
-  removeTokens(userId: string, provider: CalendarProvider): void {
+  async removeTokens(userId: string, provider: CalendarProvider): Promise<void> {
+    if (this.repository) {
+      try {
+        await this.repository.deleteCalendarToken(userId, provider);
+        return;
+      } catch (err) {
+        this.logger.error({ err }, 'Failed to delete calendar token from DB');
+      }
+    }
     const existing = tokenStore.get(userId) || [];
     tokenStore.set(userId, existing.filter(t => t.provider !== provider));
   }
@@ -186,11 +237,14 @@ export class CalendarService {
         });
         if (!res.ok) return null;
         const data = await res.json() as any;
-        return {
+        const refreshed: CalendarToken = {
           ...token,
           accessToken: data.access_token,
           expiresAt: new Date(Date.now() + (data.expires_in || 3600) * 1000).toISOString(),
         };
+        // Persist refreshed token
+        void this.storeTokens(token.userId, refreshed);
+        return refreshed;
       }
 
       if (token.provider === 'microsoft') {
@@ -206,11 +260,13 @@ export class CalendarService {
         });
         if (!res.ok) return null;
         const data = await res.json() as any;
-        return {
+        const refreshed: CalendarToken = {
           ...token,
           accessToken: data.access_token,
           expiresAt: new Date(Date.now() + (data.expires_in || 3600) * 1000).toISOString(),
         };
+        void this.storeTokens(token.userId, refreshed);
+        return refreshed;
       }
     } catch {
       // Token refresh failed — provider may have revoked access

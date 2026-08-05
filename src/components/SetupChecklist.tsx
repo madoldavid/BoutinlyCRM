@@ -78,7 +78,7 @@ export default function SetupChecklist() {
   const doneCount = items.filter(i => i.done).length;
   const pct = Math.round((doneCount / items.length) * 100);
 
-  if (dismissed || pct === 100) return null;
+  if (dismissed) return null;
 
   const dismiss = () => {
     setDismissed(true);

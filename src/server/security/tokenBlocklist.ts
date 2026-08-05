@@ -9,7 +9,7 @@
  * - Admin can force-revoke all tokens for a user.
  */
 
-import { createHash } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 
 interface BlocklistEntry {
   jti: string;
@@ -62,5 +62,5 @@ export class InMemoryTokenBlocklist implements TokenBlocklist {
 
 // JTI generation helper
 export function generateJti(): string {
-  return createHash('sha256').update(Math.random().toString() + Date.now().toString()).digest('base64url').substring(0, 32);
+  return createHash('sha256').update(randomBytes(32)).digest('base64url').substring(0, 32);
 }

@@ -162,10 +162,10 @@ function DashboardLayout() {
         {/* Offline/Error Banner */}
         {apiError && <OfflineBanner error={apiError} />}
 
-        {/* Enterprise Header Bar */}
-        <header className="shrink-0 bg-theme-card border-b border-theme-border select-none">
+        {/* Enterprise Header Bar — bold, solid, commanding */}
+        <header className="shrink-0 bg-white border-b-2 border-theme-border select-none shadow-sm">
           {/* Top row: breadcrumb + global actions */}
-          <div className="h-12 px-4 sm:px-6 flex items-center justify-between">
+          <div className="h-14 px-4 sm:px-6 flex items-center justify-between">
             <div className="flex items-center gap-2 min-w-0">
               <button
                 className="lg:hidden p-1.5 -ml-1 text-theme-secondary hover:text-theme-primary rounded cursor-pointer bg-transparent border-none"
@@ -174,31 +174,31 @@ function DashboardLayout() {
               >
                 <Menu className="w-5 h-5" />
               </button>
-              <span className="text-xs text-theme-secondary font-sans font-medium hidden sm:block">Boutinly CRM</span>
+              <span className="text-sm font-extrabold text-theme-primary font-sans hidden sm:block tracking-tight uppercase">Boutinly CRM</span>
             </div>
 
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2.5">
               <button
                 onClick={() => window.dispatchEvent(new Event('boutinly:open-palette'))}
-                className="flex items-center gap-2 text-xs text-theme-secondary bg-theme-inset hover:bg-theme-hover border border-theme-border rounded-md px-3 py-1.5 cursor-pointer transition-colors w-44 sm:w-52"
+                className="flex items-center gap-2 text-sm text-theme-primary bg-theme-inset hover:bg-white border border-theme-border rounded px-3.5 h-9 cursor-pointer transition-colors w-48 sm:w-56 shadow-sm"
                 aria-label="Open global search (Ctrl+K)"
               >
-                <Search className="w-3.5 h-3.5 shrink-0" />
-                <span className="flex-1 text-left truncate">Search…</span>
-                <kbd className="text-[9px] bg-theme-card border border-theme-border rounded px-1 py-px font-sans shrink-0">⌘K</kbd>
+                <Search className="w-4 h-4 shrink-0 text-theme-accent" />
+                <span className="flex-1 text-left text-theme-secondary">Search…</span>
+                <kbd className="text-[10px] bg-white border border-theme-border rounded px-1.5 py-0.5 font-sans font-bold shrink-0 text-theme-secondary shadow-sm">⌘K</kbd>
               </button>
               <button
                 onClick={dispatchNewRecord}
-                className="hidden sm:flex items-center gap-1.5 text-xs font-medium text-white bg-theme-accent hover:opacity-90 rounded-md px-3 py-1.5 cursor-pointer transition-opacity shadow-card"
+                className="hidden sm:flex items-center gap-2 text-sm font-extrabold text-white bg-theme-accent hover:brightness-95 rounded px-4 h-9 cursor-pointer transition-all shadow-sm"
                 aria-label="Create new record (N)"
                 title="New record (N)"
               >
-                <Plus className="w-3.5 h-3.5" />
+                <Plus className="w-4 h-4" />
                 New
               </button>
               <button
                 onClick={() => window.dispatchEvent(new Event('boutinly:open-shortcuts'))}
-                className="p-1.5 text-theme-secondary hover:text-theme-primary hover:bg-theme-hover rounded-md cursor-pointer bg-transparent border-none"
+                className="p-1.5 text-theme-secondary hover:text-theme-primary hover:bg-theme-hover rounded cursor-pointer bg-transparent border-none"
                 aria-label="Keyboard shortcuts (?)"
                 title="Keyboard shortcuts (?)"
               >
@@ -211,7 +211,7 @@ function DashboardLayout() {
                 currentUserRole={currentUser?.role ?? 'viewer'}
               />
               <div
-                className="w-7 h-7 rounded-full bg-theme-accent-soft text-theme-accent flex items-center justify-center text-xs font-bold border border-theme-border"
+                className="w-8 h-8 rounded-full bg-theme-accent text-white flex items-center justify-center text-sm font-extrabold border-2 border-white shadow-sm ring-1 ring-theme-border"
                 title={currentUser?.name}
                 aria-label={`Signed in as ${currentUser?.name}`}
               >
@@ -221,23 +221,23 @@ function DashboardLayout() {
           </div>
 
           {/* Bottom row: enterprise tabs navigation */}
-          <div className="flex items-center border-t border-theme-border overflow-x-auto scrollbar-none">
+          <div className="flex items-center border-t-2 border-theme-border overflow-x-auto scrollbar-none bg-theme-inset">
             <div className="flex px-2">
               {enterpriseTabs.map(tab => (
                 <button
                   key={tab.id}
                   onClick={() => setActiveModule(tab.id)}
-                  className={`flex items-center gap-1.5 px-3 py-2.5 text-xs font-medium font-sans whitespace-nowrap cursor-pointer transition-colors relative ${
+                  className={`flex items-center gap-1.5 px-4 py-3 text-sm font-bold font-sans whitespace-nowrap cursor-pointer transition-colors relative ${
                     activeModule === tab.id
                       ? 'text-theme-accent'
-                      : 'text-theme-secondary hover:text-theme-primary hover:bg-theme-hover/50'
+                      : 'text-theme-secondary hover:text-theme-primary'
                   }`}
                   aria-current={activeModule === tab.id ? 'page' : undefined}
                 >
-                  <tab.icon className="w-3.5 h-3.5" />
+                  <tab.icon className="w-4 h-4" />
                   {tab.label}
                   {activeModule === tab.id && (
-                    <span className="absolute bottom-0 left-2 right-2 h-0.5 bg-theme-accent rounded-full" />
+                    <span className="absolute bottom-0 left-2 right-2 h-[3px] bg-theme-accent rounded-full" />
                   )}
                 </button>
               ))}

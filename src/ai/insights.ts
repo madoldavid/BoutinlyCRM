@@ -16,8 +16,8 @@
  *    & dedup at the point of capture)
  */
 
-import type { Account, Activity, Contact, Deal, Stage, Task, User } from '../types';
-import { UserRole } from '../types';
+import type { Account, Activity, Contact, Deal, Stage, Task, User } from '../types.js';
+import { UserRole } from '../types.js';
 
 // ─── Shared context ──────────────────────────────────────────────────────
 

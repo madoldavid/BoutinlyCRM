@@ -4,7 +4,6 @@ import helmet from 'helmet';
 import { pinoHttp } from 'pino-http';
 import { randomUUID } from 'node:crypto';
 import type { AppConfig } from './config.js';
-import { runWithTenant } from './db/connection.js';
 import type { EmailService } from './email/service.js';
 import { ApiError, asyncHandler, createErrorHandler, notFoundHandler } from './errors.js';
 import type { AppLogger } from './logger.js';
@@ -21,6 +20,7 @@ import { idempotencyMiddleware } from './middleware/idempotency.js';
 import type { KeyManager } from './security/jwks.js';
 import type { AccountLockoutService } from './security/lockout.js';
 import type { TokenBlocklist } from './security/tokenBlocklist.js';
+import { setTrackingRepository } from './email/tracking.js';
 import { registerAccountsRoutes } from './routes/accounts.routes.js';
 import { registerActivitiesRoutes } from './routes/activities.routes.js';
 import { registerAdminRoutes } from './routes/admin.routes.js';
@@ -36,6 +36,8 @@ import { registerOidcRoutes } from './routes/oidc.routes.js';
 import { registerReportsRoutes } from './routes/reports.routes.js';
 import { registerTasksRoutes } from './routes/tasks.routes.js';
 import { registerFlagsRoutes } from './routes/flags.routes.js';
+import { registerInsightsRoutes } from './routes/insights.routes.js';
+import { registerPipelinesRoutes } from './routes/pipelines.routes.js';
 import { FeatureFlagService } from './services/featureFlags.js';
 
 interface CreateAppOptions {
@@ -184,27 +186,6 @@ export function createApp({ config, logger, repository, emailService, fileServic
     res.status(statusCode).json(health);
   });
 
-  // Tenant isolation — extract org from JWT and wrap downstream in runWithTenant
-  // so every query() call sets app.organization_id for PostgreSQL RLS.
-  // JWT verification is not done here — authenticate() handles that.
-  app.use((req, _res, next) => {
-    const raw = req.header('authorization');
-    if (raw?.startsWith('Bearer ')) {
-      try {
-        const parts = raw.slice(7).split('.');
-        if (parts.length === 3) {
-          const payload = JSON.parse(Buffer.from(parts[1], 'base64url').toString());
-          const orgId = payload.organizationId;
-          if (orgId) {
-            runWithTenant(orgId, () => next());
-            return;
-          }
-        }
-      } catch { /* fall through to unauthenticated path */ }
-    }
-    next();
-  });
-
   // Bootstrap - returns full scoped CRM snapshot for initial app load
   app.get('/api/crm/bootstrap', bootstrapLimiter.middleware, authenticate(config), asyncHandler<AuthenticatedRequest>(async (req, res) => {
     const snapshot = await repository.snapshot();
@@ -217,9 +198,12 @@ export function createApp({ config, logger, repository, emailService, fileServic
   // Idempotency-Key replay protection for POSTs that opt in (G-DAT-12)
   app.use(idempotencyMiddleware({ ttlMs: config.IDEMPOTENCY_TTL_MS }));
 
+  // Wire repository into email tracking for write-through persistence
+  setTrackingRepository(repository);
+
   // Register all route modules
   registerAuthRoutes(app, config, repository, emailService, lockoutService, keyManager, tokenBlocklist);
-  registerOidcRoutes(app, config, repository, logger);
+  registerOidcRoutes(app, config, repository, logger, keyManager);
   registerContactsRoutes(app, config, repository);
   registerAccountsRoutes(app, config, repository);
   registerDealsRoutes(app, config, repository);
@@ -233,6 +217,8 @@ export function createApp({ config, logger, repository, emailService, fileServic
   registerAdminRoutes(app, config, repository);
   registerCalendarRoutes(app, config, repository, logger);
   registerFlagsRoutes(app, config, repository, flags);
+  registerPipelinesRoutes(app, config, repository);
+  registerInsightsRoutes(app, config, repository, flags);
 
   app.use(notFoundHandler);
   app.use(createErrorHandler(logger));
