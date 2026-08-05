@@ -677,13 +677,13 @@ export default function AdminModule() {
 
       {/* MODAL: INVITE USER WITH ROLE */}
       {showInviteModal && (
-        <div className="fixed inset-0 bg-theme-primary/60 flex items-center justify-center z-50">
-          <div className="bg-theme-card rounded-xl shadow-xl border border-theme-border w-full max-w-sm overflow-hidden">
-            <header className="bg-theme-base px-5 py-4 border-b border-theme-border flex justify-between items-center">
+        <div className="fixed inset-0 z-[90] flex items-center justify-center p-4 bg-theme-primary/60 backdrop-blur-[2px] animate-fade-in">
+          <div className="bg-theme-card rounded-xl shadow-overlay border border-theme-border w-full max-w-sm overflow-hidden flex flex-col max-h-[85vh] animate-overlay-in">
+            <header className="bg-theme-inset px-5 py-4 border-b border-theme-border flex justify-between items-center shrink-0">
               <h3 className="text-sm font-bold text-theme-primary">Invite Corporate User</h3>
               <button onClick={() => setShowInviteModal(false)} className="text-theme-secondary hover:text-theme-primary font-bold text-xs cursor-pointer bg-transparent border-none">✕</button>
             </header>
-            <form onSubmit={handleInviteSubmit} className="p-5 space-y-4 text-xs text-left">
+            <form onSubmit={handleInviteSubmit} className="p-5 space-y-4 text-xs text-left overflow-y-auto">
               <div className="space-y-1">
                 <label className="block font-semibold text-theme-secondary">Display Name *</label>
                 <input
@@ -741,13 +741,13 @@ export default function AdminModule() {
 
       {/* MODAL: ADD CUSTOM FIELD DEFINITION */}
       {showFieldModal && (
-        <div className="fixed inset-0 bg-theme-primary/60 flex items-center justify-center z-50">
-          <div className="bg-theme-card rounded-xl shadow-xl border border-theme-border w-full max-w-sm overflow-hidden">
-            <header className="bg-theme-base px-5 py-4 border-b border-theme-border flex justify-between items-center">
+        <div className="fixed inset-0 z-[90] flex items-center justify-center p-4 bg-theme-primary/60 backdrop-blur-[2px] animate-fade-in">
+          <div className="bg-theme-card rounded-xl shadow-overlay border border-theme-border w-full max-w-sm overflow-hidden flex flex-col max-h-[85vh] animate-overlay-in">
+            <header className="bg-theme-inset px-5 py-4 border-b border-theme-border flex justify-between items-center shrink-0">
               <h3 className="text-sm font-bold text-theme-primary">Add Custom CRM Attribute</h3>
               <button onClick={() => setShowFieldModal(false)} className="text-theme-secondary hover:text-theme-primary font-bold text-xs cursor-pointer bg-transparent border-none">✕</button>
             </header>
-            <form onSubmit={handleFieldSubmit} className="p-5 space-y-4 text-xs text-left">
+            <form onSubmit={handleFieldSubmit} className="p-5 space-y-4 text-xs text-left overflow-y-auto">
               <div className="space-y-1">
                 <label className="block font-semibold text-theme-secondary">Target Entity Type</label>
                 <select

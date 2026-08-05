@@ -17,10 +17,8 @@ import {
   Sliders,
   Bell,
   Check,
-  ShieldCheck,
-  ChevronDown,
+  ChevronsUpDown,
   UserCheck,
-  Info,
   PanelLeftClose,
   PanelLeftOpen,
   ArrowRight
@@ -69,12 +67,12 @@ export default function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
   ).length;
 
   const navigationItems = [
-    { id: 'dashboard', label: 'Reports & Dashboards', icon: LayoutDashboard },
-    { id: 'contacts', label: 'Contacts & Accounts', icon: Users },
-    { id: 'deals', label: 'Sales Pipeline & Deals', icon: Briefcase },
-    { id: 'tasks', label: 'Tasks & Activities', icon: CheckSquare },
-    { id: 'emails', label: 'Email & Comms', icon: Mail },
-    { id: 'admin', label: 'System Admin', icon: Sliders, roles: [UserRole.SUPER_ADMIN, UserRole.ADMIN] },
+    { id: 'dashboard', label: 'Dashboards', icon: LayoutDashboard },
+    { id: 'contacts', label: 'Contacts', icon: Users },
+    { id: 'deals', label: 'Pipeline', icon: Briefcase },
+    { id: 'tasks', label: 'Tasks', icon: CheckSquare },
+    { id: 'emails', label: 'Email', icon: Mail },
+    { id: 'admin', label: 'Administration', icon: Sliders, roles: [UserRole.SUPER_ADMIN, UserRole.ADMIN] },
   ];
 
   const handleModuleClick = (moduleId: string) => {
@@ -101,11 +99,11 @@ export default function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
 
   // Human friendly names for roles
   const roleLabels: Record<UserRole, string> = {
-    [UserRole.SUPER_ADMIN]: 'Super Admin (Full Access)',
-    [UserRole.ADMIN]: 'Admin (Full Access)',
-    [UserRole.MANAGER]: 'Manager (Team Scope)',
-    [UserRole.SALES_REP]: 'Sales Rep (Own Scope)',
-    [UserRole.VIEWER]: 'Viewer (Read-Only)',
+    [UserRole.SUPER_ADMIN]: 'Super Admin',
+    [UserRole.ADMIN]: 'Admin',
+    [UserRole.MANAGER]: 'Manager',
+    [UserRole.SALES_REP]: 'Sales Rep',
+    [UserRole.VIEWER]: 'Viewer',
   };
 
   const roleDescriptions: Record<UserRole, string> = {
@@ -117,17 +115,16 @@ export default function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
   };
 
   return (
-    <aside className={`${collapsed ? 'w-16' : 'w-64'} bg-white text-theme-primary flex flex-col h-screen border-r-2 border-theme-border shrink-0 select-none transition-[width] duration-200 shadow-sm`}>
+    <aside className={`${collapsed ? 'w-[68px]' : 'w-60'} bg-sidebar-bg text-sidebar-text flex flex-col h-screen shrink-0 select-none transition-[width] duration-200`}>
       {/* Brand Header */}
-      <div className={`flex items-center border-b-2 border-theme-border ${collapsed ? 'p-3 justify-center' : 'px-5 py-4 justify-between'}`}>
-        <div className="flex items-center gap-3">
-          <div className="w-9 h-9 bg-theme-accent rounded flex items-center justify-center shadow-sm ring-2 ring-theme-accent/20">
-            <ShieldCheck className="w-5 h-5 text-white" />
+      <div className={`flex items-center h-14 border-b border-sidebar-border ${collapsed ? 'justify-center px-3' : 'justify-between px-4'}`}>
+        <div className="flex items-center gap-2.5 min-w-0">
+          <div className="w-8 h-8 rounded-[9px] bg-gradient-to-br from-theme-accent to-theme-accent-strong flex items-center justify-center shadow-raised shrink-0">
+            <span className="font-display font-semibold text-[15px] text-white leading-none translate-y-px">B</span>
           </div>
           {!collapsed && (
-            <div>
-              <h1 className="font-sans font-extrabold text-sm tracking-tight text-theme-primary uppercase">Boutinly</h1>
-              <span className="text-[10px] text-theme-accent font-sans font-bold tracking-widest uppercase">CRM</span>
+            <div className="leading-none min-w-0">
+              <h1 className="font-display font-semibold text-[17px] tracking-tight text-sidebar-text">Boutinly</h1>
             </div>
           )}
         </div>
@@ -136,26 +133,26 @@ export default function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
         <div className="relative">
           <button
             onClick={() => setShowNotifications(!showNotifications)}
-            className="p-1.5 hover:bg-theme-hover rounded transition-colors relative cursor-pointer text-theme-secondary hover:text-theme-primary"
+            className="p-2 hover:bg-sidebar-hover rounded-lg transition-colors relative cursor-pointer text-sidebar-muted hover:text-sidebar-text"
             id="notification-bell-btn"
             aria-label={`Notifications, ${unreadNotifications.length} unread`}
             aria-expanded={showNotifications}
           >
             <Bell className="w-4 h-4" />
             {unreadNotifications.length > 0 && (
-              <span className="absolute top-0.5 right-0.5 w-2 h-2 bg-theme-accent rounded-full animate-pulse" />
+              <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-theme-pulse rounded-full ring-2 ring-sidebar-bg" />
             )}
           </button>
 
           {/* Notifications Dropdown Panel */}
           {showNotifications && (
-            <div className="absolute right-0 mt-2 w-80 bg-theme-card rounded shadow-overlay border border-theme-border text-theme-primary z-50 overflow-hidden animate-overlay-in">
-              <div className="p-3 bg-theme-inset border-b border-theme-border flex items-center justify-between">
-                <span className="text-xs font-semibold text-theme-primary">Notifications ({unreadNotifications.length})</span>
+            <div className="absolute left-0 mt-2 w-80 bg-theme-card rounded-xl shadow-overlay border border-theme-border text-theme-primary z-50 overflow-hidden animate-overlay-in">
+              <div className="px-4 py-3 border-b border-theme-border flex items-center justify-between">
+                <span className="text-xs font-semibold text-theme-primary tracking-tight">Notifications ({unreadNotifications.length})</span>
                 {unreadNotifications.length > 0 && (
                   <button
                     onClick={clearAllNotifications}
-                    className="text-[10px] font-medium text-theme-accent hover:opacity-80 flex items-center gap-0.5 cursor-pointer"
+                    className="text-[11px] font-semibold text-theme-accent hover:text-theme-accent-strong flex items-center gap-1 cursor-pointer"
                   >
                     <Check className="w-3 h-3" /> Mark all read
                   </button>
@@ -163,19 +160,19 @@ export default function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
               </div>
               <div className="max-h-64 overflow-y-auto divide-y divide-theme-border">
                 {unreadNotifications.length === 0 ? (
-                  <div className="p-4 text-center text-xs text-theme-secondary font-sans">
-                    No unread notifications
+                  <div className="p-6 text-center text-xs text-theme-secondary font-sans">
+                    You're all caught up
                   </div>
                 ) : (
                   unreadNotifications.map(n => (
                     <div
                       key={n.id}
                       onClick={() => handleNotificationClick(n.id, n.entity_type)}
-                      className="p-3 hover:bg-theme-base cursor-pointer transition-colors text-left"
+                      className="px-4 py-3 hover:bg-theme-inset cursor-pointer transition-colors text-left"
                     >
                       <h4 className="text-xs font-semibold text-theme-primary">{n.title}</h4>
-                      <p className="text-[11px] text-theme-secondary mt-1 leading-normal">{n.body}</p>
-                      <span className="text-[9px] text-theme-secondary/70 mt-2 block font-sans">
+                      <p className="text-[11px] text-theme-secondary mt-0.5 leading-relaxed">{n.body}</p>
+                      <span className="text-[10px] text-theme-secondary/70 mt-1.5 block font-sans">
                         {new Date(n.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                       </span>
                     </div>
@@ -185,7 +182,7 @@ export default function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
               {/* Footer: open the full notifications center */}
               <button
                 onClick={() => { setShowNotifications(false); setShowNotificationsCenter(true); }}
-                className="w-full p-2.5 bg-theme-inset border-t border-theme-border text-[11px] font-medium text-theme-accent hover:opacity-80 flex items-center justify-center gap-1 cursor-pointer"
+                className="w-full py-2.5 bg-theme-inset border-t border-theme-border text-[11px] font-semibold text-theme-accent hover:text-theme-accent-strong flex items-center justify-center gap-1 cursor-pointer"
               >
                 View all notifications <ArrowRight className="w-3 h-3" />
               </button>
@@ -195,79 +192,11 @@ export default function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
         )}
       </div>
 
-      {/* Role Switcher & Profile Widget */}
-      <div className={`border-b-2 border-theme-border bg-theme-inset relative ${collapsed ? 'p-2' : 'px-4 py-3'}`}>
-        <button
-          onClick={() => (collapsed ? toggleCollapsed() : setShowUserMenu(!showUserMenu))}
-          className={`w-full flex items-center rounded transition-colors text-left cursor-pointer ${collapsed ? 'justify-center p-1.5 hover:bg-theme-hover' : 'justify-between p-2 -mx-2 hover:bg-black/5'}`}
-          id="role-switcher-btn"
-          title={collapsed ? `${currentUser.name} — expand sidebar` : undefined}
-        >
-          <div className="flex items-center gap-3 min-w-0">
-            {currentUser.avatar_url ? (
-              <img
-                src={currentUser.avatar_url}
-                alt={currentUser.name}
-                className="w-9 h-9 rounded-full border-2 border-theme-border object-cover shrink-0"
-              />
-            ) : (
-              <div className="w-9 h-9 rounded-full bg-theme-accent flex items-center justify-center text-white text-sm font-bold shrink-0 shadow-sm">
-                {currentUser.name.charAt(0)}
-              </div>
-            )}
-            {!collapsed && (
-              <div className="min-w-0">
-                <p className="text-xs font-bold text-theme-primary truncate">{currentUser.name}</p>
-                <p className="text-[10px] text-theme-accent truncate uppercase tracking-wider font-sans font-extrabold">
-                  {currentUser.role.replace(/_/g, ' ')}
-                </p>
-              </div>
-            )}
-          </div>
-          {!collapsed && <ChevronDown className="w-4 h-4 text-theme-secondary shrink-0 ml-1" />}
-        </button>
-
-        {showUserMenu && (
-          <div className="absolute left-4 right-4 mt-2 bg-theme-card rounded shadow-overlay border border-theme-border text-theme-primary z-50 py-1 divide-y divide-theme-border max-h-80 overflow-y-auto animate-overlay-in">
-            <div className="px-3 py-2 text-[10px] text-theme-secondary font-semibold uppercase tracking-wider">
-              {runtimeConfig.allowImpersonation ? 'Impersonate Role' : 'Switch View (demo)'}
-            </div>
-            {users.filter(u => runtimeConfig.allowImpersonation || u.id === currentUser.id).map(u => (
-              <button
-                key={u.id}
-                onClick={() => {
-                  setCurrentUser(u.id);
-                  setShowUserMenu(false);
-                }}
-                className={`w-full text-left px-3 py-2 text-xs flex items-center justify-between hover:bg-theme-base transition-colors cursor-pointer ${
-                  u.id === currentUser.id ? 'bg-theme-base text-theme-accent font-semibold' : 'text-theme-primary'
-                }`}
-              >
-                <div>
-                  <span className="block font-semibold">{u.name}</span>
-                  <span className="text-[10px] text-theme-secondary uppercase font-sans tracking-wide">
-                    {u.role.replace('_', ' ')}
-                  </span>
-                </div>
-                {u.id === currentUser.id && <UserCheck className="w-3.5 h-3.5 text-theme-accent" />}
-              </button>
-            ))}
-          </div>
-        )}
-
-        {/* Dynamic Role Capability Prompt */}
-        {!collapsed && (
-        <div className="mt-2.5 px-2.5 py-2 bg-theme-card rounded border border-theme-border flex gap-2 items-start shadow-sm">
-          <Info className="w-3.5 h-3.5 text-theme-accent shrink-0 mt-0.5" />
-          <p className="text-[10px] text-theme-secondary leading-normal font-sans">
-            <strong className="text-theme-primary">Scope:</strong> {roleDescriptions[currentUser.role]}
-          </p>
-        </div>
-        )}
-      </div>
-
       {/* Navigation Modules */}
-      <nav className="flex-1 px-2 py-3 space-y-0.5 overflow-y-auto scrollbar-none">
+      <nav className="flex-1 px-2.5 py-4 space-y-0.5 overflow-y-auto scrollbar-none">
+        {!collapsed && (
+          <p className="px-2.5 pb-2 text-[10px] font-semibold uppercase tracking-[0.14em] text-sidebar-muted/80">Workspace</p>
+        )}
         {navigationItems.map(item => {
           // If item is restricted to specific roles, check permission
           if (item.roles && !item.roles.includes(currentUser.role)) {
@@ -281,12 +210,12 @@ export default function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
             <button
               key={item.id}
               onClick={() => handleModuleClick(item.id)}
-              className={`relative w-full flex items-center text-xs font-semibold rounded transition-colors cursor-pointer ${
-                collapsed ? 'justify-center py-2.5 px-0' : 'gap-3 px-3 py-2.5'
+              className={`relative w-full flex items-center text-[13px] font-medium rounded-lg transition-colors cursor-pointer ${
+                collapsed ? 'justify-center py-2.5 px-0' : 'gap-2.5 px-2.5 py-2'
               } ${
                 isActive
-                  ? 'bg-theme-accent text-white shadow-sm'
-                  : 'text-theme-primary hover:bg-theme-hover'
+                  ? 'bg-sidebar-active text-sidebar-text font-semibold'
+                  : 'text-sidebar-muted hover:text-sidebar-text hover:bg-sidebar-hover'
               }`}
               id={`nav-${item.id}`}
               aria-current={isActive ? 'page' : undefined}
@@ -294,15 +223,15 @@ export default function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
               title={collapsed ? item.label : undefined}
             >
               {/* Left accent bar — visible on active */}
-              {isActive && !collapsed && (
-                <span className="absolute left-0 top-1 bottom-1 w-1 bg-white/30 rounded-r-sm" aria-hidden="true" />
+              {isActive && (
+                <span className="absolute left-0 top-2 bottom-2 w-[3px] bg-theme-pulse rounded-full" aria-hidden="true" />
               )}
-              <Icon className={`w-4 h-4 shrink-0 ${isActive ? 'text-white' : 'text-theme-secondary'}`} />
+              <Icon className={`w-4 h-4 shrink-0 ${isActive ? 'text-theme-pulse' : ''}`} strokeWidth={isActive ? 2.2 : 1.8} />
               {!collapsed && <span className="truncate">{item.label}</span>}
 
               {/* Optional notifications bubble on side menu */}
               {!collapsed && item.id === 'tasks' && overdueCount > 0 && (
-                <span className="ml-auto bg-danger text-white px-1.5 py-0.5 text-[9px] rounded-full font-sans font-extrabold tnum shadow-sm">
+                <span className="ml-auto bg-danger text-white px-1.5 py-0.5 text-[10px] rounded-full font-sans font-semibold tnum">
                   {overdueCount}
                 </span>
               )}
@@ -311,24 +240,15 @@ export default function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
         })}
       </nav>
 
-      {/* Theme Switcher & Footer */}
-      <div className={`border-t-2 border-theme-border bg-theme-inset space-y-2.5 ${collapsed ? 'p-2' : 'p-3'}`}>
-        <button
-          onClick={toggleCollapsed}
-          className={`w-full flex items-center gap-2 py-2 text-xs font-semibold text-theme-secondary hover:text-theme-primary hover:bg-theme-hover rounded transition-colors cursor-pointer ${collapsed ? 'justify-center px-0' : 'px-3'}`}
-          aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-          title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-        >
-          {collapsed ? <PanelLeftOpen className="w-4 h-4" /> : <PanelLeftClose className="w-4 h-4" />}
-          {!collapsed && <span>Collapse</span>}
-        </button>
+      {/* Footer: theme, collapse, user */}
+      <div className={`border-t border-sidebar-border space-y-1 ${collapsed ? 'p-2' : 'p-2.5'}`}>
         {!collapsed && (
-        <div className="flex items-center justify-between px-1">
-          <span className="text-[10px] text-theme-secondary font-extrabold uppercase tracking-wider font-sans">Theme</span>
+        <div className="flex items-center justify-between px-2.5 py-1.5">
+          <span className="text-[10px] text-sidebar-muted/80 font-semibold uppercase tracking-[0.14em] font-sans">Theme</span>
           <div className="flex items-center gap-2" role="radiogroup" aria-label="Color theme">
             {[
-              { id: 'light', swatch: '#0176D3', label: 'Salesforce Lightning' },
-              { id: 'dark', swatch: '#242426', label: 'Dark' },
+              { id: 'light', swatch: '#0D5F4A', label: 'Atelier Light' },
+              { id: 'dark', swatch: '#161513', label: 'Atelier Dark' },
             ].map(t => (
               <button
                 key={t.id}
@@ -337,10 +257,10 @@ export default function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
                 aria-checked={activeTheme === t.id}
                 aria-label={t.label}
                 title={t.label}
-                className={`w-5 h-5 rounded-full cursor-pointer transition-all border-2 ${
+                className={`w-4.5 h-4.5 rounded-full cursor-pointer transition-all border-2 ${
                   activeTheme === t.id
-                    ? 'border-theme-accent scale-110 shadow-sm'
-                    : 'border-theme-border hover:border-theme-secondary'
+                    ? 'border-theme-pulse scale-110'
+                    : 'border-sidebar-border hover:border-sidebar-muted'
                 }`}
                 style={{ backgroundColor: t.swatch }}
               />
@@ -348,11 +268,82 @@ export default function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
           </div>
         </div>
         )}
-        {!collapsed && (
-        <div className="text-[10px] text-theme-secondary/60 text-center font-sans font-medium">
-          {currentUser?.email?.split('@')[1] ? `${currentUser.email.split('@')[1]}` : 'Secure Environment'}
+
+        <button
+          onClick={toggleCollapsed}
+          className={`w-full flex items-center gap-2.5 py-2 text-[13px] font-medium text-sidebar-muted hover:text-sidebar-text hover:bg-sidebar-hover rounded-lg transition-colors cursor-pointer ${collapsed ? 'justify-center px-0' : 'px-2.5'}`}
+          aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+          title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+        >
+          {collapsed ? <PanelLeftOpen className="w-4 h-4" /> : <PanelLeftClose className="w-4 h-4" />}
+          {!collapsed && <span>Collapse</span>}
+        </button>
+
+        {/* User card / role switcher */}
+        <div className="relative">
+          <button
+            onClick={() => (collapsed ? toggleCollapsed() : setShowUserMenu(!showUserMenu))}
+            className={`w-full flex items-center rounded-lg transition-colors text-left cursor-pointer ${collapsed ? 'justify-center p-1.5 hover:bg-sidebar-hover' : 'justify-between gap-2 p-2 hover:bg-sidebar-hover'}`}
+            id="role-switcher-btn"
+            title={collapsed ? `${currentUser.name} — expand sidebar` : undefined}
+          >
+            <div className="flex items-center gap-2.5 min-w-0">
+              {currentUser.avatar_url ? (
+                <img
+                  src={currentUser.avatar_url}
+                  alt={currentUser.name}
+                  className="w-8 h-8 rounded-full object-cover shrink-0 ring-1 ring-sidebar-border"
+                />
+              ) : (
+                <div className="w-8 h-8 rounded-full bg-theme-accent flex items-center justify-center text-white text-xs font-semibold shrink-0">
+                  {currentUser.name.charAt(0)}
+                </div>
+              )}
+              {!collapsed && (
+                <div className="min-w-0 leading-tight">
+                  <p className="text-[13px] font-semibold text-sidebar-text truncate">{currentUser.name}</p>
+                  <p className="text-[10px] text-sidebar-muted truncate font-sans font-medium">
+                    {roleLabels[currentUser.role]}
+                  </p>
+                </div>
+              )}
+            </div>
+            {!collapsed && <ChevronsUpDown className="w-3.5 h-3.5 text-sidebar-muted shrink-0" />}
+          </button>
+
+          {showUserMenu && (
+            <div className="absolute bottom-full left-0 right-0 mb-2 bg-theme-card rounded-xl shadow-overlay border border-theme-border text-theme-primary z-50 py-1.5 max-h-80 overflow-y-auto animate-overlay-in">
+              <div className="px-3 pt-1.5 pb-2 border-b border-theme-border mb-1">
+                <p className="text-[10px] text-theme-secondary font-semibold uppercase tracking-[0.12em]">
+                  {runtimeConfig.allowImpersonation ? 'Impersonate Role' : 'Switch View (demo)'}
+                </p>
+                <p className="text-[10px] text-theme-secondary/80 mt-1 leading-relaxed font-sans">
+                  {roleDescriptions[currentUser.role]}
+                </p>
+              </div>
+              {users.filter(u => runtimeConfig.allowImpersonation || u.id === currentUser.id).map(u => (
+                <button
+                  key={u.id}
+                  onClick={() => {
+                    setCurrentUser(u.id);
+                    setShowUserMenu(false);
+                  }}
+                  className={`w-full text-left px-3 py-2 text-xs flex items-center justify-between hover:bg-theme-inset transition-colors cursor-pointer ${
+                    u.id === currentUser.id ? 'text-theme-accent font-semibold' : 'text-theme-primary'
+                  }`}
+                >
+                  <div>
+                    <span className="block font-semibold">{u.name}</span>
+                    <span className="text-[10px] text-theme-secondary font-sans">
+                      {u.role.replace(/_/g, ' ')}
+                    </span>
+                  </div>
+                  {u.id === currentUser.id && <UserCheck className="w-3.5 h-3.5 text-theme-accent" />}
+                </button>
+              ))}
+            </div>
+          )}
         </div>
-        )}
       </div>
 
       {/* Notifications center modal */}

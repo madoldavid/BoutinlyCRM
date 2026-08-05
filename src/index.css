@@ -1,7 +1,9 @@
 @import "tailwindcss";
 
 /* ================================================================
-   Salesforce Lightning Design System — Theme Tokens
+   Boutinly Design System — "Atelier" theme
+   Warm paper surfaces, deep evergreen accent, ink sidebar,
+   editorial typography (Hanken Grotesk + Fraunces).
    ================================================================ */
 
 @theme {
@@ -13,11 +15,20 @@
   --color-theme-primary: var(--text-primary);
   --color-theme-secondary: var(--text-secondary);
   --color-theme-accent: var(--accent);
+  --color-theme-accent-strong: var(--accent-strong);
   --color-theme-pulse: var(--accent-pulse);
   --color-theme-accent-soft: var(--accent-soft);
   --color-theme-border: var(--border);
 
-  /* ── Semantic status colors (Salesforce palette) ── */
+  /* ── Sidebar (dark ink) slots ── */
+  --color-sidebar-bg: var(--sidebar-bg);
+  --color-sidebar-text: var(--sidebar-text);
+  --color-sidebar-muted: var(--sidebar-muted);
+  --color-sidebar-hover: var(--sidebar-hover);
+  --color-sidebar-active: var(--sidebar-active);
+  --color-sidebar-border: var(--sidebar-border);
+
+  /* ── Semantic status colors ── */
   --color-success: var(--success);
   --color-success-soft: var(--success-soft);
   --color-warning: var(--warning);
@@ -27,20 +38,20 @@
   --color-info: var(--info);
   --color-info-soft: var(--info-soft);
 
-  /* ── Salesforce Sans font stack ── */
-  --font-sans: "Salesforce Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-  --font-display: "Salesforce Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  /* ── Typography ── */
+  --font-sans: "Hanken Grotesk", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-display: "Fraunces", Georgia, "Times New Roman", serif;
   --font-mono: "SF Mono", "Monaco", "Menlo", "Consolas", monospace;
 
-  /* ── Salesforce typography scale ── */
+  /* ── Type scale ── */
   --text-2xs: 0.6875rem;    /* 11px — fine print */
   --text-2xs--line-height: 1.4;
   --text-xs: 0.75rem;       /* 12px — field labels */
   --text-xs--line-height: 1.45;
   --text-sm: 0.8125rem;     /* 13px */
   --text-sm--line-height: 1.5;
-  --text-base: 0.875rem;    /* 14px — body text / field values */
-  --text-base--line-height: 1.5;
+  --text-base: 0.875rem;    /* 14px — body text */
+  --text-base--line-height: 1.55;
   --text-lg: 1rem;          /* 16px — section headers */
   --text-lg--line-height: 1.45;
   --text-xl: 1.25rem;       /* 20px */
@@ -48,16 +59,16 @@
   --text-2xl: 1.5rem;       /* 24px */
   --text-2xl--line-height: 1.2;
 
-  /* ── Salesforce border radius (4px default) ── */
-  --radius-xs: 2px;
-  --radius-sm: 4px;
-  --radius-md: 4px;
-  --radius-lg: 4px;
-  --radius-xl: 4px;
-  --radius-2xl: 6px;
-  --radius-3xl: 8px;
+  /* ── Radius — soft, modern, restrained ── */
+  --radius-xs: 3px;
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 10px;
+  --radius-xl: 12px;
+  --radius-2xl: 16px;
+  --radius-3xl: 20px;
 
-  /* ── Salesforce elevation (tight, utilitarian) ── */
+  /* ── Elevation (layered, warm-tinted) ── */
   --shadow-card: var(--elev-card);
   --shadow-raised: var(--elev-raised);
   --shadow-overlay: var(--elev-overlay);
@@ -67,89 +78,114 @@
 }
 
 /* ================================================================
-   Salesforce Lightning Design Tokens
+   Theme Tokens
    ================================================================ */
 
 :root {
-  /* ── Surface palette ── */
-  --bg-base: #F3F3F3;        /* Page background — Salesforce Light Gray */
+  /* ── Surface palette — warm paper ── */
+  --bg-base: #F6F5F1;         /* Page background */
   --bg-card: #FFFFFF;         /* Cards, tables, modals */
-  --bg-inset: #F9F9F9;        /* Inset areas, table headers */
-  --bg-hover: #F3F3F3;        /* Row hover, button hover */
+  --bg-inset: #FAF9F5;        /* Inset areas, table headers */
+  --bg-hover: #EFEDE6;        /* Row hover, button hover */
 
-  /* ── Text palette ── */
-  --text-primary: #181818;    /* Deep charcoal — body text, values */
-  --text-secondary: #514F4D;  /* Muted gray-blue — labels, help text */
+  /* ── Text palette — warm ink ── */
+  --text-primary: #1D1B16;    /* Near-black, warm */
+  --text-secondary: #6E6A5E;  /* Muted warm gray */
 
-  /* ── Brand accent ── */
-  --accent: #0176D3;          /* Salesforce Blue */
-  --accent-pulse: #0176D3;    /* Same as accent */
-  --accent-soft: rgba(1, 118, 211, 0.08); /* Blue tint for selected states */
+  /* ── Brand accent — deep evergreen ── */
+  --accent: #0D5F4A;
+  --accent-strong: #094A3A;   /* Hover / pressed */
+  --accent-pulse: #0D5F4A;
+  --accent-soft: rgba(13, 95, 74, 0.08);
 
   /* ── Borders ── */
-  --border: #DDDBDA;          /* Standard Salesforce separator */
+  --border: #E4E1D8;          /* Warm hairline */
 
   /* ── Semantic status colors ── */
-  --success: #2E844A;         /* Salesforce green */
-  --success-soft: #EDF7EE;
-  --warning: #DD7A01;         /* Salesforce orange */
-  --warning-soft: #FEF3E4;
-  --danger: #EA001E;          /* Salesforce red */
-  --danger-soft: #FEF0F0;
-  --info: #0176D3;            /* Salesforce blue */
-  --info-soft: #EBF3FC;
+  --success: #2E8B57;
+  --success-soft: #EAF4EE;
+  --warning: #B07C14;
+  --warning-soft: #FBF4E2;
+  --danger: #C24343;
+  --danger-soft: #FAEEEE;
+  --info: #3E6B9E;
+  --info-soft: #EDF2F9;
 
-  /* ── Elevation (Salesforce: tight, single-pixel, low-opacity) ── */
-  --elev-card: 0 2px 2px 0 rgba(0, 0, 0, 0.05);
-  --elev-raised: 0 2px 4px 0 rgba(0, 0, 0, 0.08);
-  --elev-overlay: 0 8px 24px 0 rgba(0, 0, 0, 0.15);
+  /* ── Dark ink sidebar ── */
+  --sidebar-bg: #0E1B16;
+  --sidebar-text: #ECEAE2;
+  --sidebar-muted: #8CA398;
+  --sidebar-hover: rgba(255, 255, 255, 0.055);
+  --sidebar-active: rgba(255, 255, 255, 0.10);
+  --sidebar-border: rgba(255, 255, 255, 0.07);
+
+  /* ── Elevation ── */
+  --elev-card: 0 1px 2px rgba(29, 27, 22, 0.04), 0 1px 3px rgba(29, 27, 22, 0.03);
+  --elev-raised: 0 2px 6px rgba(29, 27, 22, 0.06), 0 4px 14px rgba(29, 27, 22, 0.05);
+  --elev-overlay: 0 8px 24px rgba(29, 27, 22, 0.10), 0 16px 48px rgba(29, 27, 22, 0.10);
 
   color-scheme: light;
 }
 
-/* ── Dark theme: Salesforce doesn't really have one, but we keep it usable ── */
+/* ── Dark theme — warm charcoal ── */
 .theme-dark {
-  --bg-base: #1A1A1C;
-  --bg-card: #242426;
-  --bg-inset: #1E1E20;
-  --bg-hover: #2A2A2D;
-  --text-primary: #F3F3F3;
-  --text-secondary: #A2A1A0;
-  --accent: #0176D3;
-  --accent-pulse: #0176D3;
-  --accent-soft: rgba(1, 118, 211, 0.16);
-  --border: rgba(255, 255, 255, 0.10);
+  --bg-base: #161513;
+  --bg-card: #1F1D1A;
+  --bg-inset: #1A1815;
+  --bg-hover: #28251F;
+  --text-primary: #F0EEE7;
+  --text-secondary: #A29D90;
+  --accent: #45B993;
+  --accent-strong: #5FCBA6;
+  --accent-pulse: #45B993;
+  --accent-soft: rgba(69, 185, 147, 0.14);
+  --border: rgba(255, 255, 255, 0.09);
 
-  --success: #2E844A;
-  --success-soft: rgba(46, 132, 74, 0.14);
-  --warning: #DD7A01;
-  --warning-soft: rgba(221, 122, 1, 0.14);
-  --danger: #EA001E;
-  --danger-soft: rgba(234, 0, 30, 0.14);
-  --info: #0176D3;
-  --info-soft: rgba(1, 118, 211, 0.16);
+  --success: #4CAF7D;
+  --success-soft: rgba(76, 175, 125, 0.14);
+  --warning: #D9A62E;
+  --warning-soft: rgba(217, 166, 46, 0.14);
+  --danger: #DE6B6B;
+  --danger-soft: rgba(222, 107, 107, 0.14);
+  --info: #6FA0D4;
+  --info-soft: rgba(111, 160, 212, 0.14);
 
-  --elev-card: 0 2px 2px 0 rgba(0, 0, 0, 0.20);
-  --elev-raised: 0 2px 4px 0 rgba(0, 0, 0, 0.25);
-  --elev-overlay: 0 8px 24px 0 rgba(0, 0, 0, 0.40);
+  --sidebar-bg: #100E0C;
+  --sidebar-text: #ECEAE2;
+  --sidebar-muted: #8F8A7D;
+  --sidebar-hover: rgba(255, 255, 255, 0.05);
+  --sidebar-active: rgba(255, 255, 255, 0.09);
+  --sidebar-border: rgba(255, 255, 255, 0.07);
+
+  --elev-card: 0 1px 2px rgba(0, 0, 0, 0.24), 0 1px 3px rgba(0, 0, 0, 0.20);
+  --elev-raised: 0 2px 6px rgba(0, 0, 0, 0.28), 0 4px 14px rgba(0, 0, 0, 0.24);
+  --elev-overlay: 0 8px 24px rgba(0, 0, 0, 0.36), 0 16px 48px rgba(0, 0, 0, 0.32);
 
   color-scheme: dark;
 }
 
-/* ── Legacy theme aliases (kept for existing toggle, now all map to Salesforce) ── */
+/* ── Legacy theme aliases (all map to the Atelier light palette) ── */
 .theme-light,
 .theme-artisan,
 .theme-operator,
 .theme-heritage {
-  --bg-base: #F3F3F3;
+  --bg-base: #F6F5F1;
   --bg-card: #FFFFFF;
-  --bg-inset: #F9F9F9;
-  --bg-hover: #F3F3F3;
-  --text-primary: #181818;
-  --text-secondary: #514F4D;
-  --accent: #0176D3;
-  --accent-soft: rgba(1, 118, 211, 0.08);
-  --border: #DDDBDA;
+  --bg-inset: #FAF9F5;
+  --bg-hover: #EFEDE6;
+  --text-primary: #1D1B16;
+  --text-secondary: #6E6A5E;
+  --accent: #0D5F4A;
+  --accent-strong: #094A3A;
+  --accent-soft: rgba(13, 95, 74, 0.08);
+  --border: #E4E1D8;
+
+  --sidebar-bg: #0E1B16;
+  --sidebar-text: #ECEAE2;
+  --sidebar-muted: #8CA398;
+  --sidebar-hover: rgba(255, 255, 255, 0.055);
+  --sidebar-active: rgba(255, 255, 255, 0.10);
+  --sidebar-border: rgba(255, 255, 255, 0.07);
 }
 
 /* ================================================================
@@ -160,13 +196,27 @@ html, body {
   background-color: var(--bg-base);
   color: var(--text-primary);
   -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
   font-family: var(--font-sans);
 }
 
-/* ── Display typography — Salesforce Sans bold for headings ── */
-h1, h2, h3, .font-display {
+::selection {
+  background: var(--accent-soft);
+  color: var(--text-primary);
+}
+
+/* ── Headings — confident grotesk, tight tracking ── */
+h1, h2, h3 {
+  font-family: var(--font-sans);
+  font-weight: 650;
+  letter-spacing: -0.015em;
+}
+
+/* ── Serif display moments (brand, hero, empty states) ── */
+.font-display {
   font-family: var(--font-display);
-  font-weight: 600;
+  font-optical-sizing: auto;
   letter-spacing: -0.01em;
 }
 
@@ -192,11 +242,11 @@ aside, header, nav, main, section, div[class*="bg-theme"], button, a, input, sel
   border-width: 0;
 }
 
-/* ── Accessible focus rings (Salesforce blue) ── */
+/* ── Accessible focus rings ── */
 :focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 1px;
-  border-radius: 4px;
+  border-radius: 6px;
 }
 
 input:focus-visible, select:focus-visible, textarea:focus-visible {
@@ -209,9 +259,23 @@ input:focus-visible, select:focus-visible, textarea:focus-visible {
   font-variant-numeric: tabular-nums;
 }
 
+/* ── Keyboard hint chips ── */
+kbd {
+  font-family: var(--font-sans);
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-bottom-width: 2px;
+  border-radius: 5px;
+  padding: 1px 5px;
+  line-height: 1.4;
+}
+
 /* ── Overlay entrance ── */
 @keyframes overlay-in {
-  from { opacity: 0; transform: translateY(2px) scale(0.995); }
+  from { opacity: 0; transform: translateY(3px) scale(0.99); }
   to   { opacity: 1; transform: translateY(0) scale(1); }
 }
 
@@ -221,11 +285,11 @@ input:focus-visible, select:focus-visible, textarea:focus-visible {
 }
 
 .animate-overlay-in {
-  animation: overlay-in 130ms var(--ease-out-quart);
+  animation: overlay-in 160ms var(--ease-out-quart);
 }
 
 .animate-fade-in {
-  animation: fade-in 120ms ease-out;
+  animation: fade-in 140ms ease-out;
 }
 
 /* ================================================================
@@ -239,7 +303,7 @@ input:focus-visible, select:focus-visible, textarea:focus-visible {
     left: 0;
     bottom: 0;
     z-index: 80;
-    transition: transform 200ms var(--ease-out-quart);
+    transition: transform 220ms var(--ease-out-quart);
   }
   .sidebar-mobile-hidden {
     transform: translateX(-100%);
@@ -256,7 +320,7 @@ input:focus-visible, select:focus-visible, textarea:focus-visible {
 
 @media (max-width: 640px) {
   .responsive-card-list > * {
-    border-radius: 4px;
+    border-radius: 10px;
     margin-bottom: 8px;
   }
 }
@@ -269,12 +333,12 @@ input:focus-visible, select:focus-visible, textarea:focus-visible {
 }
 
 /* ================================================================
-   Premium Scrollbars (Salesforce style)
+   Scrollbars
    ================================================================ */
 
 ::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
+  width: 8px;
+  height: 8px;
 }
 
 ::-webkit-scrollbar-track {
@@ -282,12 +346,16 @@ input:focus-visible, select:focus-visible, textarea:focus-visible {
 }
 
 ::-webkit-scrollbar-thumb {
-  background: var(--border);
+  background: color-mix(in srgb, var(--text-secondary) 28%, transparent);
   border-radius: 9999px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: var(--text-secondary);
+  background: color-mix(in srgb, var(--text-secondary) 48%, transparent);
+  background-clip: padding-box;
+  border: 2px solid transparent;
 }
 
 /* ================================================================
@@ -330,10 +398,9 @@ html.printing .print-area {
 }
 
 /* ================================================================
-   Salesforce Input Field Standardization
+   Input Field Standardization
    ================================================================ */
 
-/* Standardize all input, select, textarea to Salesforce spec */
 input[type="text"],
 input[type="email"],
 input[type="password"],
@@ -345,30 +412,44 @@ input[type="date"],
 input:not([type]),
 select,
 textarea {
-  height: 32px;
-  min-height: 32px;
-  border-radius: 4px;
+  height: 34px;
+  min-height: 34px;
+  border-radius: 7px;
   border: 1px solid var(--border);
-  padding-left: 8px;
-  padding-right: 8px;
-  font-size: 0.875rem;
+  padding-left: 10px;
+  padding-right: 10px;
+  font-size: 0.8125rem;
   font-family: var(--font-sans);
   background-color: var(--bg-card);
   color: var(--text-primary);
   box-sizing: border-box;
-  transition: border-color 120ms ease, box-shadow 120ms ease;
+  transition: border-color 120ms ease, box-shadow 120ms ease, background-color 120ms ease;
+}
+
+input[type="text"]:hover:not(:focus):not(:disabled),
+input[type="email"]:hover:not(:focus):not(:disabled),
+input[type="password"]:hover:not(:focus):not(:disabled),
+input[type="number"]:hover:not(:focus):not(:disabled),
+input[type="search"]:hover:not(:focus):not(:disabled),
+input[type="tel"]:hover:not(:focus):not(:disabled),
+input[type="url"]:hover:not(:focus):not(:disabled),
+input[type="date"]:hover:not(:focus):not(:disabled),
+input:not([type]):hover:not(:focus):not(:disabled),
+select:hover:not(:focus):not(:disabled),
+textarea:hover:not(:focus):not(:disabled) {
+  border-color: color-mix(in srgb, var(--text-secondary) 45%, var(--border));
 }
 
 textarea {
   height: auto;
-  min-height: 64px;
-  padding-top: 6px;
-  padding-bottom: 6px;
+  min-height: 72px;
+  padding-top: 8px;
+  padding-bottom: 8px;
   line-height: 1.5;
   resize: vertical;
 }
 
-/* Focus — Salesforce blue border with subtle glow */
+/* Focus — evergreen border with soft halo */
 input[type="text"]:focus,
 input[type="email"]:focus,
 input[type="password"]:focus,
@@ -380,14 +461,13 @@ input[type="date"]:focus,
 input:not([type]):focus,
 select:focus,
 textarea:focus {
-  border-color: #0176D3;
-  box-shadow: 0 0 0 1px rgba(1, 118, 211, 0.2);
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
   outline: none;
 }
 
-/* Placeholder — muted */
 ::placeholder {
-  color: #939393;
+  color: color-mix(in srgb, var(--text-secondary) 62%, transparent);
   font-size: 0.8125rem;
 }
 
@@ -396,79 +476,47 @@ input[type="checkbox"],
 input[type="radio"] {
   width: 14px;
   height: 14px;
-  accent-color: #0176D3;
+  accent-color: var(--accent);
   cursor: pointer;
 }
 
-/* Select dropdown arrow standardization */
+/* Select dropdown arrow */
 select {
   appearance: none;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%23514F4D' d='M6 8L1 3h10z'/%3E%3C/svg%3E");
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%236E6A5E' d='M6 8L1 3h10z'/%3E%3C/svg%3E");
   background-repeat: no-repeat;
-  background-position: right 8px center;
-  padding-right: 28px;
+  background-position: right 10px center;
+  padding-right: 30px;
   cursor: pointer;
 }
 
 /* ================================================================
-   Salesforce Button Standardization
+   Button Normalization
    ================================================================ */
 
 button, [role="button"] {
-  border-radius: 4px;
+  border-radius: 7px;
   font-family: var(--font-sans);
 }
 
-/* Primary buttons — override Tailwind classes via attribute selectors */
-button.bg-theme-accent,
-button[class*="bg-theme-accent"] {
-  border-radius: 4px;
-  height: 32px;
-  padding-left: 16px;
-  padding-right: 16px;
-  font-weight: 600;
-  font-size: 0.8125rem;
-  box-shadow: none;
-}
-
-/* Secondary buttons — white bg + blue text + border */
-button.bg-theme-card[class*="border-theme-border"],
-button.bg-theme-base[class*="border-theme-border"] {
-  border-radius: 4px;
-  height: 32px;
-  padding-left: 16px;
-  padding-right: 16px;
-  font-weight: 500;
-  font-size: 0.8125rem;
-  border-color: #DDDBDA;
-  color: #0176D3;
-}
-
 /* ================================================================
-   Salesforce Table Row Density
+   Table Baseline
    ================================================================ */
 
-/* Compact table rows */
 table th,
 table td {
-  height: 36px;
-  font-size: 0.8125rem;
   border-bottom: 1px solid var(--border);
 }
 
-/* Salesforce field label style */
+table th {
+  font-weight: 600;
+}
+
+/* Field labels */
 label {
   font-size: 0.75rem;
-  font-weight: 400;
-  color: #514F4D;
+  font-weight: 500;
+  color: var(--text-secondary);
   display: block;
   margin-bottom: 4px;
 }
-
-/* Card containers — white, 4px radius, thin border, faint shadow */
-.bg-theme-card {
-  border-radius: 4px;
-  border: 1px solid var(--border);
-  box-shadow: 0 2px 2px 0 rgba(0, 0, 0, 0.05);
-}
-

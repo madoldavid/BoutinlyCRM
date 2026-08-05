@@ -935,7 +935,7 @@ export default function PipelineModule() {
               <div className="grid grid-cols-3 gap-4 mt-5 pt-4 border-t border-theme-border text-[11px] text-theme-secondary font-sans">
                 <div>
                   <span className="text-theme-secondary/80 block font-sans text-[9px] uppercase tracking-wider font-semibold">Deal Value</span>
-                  <span className="text-sm font-extrabold text-theme-primary font-sans">${activeDeal.value.toLocaleString()}</span>
+                   <span className="text-sm font-semibold tnum text-theme-primary font-sans">${activeDeal.value.toLocaleString()}</span>
                 </div>
                 <div>
                   <span className="text-theme-secondary/80 block font-sans text-[9px] uppercase tracking-wider font-semibold">Pipeline Stage</span>
@@ -1236,13 +1236,13 @@ export default function PipelineModule() {
 
       {/* MODAL: CREATE DEAL */}
       {showCreateDeal && (
-        <div className="fixed inset-0 bg-theme-primary/60 flex items-center justify-center z-50">
-          <div className="bg-theme-card rounded-xl shadow-xl border border-theme-border w-full max-w-lg overflow-hidden">
-            <header className="bg-theme-base px-5 py-4 border-b border-theme-border flex justify-between items-center">
+        <div className="fixed inset-0 z-[90] flex items-center justify-center p-4 bg-theme-primary/60 backdrop-blur-[2px] animate-fade-in">
+          <div className="bg-theme-card rounded-xl shadow-overlay border border-theme-border w-full max-w-lg overflow-hidden flex flex-col max-h-[85vh] animate-overlay-in">
+            <header className="bg-theme-inset px-5 py-4 border-b border-theme-border flex justify-between items-center shrink-0">
               <h3 className="text-sm font-bold text-theme-primary">Provision New Opportunity (Deal)</h3>
               <button onClick={() => setShowCreateDeal(false)} className="text-theme-secondary hover:text-theme-primary font-bold text-xs cursor-pointer bg-transparent border-none">✕</button>
             </header>
-            <form onSubmit={handleCreateDealSubmit} className="p-5 space-y-4 text-xs text-left">
+            <form onSubmit={handleCreateDealSubmit} className="p-5 space-y-4 text-xs text-left overflow-y-auto">
               <div className="space-y-1">
                 <label className="block font-semibold text-theme-secondary">Opportunity Name *</label>
                 <input
@@ -1349,13 +1349,13 @@ export default function PipelineModule() {
 
       {/* MODAL: CLOSE DEAL OUTCOME */}
       {showCloseDealModal && (
-        <div className="fixed inset-0 bg-theme-primary/60 flex items-center justify-center z-50">
-          <div className="bg-theme-card rounded-xl shadow-xl border border-theme-border w-full max-w-sm overflow-hidden">
-            <header className="bg-theme-base px-5 py-4 border-b border-theme-border flex justify-between items-center">
+        <div className="fixed inset-0 z-[90] flex items-center justify-center p-4 bg-theme-primary/60 backdrop-blur-[2px] animate-fade-in">
+          <div className="bg-theme-card rounded-xl shadow-overlay border border-theme-border w-full max-w-sm overflow-hidden flex flex-col max-h-[85vh] animate-overlay-in">
+            <header className="bg-theme-inset px-5 py-4 border-b border-theme-border flex justify-between items-center shrink-0">
               <h3 className="text-sm font-bold text-theme-primary">Close Opportunity (Final Status)</h3>
               <button onClick={() => setShowCloseDealModal(false)} className="text-theme-secondary hover:text-theme-primary font-bold text-xs cursor-pointer bg-transparent border-none">✕</button>
             </header>
-            <div className="p-5 space-y-4 text-xs text-left">
+            <div className="p-5 space-y-4 text-xs text-left overflow-y-auto">
               <p className="text-theme-secondary leading-normal">
                 Setting this deal to Closed {closingOutcome === 'won' ? 'Won' : 'Lost'}.
               </p>

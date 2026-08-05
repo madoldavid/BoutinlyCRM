@@ -109,7 +109,7 @@ export default function NotificationsCenter({ open, onClose }: { open: boolean; 
       aria-modal="true"
       aria-label="Notifications center"
     >
-      <div className="w-full max-w-lg bg-theme-card border border-theme-border rounded-[14px] shadow-overlay animate-overlay-in flex flex-col max-h-[80vh] overflow-hidden">
+      <div className="w-full max-w-lg bg-theme-card border border-theme-border rounded-xl shadow-overlay animate-overlay-in flex flex-col max-h-[80vh] overflow-hidden">
         {/* Header */}
         <div className="px-5 py-4 border-b border-theme-border flex items-center justify-between shrink-0">
           <div className="flex items-center gap-2.5">

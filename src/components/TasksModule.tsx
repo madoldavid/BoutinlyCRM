@@ -581,13 +581,13 @@ export default function TasksModule() {
 
       {/* MODAL: CREATE TASK */}
       {showCreateTask && (
-        <div className="fixed inset-0 bg-theme-primary/60 flex items-center justify-center z-50">
-          <div className="bg-theme-card rounded-xl shadow-xl border border-theme-border w-full max-w-md overflow-hidden">
-            <header className="bg-theme-base px-5 py-4 border-b border-theme-border flex justify-between items-center">
+        <div className="fixed inset-0 z-[90] flex items-center justify-center p-4 bg-theme-primary/60 backdrop-blur-[2px] animate-fade-in">
+          <div className="bg-theme-card rounded-xl shadow-overlay border border-theme-border w-full max-w-md overflow-hidden flex flex-col max-h-[85vh] animate-overlay-in">
+            <header className="bg-theme-inset px-5 py-4 border-b border-theme-border flex justify-between items-center shrink-0">
               <h3 className="text-sm font-bold text-theme-primary">Create Scheduled CRM Task</h3>
               <button onClick={() => setShowCreateTask(false)} className="text-theme-secondary hover:text-theme-primary font-bold text-xs cursor-pointer bg-transparent border-none">✕</button>
             </header>
-            <form onSubmit={handleTaskSubmit} className="p-5 space-y-4 text-xs text-left">
+            <form onSubmit={handleTaskSubmit} className="p-5 space-y-4 text-xs text-left overflow-y-auto">
               <div className="space-y-1">
                 <label className="block font-semibold text-theme-secondary">Task Title *</label>
                 <input

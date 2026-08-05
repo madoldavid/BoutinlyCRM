@@ -81,7 +81,7 @@ export default function AppLauncher({ apps, activeAppId, onSelect, currentUserRo
           <div className="fixed inset-0 z-[88]" onClick={() => setOpen(false)} />
           <div
             ref={ref}
-            className="absolute right-0 top-full mt-2 w-[340px] bg-theme-card rounded-[14px] shadow-overlay border border-theme-border animate-overlay-in z-[89] overflow-hidden"
+            className="absolute right-0 top-full mt-2 w-[340px] bg-theme-card rounded-xl shadow-overlay border border-theme-border animate-overlay-in z-[89] overflow-hidden"
             role="dialog"
             aria-label="App launcher"
           >

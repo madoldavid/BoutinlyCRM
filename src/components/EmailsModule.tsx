@@ -430,7 +430,7 @@ export default function EmailsModule() {
             <div className="p-3 bg-theme-base/50 rounded-xl border border-theme-border">
               <Eye className="w-5 h-5 text-theme-accent mx-auto" />
               <span className="text-[10px] text-theme-secondary block uppercase font-sans font-bold mt-1.5">Avg Open Rate</span>
-              <span className="text-sm font-extrabold text-theme-primary font-sans">
+              <span className="text-sm font-semibold tnum text-theme-primary font-sans">
                 {(() => {
                   const sent = emailCampaigns.filter(c => c.status === 'sent' && c.total_recipients > 0);
                   if (sent.length === 0) return 'N/A';
@@ -442,7 +442,7 @@ export default function EmailsModule() {
             <div className="p-3 bg-theme-base/50 rounded-xl border border-theme-border">
               <MousePointerClick className="w-5 h-5 text-theme-accent mx-auto" />
               <span className="text-[10px] text-theme-secondary block uppercase font-sans font-bold mt-1.5">Avg Click Rate</span>
-              <span className="text-sm font-extrabold text-theme-primary font-sans">
+              <span className="text-sm font-semibold tnum text-theme-primary font-sans">
                 {(() => {
                   const sent = emailCampaigns.filter(c => c.status === 'sent' && c.total_recipients > 0);
                   if (sent.length === 0) return 'N/A';
@@ -454,7 +454,7 @@ export default function EmailsModule() {
             <div className="p-3 bg-theme-base/50 rounded-xl border border-theme-border">
               <XOctagon className="w-5 h-5 text-theme-secondary mx-auto" />
               <span className="text-[10px] text-theme-secondary block uppercase font-sans font-bold mt-1.5">Hard Bounce</span>
-              <span className="text-sm font-extrabold text-theme-primary font-sans">
+              <span className="text-sm font-semibold tnum text-theme-primary font-sans">
                 {(() => {
                   const sent = emailCampaigns.filter(c => c.status === 'sent' && c.total_recipients > 0);
                   if (sent.length === 0) return 'N/A';
@@ -479,13 +479,13 @@ export default function EmailsModule() {
 
       {/* MODAL: CREATE EMAIL TEMPLATE */}
       {showCreateTemplate && (
-        <div className="fixed inset-0 bg-theme-primary/60 flex items-center justify-center z-50">
-          <div className="bg-theme-card rounded-xl shadow-xl border border-theme-border w-full max-w-lg overflow-hidden">
-            <header className="bg-theme-base px-5 py-4 border-b border-theme-border flex justify-between items-center">
+        <div className="fixed inset-0 z-[90] flex items-center justify-center p-4 bg-theme-primary/60 backdrop-blur-[2px] animate-fade-in">
+          <div className="bg-theme-card rounded-xl shadow-overlay border border-theme-border w-full max-w-lg overflow-hidden flex flex-col max-h-[85vh] animate-overlay-in">
+            <header className="bg-theme-inset px-5 py-4 border-b border-theme-border flex justify-between items-center shrink-0">
               <h3 className="text-sm font-bold text-theme-primary">Add New Email Template</h3>
               <button onClick={() => setShowCreateTemplate(false)} className="text-theme-secondary hover:text-theme-primary font-bold text-xs cursor-pointer bg-transparent border-none">✕</button>
             </header>
-            <form onSubmit={handleCreateTemplateSubmit} className="p-5 space-y-4 text-xs text-left">
+            <form onSubmit={handleCreateTemplateSubmit} className="p-5 space-y-4 text-xs text-left overflow-y-auto">
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-1">
                   <label className="block font-semibold text-theme-secondary">Template Title *</label>
@@ -564,13 +564,13 @@ export default function EmailsModule() {
 
       {/* MODAL: CREATE CAMPAIGN OUTREACH */}
       {showCreateCampaign && (
-        <div className="fixed inset-0 bg-theme-primary/60 flex items-center justify-center z-50">
-          <div className="bg-theme-card rounded-xl shadow-xl border border-theme-border w-full max-w-sm overflow-hidden">
-            <header className="bg-theme-base px-5 py-4 border-b border-theme-border flex justify-between items-center">
+        <div className="fixed inset-0 z-[90] flex items-center justify-center p-4 bg-theme-primary/60 backdrop-blur-[2px] animate-fade-in">
+          <div className="bg-theme-card rounded-xl shadow-overlay border border-theme-border w-full max-w-sm overflow-hidden flex flex-col max-h-[85vh] animate-overlay-in">
+            <header className="bg-theme-inset px-5 py-4 border-b border-theme-border flex justify-between items-center shrink-0">
               <h3 className="text-sm font-bold text-theme-primary">Launch Bulk Email Campaign</h3>
               <button onClick={() => setShowCreateCampaign(false)} className="text-theme-secondary hover:text-theme-primary font-bold text-xs cursor-pointer bg-transparent border-none">✕</button>
             </header>
-            <form onSubmit={handleLaunchCampaign} className="p-5 space-y-4 text-xs text-left">
+            <form onSubmit={handleLaunchCampaign} className="p-5 space-y-4 text-xs text-left overflow-y-auto">
               <div className="space-y-1">
                 <label className="block font-semibold text-theme-secondary">Campaign Title *</label>
                 <input

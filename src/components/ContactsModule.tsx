@@ -1146,13 +1146,13 @@ export default function ContactsModule() {
 
       {/* MODAL: CREATE CONTACT */}
       {showCreateContact && (
-        <div className="fixed inset-0 bg-theme-primary/60 flex items-center justify-center z-50">
-          <div className="bg-theme-card rounded-xl shadow-xl border border-theme-border w-full max-w-lg overflow-hidden">
-            <header className="bg-theme-base px-5 py-4 border-b border-theme-border flex justify-between items-center">
+        <div className="fixed inset-0 z-[90] flex items-center justify-center p-4 bg-theme-primary/60 backdrop-blur-[2px] animate-fade-in">
+          <div className="bg-theme-card rounded-xl shadow-overlay border border-theme-border w-full max-w-lg overflow-hidden flex flex-col max-h-[85vh] animate-overlay-in">
+            <header className="bg-theme-inset px-5 py-4 border-b border-theme-border flex justify-between items-center shrink-0">
               <h3 className="text-sm font-bold text-theme-primary">Provision New B2B Contact</h3>
               <button onClick={() => setShowCreateContact(false)} className="text-theme-secondary hover:text-theme-primary font-bold text-xs cursor-pointer bg-transparent border-none">✕</button>
             </header>
-            <form onSubmit={handleCreateContactSubmit} className="p-5 space-y-4 text-xs text-left">
+            <form onSubmit={handleCreateContactSubmit} className="p-5 space-y-4 text-xs text-left overflow-y-auto">
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-1">
                   <label className="block font-semibold text-theme-secondary">First Name *</label>
@@ -1363,13 +1363,13 @@ export default function ContactsModule() {
 
       {/* MODAL: CREATE ACCOUNT */}
       {showCreateAccount && (
-        <div className="fixed inset-0 bg-theme-primary/60 flex items-center justify-center z-50">
-          <div className="bg-theme-card rounded-xl shadow-xl border border-theme-border w-full max-w-lg overflow-hidden">
-            <header className="bg-theme-base px-5 py-4 border-b border-theme-border flex justify-between items-center">
+        <div className="fixed inset-0 z-[90] flex items-center justify-center p-4 bg-theme-primary/60 backdrop-blur-[2px] animate-fade-in">
+          <div className="bg-theme-card rounded-xl shadow-overlay border border-theme-border w-full max-w-lg overflow-hidden flex flex-col max-h-[85vh] animate-overlay-in">
+            <header className="bg-theme-inset px-5 py-4 border-b border-theme-border flex justify-between items-center shrink-0">
               <h3 className="text-sm font-bold text-theme-primary">Provision New B2B Account</h3>
               <button onClick={() => setShowCreateAccount(false)} className="text-theme-secondary hover:text-theme-primary font-bold text-xs cursor-pointer bg-transparent border-none">✕</button>
             </header>
-            <form onSubmit={handleCreateAccountSubmit} className="p-5 space-y-4 text-xs text-left">
+            <form onSubmit={handleCreateAccountSubmit} className="p-5 space-y-4 text-xs text-left overflow-y-auto">
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-1">
                   <label className="block font-semibold text-theme-secondary">Company Name *</label>
@@ -1531,15 +1531,15 @@ export default function ContactsModule() {
 
       {/* MODAL: BULK CSV IMPORT */}
       {showImportModal && (
-        <div className="fixed inset-0 bg-theme-primary/60 flex items-center justify-center z-50">
-          <div className="bg-theme-card rounded-xl shadow-xl border border-theme-border w-full max-w-lg overflow-hidden">
-            <header className="bg-theme-base px-5 py-4 border-b border-theme-border flex justify-between items-center">
+        <div className="fixed inset-0 z-[90] flex items-center justify-center p-4 bg-theme-primary/60 backdrop-blur-[2px] animate-fade-in">
+          <div className="bg-theme-card rounded-xl shadow-overlay border border-theme-border w-full max-w-lg overflow-hidden flex flex-col max-h-[85vh] animate-overlay-in">
+            <header className="bg-theme-inset px-5 py-4 border-b border-theme-border flex justify-between items-center shrink-0">
               <h3 className="text-sm font-bold text-theme-primary flex items-center gap-1.5">
                 <FileSpreadsheet className="w-4 h-4 text-theme-accent" /> Bulk CSV Data Importer
               </h3>
               <button onClick={() => setShowImportModal(false)} className="text-theme-secondary hover:text-theme-primary font-bold text-xs cursor-pointer bg-transparent border-none">✕</button>
             </header>
-            <div className="p-5 space-y-4 text-xs text-left">
+            <div className="p-5 space-y-4 text-xs text-left overflow-y-auto">
               <p className="text-theme-secondary leading-normal">
                 Paste raw CSV values here. The importer automatically maps headers and flags probable duplicates using contact email rules.
               </p>
@@ -1587,15 +1587,15 @@ export default function ContactsModule() {
 
       {/* MODAL: MERGE DUPLICATES */}
       {showMergeModal && (
-        <div className="fixed inset-0 bg-theme-primary/60 flex items-center justify-center z-50">
-          <div className="bg-theme-card rounded-xl shadow-xl border border-theme-border w-full max-w-lg overflow-hidden">
-            <header className="bg-theme-base px-5 py-4 border-b border-theme-border flex justify-between items-center">
+        <div className="fixed inset-0 z-[90] flex items-center justify-center p-4 bg-theme-primary/60 backdrop-blur-[2px] animate-fade-in">
+          <div className="bg-theme-card rounded-xl shadow-overlay border border-theme-border w-full max-w-lg overflow-hidden flex flex-col max-h-[85vh] animate-overlay-in">
+            <header className="bg-theme-inset px-5 py-4 border-b border-theme-border flex justify-between items-center shrink-0">
               <h3 className="text-sm font-bold text-theme-primary flex items-center gap-1.5">
                 <Shuffle className="w-4 h-4 text-theme-accent" /> Atomic Record Consolidation (Merge)
               </h3>
               <button onClick={() => setShowMergeModal(false)} className="text-theme-secondary hover:text-theme-primary font-bold text-xs cursor-pointer bg-transparent border-none">✕</button>
             </header>
-            <form onSubmit={handleMergeSubmit} className="p-5 space-y-4 text-xs text-left">
+            <form onSubmit={handleMergeSubmit} className="p-5 space-y-4 text-xs text-left overflow-y-auto">
               <p className="text-theme-secondary leading-normal">
                 Merge duplicate contacts atomically. The timeline activities of the merged contact will be automatically migrated to the destination profile, and the duplicate contact is soft-deleted.
               </p>

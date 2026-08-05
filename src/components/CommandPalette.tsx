@@ -196,7 +196,7 @@ export default function CommandPalette() {
       aria-modal="true"
       aria-label="Command palette"
     >
-      <div className="w-full max-w-xl bg-theme-card border border-theme-border rounded-[14px] shadow-overlay animate-overlay-in overflow-hidden">
+      <div className="w-full max-w-xl bg-theme-card border border-theme-border rounded-xl shadow-overlay animate-overlay-in overflow-hidden">
         <div className="flex items-center gap-2.5 px-4 border-b border-theme-border">
           <Search className="w-4 h-4 text-theme-secondary shrink-0" />
           <input

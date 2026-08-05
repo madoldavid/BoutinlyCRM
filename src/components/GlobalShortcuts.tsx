@@ -198,7 +198,7 @@ export default function GlobalShortcuts() {
       aria-modal="true"
       aria-label="Keyboard shortcuts"
     >
-      <div className="w-full max-w-md bg-theme-card border border-theme-border rounded-[14px] shadow-overlay animate-overlay-in overflow-hidden">
+      <div className="w-full max-w-md bg-theme-card border border-theme-border rounded-xl shadow-overlay animate-overlay-in overflow-hidden">
         <div className="px-5 py-4 border-b border-theme-border flex items-center justify-between">
           <div className="flex items-center gap-2.5">
             <span className="w-8 h-8 rounded-lg bg-theme-accent-soft flex items-center justify-center">

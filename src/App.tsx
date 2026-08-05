@@ -69,7 +69,7 @@ function DashboardLayout() {
   if (!currentUser?.is_active) {
     return (
       <div className="h-screen w-screen bg-theme-base flex flex-col items-center justify-center p-6 text-theme-primary select-none">
-        <div className="max-w-md w-full bg-theme-card border border-danger/25 rounded-[14px] p-8 text-center space-y-6 shadow-overlay animate-overlay-in">
+        <div className="max-w-md w-full bg-theme-card border border-danger/25 rounded-2xl p-8 text-center space-y-6 shadow-overlay animate-overlay-in">
           <div className="w-16 h-16 bg-danger-soft rounded-full flex items-center justify-center mx-auto">
             <ShieldAlert className="w-8 h-8 text-danger animate-pulse" />
           </div>
@@ -81,7 +81,7 @@ function DashboardLayout() {
             </p>
           </div>
 
-          <div className="bg-theme-inset p-4 rounded-xl border border-theme-border text-left space-y-2.5 font-mono text-[10px]">
+          <div className="bg-theme-inset p-4 rounded-lg border border-theme-border text-left space-y-2.5 font-mono text-[10px]">
             <div className="flex justify-between">
               <span className="text-theme-secondary">USER ID:</span>
               <span className="text-theme-primary">{currentUser.id}</span>
@@ -137,10 +137,11 @@ function DashboardLayout() {
     { id: 'tasks', label: 'Tasks', icon: CheckSquare },
     { id: 'emails', label: 'Email', icon: Mail },
     ...(currentUser?.role === UserRole.SUPER_ADMIN || currentUser?.role === UserRole.ADMIN
-      ? [{ id: 'admin', label: 'Admin', icon: Sliders }]
+      ? [{ id: 'admin', label: 'Administration', icon: Sliders }]
       : []),
   ];
 
+  const activeTab = enterpriseTabs.find(t => t.id === activeModule);
   const apps = React.useMemo(() => getDefaultApps(activeModule, (id) => setActiveModule(id)), [activeModule, setActiveModule]);
 
   return (
@@ -162,43 +163,48 @@ function DashboardLayout() {
         {/* Offline/Error Banner */}
         {apiError && <OfflineBanner error={apiError} />}
 
-        {/* Enterprise Header Bar — bold, solid, commanding */}
-        <header className="shrink-0 bg-white border-b-2 border-theme-border select-none shadow-sm">
-          {/* Top row: breadcrumb + global actions */}
+        {/* Workspace Header — slim utility bar */}
+        <header className="shrink-0 bg-theme-card border-b border-theme-border select-none">
           <div className="h-14 px-4 sm:px-6 flex items-center justify-between">
-            <div className="flex items-center gap-2 min-w-0">
+            <div className="flex items-center gap-3 min-w-0">
               <button
-                className="lg:hidden p-1.5 -ml-1 text-theme-secondary hover:text-theme-primary rounded cursor-pointer bg-transparent border-none"
+                className="lg:hidden p-1.5 -ml-1 text-theme-secondary hover:text-theme-primary rounded-md cursor-pointer bg-transparent border-none"
                 onClick={() => setMobileSidebarOpen(true)}
                 aria-label="Open navigation menu"
               >
                 <Menu className="w-5 h-5" />
               </button>
-              <span className="text-sm font-extrabold text-theme-primary font-sans hidden sm:block tracking-tight uppercase">Boutinly CRM</span>
+              <div className="flex items-center gap-2.5 min-w-0">
+                {activeTab && <activeTab.icon className="w-4 h-4 text-theme-accent shrink-0 hidden sm:block" strokeWidth={2} />}
+                <h1 className="text-base font-semibold text-theme-primary font-sans tracking-tight truncate">
+                  {activeTab?.label ?? 'Workspace'}
+                </h1>
+              </div>
             </div>
 
-            <div className="flex items-center gap-2.5">
+            <div className="flex items-center gap-2">
               <button
                 onClick={() => window.dispatchEvent(new Event('boutinly:open-palette'))}
-                className="flex items-center gap-2 text-sm text-theme-primary bg-theme-inset hover:bg-white border border-theme-border rounded px-3.5 h-9 cursor-pointer transition-colors w-48 sm:w-56 shadow-sm"
+                className="flex items-center gap-2 text-sm text-theme-primary bg-theme-inset hover:bg-theme-hover border border-theme-border rounded-lg px-3 h-8.5 cursor-pointer transition-colors w-40 sm:w-52"
                 aria-label="Open global search (Ctrl+K)"
               >
-                <Search className="w-4 h-4 shrink-0 text-theme-accent" />
-                <span className="flex-1 text-left text-theme-secondary">Search…</span>
-                <kbd className="text-[10px] bg-white border border-theme-border rounded px-1.5 py-0.5 font-sans font-bold shrink-0 text-theme-secondary shadow-sm">⌘K</kbd>
+                <Search className="w-3.5 h-3.5 shrink-0 text-theme-secondary" />
+                <span className="flex-1 text-left text-xs text-theme-secondary">Search…</span>
+                <kbd className="shrink-0 hidden sm:block">⌘K</kbd>
               </button>
               <button
                 onClick={dispatchNewRecord}
-                className="hidden sm:flex items-center gap-2 text-sm font-extrabold text-white bg-theme-accent hover:brightness-95 rounded px-4 h-9 cursor-pointer transition-all shadow-sm"
+                className="hidden sm:flex items-center gap-1.5 text-xs font-semibold text-white bg-theme-accent hover:bg-theme-accent-strong rounded-lg px-3.5 h-8.5 cursor-pointer transition-colors shadow-card"
                 aria-label="Create new record (N)"
                 title="New record (N)"
               >
-                <Plus className="w-4 h-4" />
+                <Plus className="w-3.5 h-3.5" />
                 New
               </button>
+              <div className="w-px h-5 bg-theme-border mx-1 hidden sm:block" aria-hidden="true" />
               <button
                 onClick={() => window.dispatchEvent(new Event('boutinly:open-shortcuts'))}
-                className="p-1.5 text-theme-secondary hover:text-theme-primary hover:bg-theme-hover rounded cursor-pointer bg-transparent border-none"
+                className="p-2 text-theme-secondary hover:text-theme-primary hover:bg-theme-hover rounded-lg cursor-pointer bg-transparent border-none"
                 aria-label="Keyboard shortcuts (?)"
                 title="Keyboard shortcuts (?)"
               >
@@ -211,36 +217,12 @@ function DashboardLayout() {
                 currentUserRole={currentUser?.role ?? 'viewer'}
               />
               <div
-                className="w-8 h-8 rounded-full bg-theme-accent text-white flex items-center justify-center text-sm font-extrabold border-2 border-white shadow-sm ring-1 ring-theme-border"
+                className="w-8 h-8 rounded-full bg-theme-accent-soft text-theme-accent flex items-center justify-center text-xs font-semibold ring-1 ring-inset ring-theme-accent/15"
                 title={currentUser?.name}
                 aria-label={`Signed in as ${currentUser?.name}`}
               >
                 {currentUser?.name?.charAt(0)}
               </div>
-            </div>
-          </div>
-
-          {/* Bottom row: enterprise tabs navigation */}
-          <div className="flex items-center border-t-2 border-theme-border overflow-x-auto scrollbar-none bg-theme-inset">
-            <div className="flex px-2">
-              {enterpriseTabs.map(tab => (
-                <button
-                  key={tab.id}
-                  onClick={() => setActiveModule(tab.id)}
-                  className={`flex items-center gap-1.5 px-4 py-3 text-sm font-bold font-sans whitespace-nowrap cursor-pointer transition-colors relative ${
-                    activeModule === tab.id
-                      ? 'text-theme-accent'
-                      : 'text-theme-secondary hover:text-theme-primary'
-                  }`}
-                  aria-current={activeModule === tab.id ? 'page' : undefined}
-                >
-                  <tab.icon className="w-4 h-4" />
-                  {tab.label}
-                  {activeModule === tab.id && (
-                    <span className="absolute bottom-0 left-2 right-2 h-[3px] bg-theme-accent rounded-full" />
-                  )}
-                </button>
-              ))}
             </div>
           </div>
         </header>

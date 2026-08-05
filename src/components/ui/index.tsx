@@ -31,15 +31,15 @@ interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
 }
 
 const buttonVariants: Record<ButtonVariant, string> = {
-  primary: 'bg-theme-accent text-white hover:opacity-90 shadow-card hover:shadow-[var(--shadow-glow)]',
-  secondary: 'bg-theme-card text-theme-primary border border-theme-border hover:bg-theme-hover',
+  primary: 'bg-theme-accent text-white hover:bg-theme-accent-strong shadow-card active:shadow-none',
+  secondary: 'bg-theme-card text-theme-primary border border-theme-border hover:bg-theme-inset hover:border-[color-mix(in_srgb,var(--text-secondary)_35%,var(--border))]',
   ghost: 'text-theme-secondary hover:text-theme-primary hover:bg-theme-hover',
-  danger: 'bg-danger text-white hover:opacity-90',
+  danger: 'bg-danger text-white hover:brightness-[0.92] shadow-card',
 };
 
 const buttonSizes: Record<ButtonSize, string> = {
-  sm: 'text-2xs px-2.5 py-1.5 gap-1.5 rounded-md',
-  md: 'text-xs px-3.5 py-2 gap-2 rounded-md',
+  sm: 'h-7 text-2xs px-2.5 gap-1.5 rounded-md font-semibold',
+  md: 'h-8.5 text-xs px-3.5 gap-2 rounded-lg font-semibold',
 };
 
 export function Button({
@@ -54,7 +54,7 @@ export function Button({
 }: ButtonProps) {
   return (
     <button
-      className={`inline-flex items-center justify-center font-medium font-sans cursor-pointer transition-all select-none disabled:opacity-50 disabled:cursor-not-allowed ${buttonVariants[variant]} ${buttonSizes[size]} ${className}`}
+      className={`inline-flex items-center justify-center font-sans cursor-pointer transition-all select-none disabled:opacity-50 disabled:cursor-not-allowed active:translate-y-px ${buttonVariants[variant]} ${buttonSizes[size]} ${className}`}
       disabled={disabled || loading}
       {...rest}
     >
@@ -78,7 +78,7 @@ function FieldWrapper({ label, error, help, required, children }: FieldWrapperPr
   return (
     <label className="block text-left">
       {label && (
-        <span className="block text-2xs font-medium text-theme-secondary mb-1 font-sans">
+        <span className="block text-2xs font-semibold text-theme-secondary mb-1.5 font-sans tracking-wide">
           {label} {required && <span className="text-danger">*</span>}
         </span>
       )}
@@ -90,7 +90,7 @@ function FieldWrapper({ label, error, help, required, children }: FieldWrapperPr
 }
 
 const fieldClass =
-  'w-full bg-theme-card text-theme-primary text-xs border border-theme-border rounded-md px-2.5 py-2 placeholder:text-theme-secondary/50 focus:border-theme-accent transition-colors font-sans';
+  'w-full bg-theme-card text-theme-primary text-xs border border-theme-border rounded-lg px-2.5 placeholder:text-theme-secondary/50 transition-colors font-sans';
 
 interface InputProps extends React.InputHTMLAttributes<HTMLInputElement> {
   label?: string;
@@ -216,16 +216,16 @@ export function Modal({ open, onClose, title, subtitle, children, footer, width 
     >
       <div
         ref={ref}
-        className={`w-full ${modalWidths[width]} bg-theme-card border border-theme-border rounded-[14px] shadow-overlay animate-overlay-in flex flex-col max-h-[85vh]`}
+        className={`w-full ${modalWidths[width]} bg-theme-card border border-theme-border rounded-xl shadow-overlay animate-overlay-in flex flex-col max-h-[85vh]`}
       >
         <div className="px-5 py-4 border-b border-theme-border flex items-start justify-between shrink-0">
           <div>
-            <h3 className="text-base font-semibold text-theme-primary font-sans">{title}</h3>
+            <h3 className="text-base font-semibold text-theme-primary font-sans tracking-tight">{title}</h3>
             {subtitle && <p className="text-2xs text-theme-secondary mt-0.5">{subtitle}</p>}
           </div>
           <button
             onClick={onClose}
-            className="p-1 -m-1 text-theme-secondary hover:text-theme-primary rounded cursor-pointer"
+            className="p-1.5 -m-1.5 text-theme-secondary hover:text-theme-primary hover:bg-theme-hover rounded-md cursor-pointer"
             aria-label="Close dialog"
           >
             <X className="w-4 h-4" />
@@ -233,7 +233,7 @@ export function Modal({ open, onClose, title, subtitle, children, footer, width 
         </div>
         <div className="px-5 py-4 overflow-y-auto">{children}</div>
         {footer && (
-          <div className="px-5 py-3.5 border-t border-theme-border bg-theme-inset/50 rounded-b-[14px] flex items-center justify-end gap-2 shrink-0">
+          <div className="px-5 py-3.5 border-t border-theme-border bg-theme-inset rounded-b-xl flex items-center justify-end gap-2 shrink-0">
             {footer}
           </div>
         )}
@@ -312,7 +312,7 @@ export function Badge({
 }) {
   return (
     <span
-      className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-2xs font-medium font-sans whitespace-nowrap ${badgeTones[tone]} ${className}`}
+      className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-2xs font-semibold font-sans whitespace-nowrap ring-1 ring-inset ring-current/10 ${badgeTones[tone]} ${className}`}
     >
       {children}
     </span>
@@ -345,15 +345,15 @@ export function EmptyState({
   action?: React.ReactNode;
 }) {
   return (
-    <div className="flex flex-col items-center justify-center text-center py-12 px-6">
+    <div className="flex flex-col items-center justify-center text-center py-14 px-6">
       {icon && (
-        <div className="w-11 h-11 rounded-full bg-theme-inset flex items-center justify-center mb-3 text-theme-secondary/60">
+        <div className="w-12 h-12 rounded-xl bg-theme-accent-soft flex items-center justify-center mb-3.5 text-theme-accent">
           {icon}
         </div>
       )}
-      <h4 className="text-sm font-semibold text-theme-primary font-sans">{title}</h4>
-      {body && <p className="text-xs text-theme-secondary mt-1 max-w-xs leading-relaxed">{body}</p>}
-      {action && <div className="mt-4">{action}</div>}
+      <h4 className="text-sm font-semibold text-theme-primary font-sans tracking-tight">{title}</h4>
+      {body && <p className="text-xs text-theme-secondary mt-1.5 max-w-xs leading-relaxed">{body}</p>}
+      {action && <div className="mt-5">{action}</div>}
     </div>
   );
 }
@@ -381,7 +381,7 @@ export function Avatar({
   }
   return (
     <span
-      className={`${sizes[size]} rounded-full bg-theme-accent-soft text-theme-accent border border-theme-border flex items-center justify-center font-bold shrink-0`}
+      className={`${sizes[size]} rounded-full bg-theme-accent-soft text-theme-accent flex items-center justify-center font-semibold shrink-0`}
       aria-label={name}
     >
       {name.split(' ').map(w => w.charAt(0)).slice(0, 2).join('')}
@@ -407,13 +407,17 @@ export function KpiCard({
   footer?: React.ReactNode;
 }) {
   return (
-    <div className="bg-theme-card border border-theme-border rounded-[10px] p-4 shadow-card">
-      <div className="flex items-center justify-between mb-2">
-        <span className="text-2xs font-medium text-theme-secondary uppercase tracking-wider font-sans">{label}</span>
-        {icon && <span className="text-theme-secondary/50">{icon}</span>}
+    <div className="bg-theme-card border border-theme-border rounded-xl p-5 shadow-card hover:shadow-raised transition-shadow">
+      <div className="flex items-center justify-between mb-3">
+        <span className="text-2xs font-semibold text-theme-secondary uppercase tracking-wider font-sans">{label}</span>
+        {icon && (
+          <span className="w-7 h-7 rounded-lg bg-theme-accent-soft text-theme-accent flex items-center justify-center [&>svg]:w-3.5 [&>svg]:h-3.5">
+            {icon}
+          </span>
+        )}
       </div>
       <div className="flex items-baseline gap-2">
-        <span className="text-xl font-semibold text-theme-primary font-sans tnum" data-metric>{value}</span>
+        <span className="text-2xl font-semibold text-theme-primary font-sans tracking-tight tnum" data-metric>{value}</span>
         {delta && <Badge tone={deltaTone}>{delta}</Badge>}
       </div>
       {footer && <div className="mt-2 text-2xs text-theme-secondary">{footer}</div>}
