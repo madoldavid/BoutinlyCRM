@@ -16,6 +16,7 @@ export type { RecordDetailPageProps } from './RecordDetailPage';
 export { default as DashboardWidgetGrid } from './DashboardWidgetGrid';
 export type { DashboardWidget } from './DashboardWidgetGrid';
 export { default as AppLauncher, getDefaultApps } from './AppLauncher';
+export { default as MentionInput } from './MentionInput';
 
 /* ────────────────────────── Button ────────────────────────── */
 

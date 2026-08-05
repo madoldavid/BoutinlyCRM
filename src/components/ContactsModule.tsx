@@ -8,7 +8,7 @@ import { useCRM } from '../store';
 import { Contact, Account, UserRole } from '../types';
 import { DataTable, type DataTableColumn } from './ui/DataTable';
 import { useSavedViews, ViewSwitcher, type SavedView } from './ui/SavedViews';
-import { ConfirmDialog, toast, RecordDetailPage, ActivityTimeline } from './ui';
+import { ConfirmDialog, toast, RecordDetailPage, ActivityTimeline, MentionInput, Modal, Input, Select, Button } from './ui';
 import { FieldRow } from './ui/RecordDetailPage';
 import type { RecordDetailPageProps } from './ui';
 import { NEW_RECORD_EVENT, SELECT_ENTITY_EVENT, type SelectEntityDetail } from './GlobalShortcuts';
@@ -39,6 +39,7 @@ import {
   AlertTriangle,
   Printer,
   Maximize2,
+  Pencil,
   DollarSign,
   Clock,
 } from 'lucide-react';
@@ -53,9 +54,11 @@ export default function ContactsModule() {
     getScopedDeals,
     addContact,
     deleteContact,
+    updateContact,
     mergeContacts,
     addAccount,
     deleteAccount,
+    updateAccount,
     customFields,
     activities,
     addActivity,
@@ -101,6 +104,8 @@ export default function ContactsModule() {
   // Modals state
   const [showCreateContact, setShowCreateContact] = useState(false);
   const [showCreateAccount, setShowCreateAccount] = useState(false);
+  const [showEditContact, setShowEditContact] = useState(false);
+  const [showEditAccount, setShowEditAccount] = useState(false);
   const [showImportModal, setShowImportModal] = useState(false);
   const [showMergeModal, setShowMergeModal] = useState(false);
 
@@ -228,6 +233,10 @@ export default function ContactsModule() {
   // Add Inline Timeline note
   const handleAddTimelineNote = () => {
     if (!timelineNote.trim()) return;
+
+    const mentions = timelineNote.match(/@([\w.]+)/g)?.map(m => m.slice(1).toLowerCase()) ?? [];
+    const mentionedUsers = users.filter(u => mentions.includes(u.name.toLowerCase()));
+    const metadata = mentionedUsers.length > 0 ? { mentionedUserIds: mentionedUsers.map(u => u.id) } : undefined;
     
     if (activeTab === 'contacts' && activeContact) {
       addActivity({
@@ -236,9 +245,9 @@ export default function ContactsModule() {
         body: timelineNote,
         user_id: currentUser.id,
         contact_id: activeContact.id,
+        metadata,
       });
     } else if (activeTab === 'accounts' && activeAccount) {
-      // Find primary contact
       const primeContact = scopedContacts.find(c => c.account_id === activeAccount.id);
       addActivity({
         type: 'note',
@@ -246,10 +255,48 @@ export default function ContactsModule() {
         body: timelineNote,
         user_id: currentUser.id,
         contact_id: primeContact?.id,
+        metadata,
       });
     }
 
     setTimelineNote('');
+  };
+
+  // Edit Contact Handler
+  const handleEditContactSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedContactId) return;
+    updateContact(selectedContactId, {
+      first_name: contactForm.first_name,
+      last_name: contactForm.last_name,
+      email: contactForm.email,
+      phone: contactForm.phone,
+      title: contactForm.title,
+      linkedin_url: contactForm.linkedin_url,
+      account_id: contactForm.account_id || '',
+      owner_id: contactForm.owner_id,
+      tags: contactForm.tags.split(',').map(t => t.trim()).filter(Boolean),
+      custom_fields: contactForm.custom_values,
+    });
+    setShowEditContact(false);
+    toast.success('Contact updated', `${contactForm.first_name} ${contactForm.last_name}`);
+  };
+
+  const openEditContactModal = () => {
+    if (!activeContact) return;
+    setContactForm({
+      first_name: activeContact.first_name,
+      last_name: activeContact.last_name,
+      email: activeContact.email,
+      phone: activeContact.phone,
+      title: activeContact.title,
+      linkedin_url: activeContact.linkedin_url || '',
+      account_id: activeContact.account_id,
+      owner_id: activeContact.owner_id,
+      tags: activeContact.tags.join(', '),
+      custom_values: { ...activeContact.custom_fields },
+    });
+    setShowEditContact(true);
   };
 
   // Create Contact Handler
@@ -282,6 +329,41 @@ export default function ContactsModule() {
       tags: '',
       custom_values: {},
     });
+  };
+
+  // Edit Account Handler
+  const handleEditAccountSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedAccountId) return;
+    updateAccount(selectedAccountId, {
+      name: accountForm.name,
+      domain: accountForm.domain,
+      industry: accountForm.industry,
+      size: accountForm.size,
+      website: accountForm.website,
+      arr: accountForm.arr,
+      owner_id: accountForm.owner_id,
+      tags: accountForm.tags.split(',').map(t => t.trim()).filter(Boolean),
+      custom_fields: accountForm.custom_values,
+    });
+    setShowEditAccount(false);
+    toast.success('Account updated', accountForm.name);
+  };
+
+  const openEditAccountModal = () => {
+    if (!activeAccount) return;
+    setAccountForm({
+      name: activeAccount.name,
+      domain: activeAccount.domain,
+      industry: activeAccount.industry,
+      size: activeAccount.size,
+      website: activeAccount.website,
+      arr: activeAccount.arr,
+      owner_id: activeAccount.owner_id,
+      tags: activeAccount.tags.join(', '),
+      custom_values: { ...activeAccount.custom_fields },
+    });
+    setShowEditAccount(true);
   };
 
   // Create Account Handler
@@ -429,9 +511,14 @@ export default function ContactsModule() {
           users={users}
           activities={contactActivities}
           actions={
-            <button onClick={printRecord} className="p-1.5 text-theme-secondary hover:text-theme-primary rounded hover:bg-theme-hover transition-colors cursor-pointer bg-transparent border-none" title="Print / PDF">
-              <Printer className="w-4 h-4" />
-            </button>
+            <div className="flex items-center gap-1">
+              <button onClick={openEditContactModal} className="p-1.5 text-theme-secondary hover:text-theme-accent rounded hover:bg-theme-hover transition-colors cursor-pointer bg-transparent border-none" title="Edit contact">
+                <Pencil className="w-4 h-4" />
+              </button>
+              <button onClick={printRecord} className="p-1.5 text-theme-secondary hover:text-theme-primary rounded hover:bg-theme-hover transition-colors cursor-pointer bg-transparent border-none" title="Print / PDF">
+                <Printer className="w-4 h-4" />
+              </button>
+            </div>
           }
         >
           <div className="space-y-0">
@@ -929,13 +1016,13 @@ export default function ContactsModule() {
                 {!isReadOnly && (
                   <div className="p-3 bg-theme-card border-t border-theme-border shrink-0">
                     <div className="flex gap-2">
-                      <input
-                        type="text"
-                        placeholder={`Log a follow-up note on ${activeContact.first_name}...`}
+                      <MentionInput
                         value={timelineNote}
-                        onChange={(e) => setTimelineNote(e.target.value)}
-                        onKeyDown={(e) => e.key === 'Enter' && handleAddTimelineNote()}
+                        onChange={setTimelineNote}
+                        placeholder={`Log a note on ${activeContact.first_name}... Type @ to mention`}
+                        users={users}
                         className="flex-1 bg-theme-base text-theme-primary border border-theme-border rounded-lg px-3 py-2 text-xs focus:ring-1 focus:ring-theme-accent focus:outline-none"
+                        onKeyDown={(e) => e.key === 'Enter' && handleAddTimelineNote()}
                       />
                       <button
                         onClick={handleAddTimelineNote}
@@ -1212,6 +1299,67 @@ export default function ContactsModule() {
         </div>
       )}
 
+      {/* MODAL: EDIT CONTACT */}
+      {showEditContact && (
+        <Modal
+          open={showEditContact}
+          onClose={() => setShowEditContact(false)}
+          title="Edit Contact"
+          footer={
+            <div className="flex gap-2">
+              <Button variant="secondary" onClick={() => setShowEditContact(false)}>Cancel</Button>
+              <Button variant="primary" onClick={() => {
+                if (!selectedContactId) return;
+                updateContact(selectedContactId, {
+                  first_name: contactForm.first_name,
+                  last_name: contactForm.last_name,
+                  email: contactForm.email,
+                  phone: contactForm.phone,
+                  title: contactForm.title,
+                  linkedin_url: contactForm.linkedin_url,
+                  account_id: contactForm.account_id || '',
+                  owner_id: contactForm.owner_id,
+                  tags: contactForm.tags.split(',').map((t: string) => t.trim()).filter(Boolean),
+                  custom_fields: contactForm.custom_values,
+                });
+                setShowEditContact(false);
+                toast.success('Contact updated', `${contactForm.first_name} ${contactForm.last_name}`);
+              }}>Save Changes</Button>
+            </div>
+          }
+        >
+          <div id="edit-contact-form" className="space-y-3 text-xs">
+            <div className="grid grid-cols-2 gap-3">
+              <Input label="First Name" required value={contactForm.first_name} onChange={(e) => setContactForm({ ...contactForm, first_name: e.target.value })} />
+              <Input label="Last Name" required value={contactForm.last_name} onChange={(e) => setContactForm({ ...contactForm, last_name: e.target.value })} />
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <Input label="Email" type="email" required value={contactForm.email} onChange={(e) => setContactForm({ ...contactForm, email: e.target.value })} />
+              <Input label="Phone" required value={contactForm.phone} onChange={(e) => setContactForm({ ...contactForm, phone: e.target.value })} />
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <Input label="Job Title" value={contactForm.title} onChange={(e) => setContactForm({ ...contactForm, title: e.target.value })} />
+              <Input label="LinkedIn URL" value={contactForm.linkedin_url} onChange={(e) => setContactForm({ ...contactForm, linkedin_url: e.target.value })} />
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <Select label="Company Account" value={contactForm.account_id} onChange={(e) => setContactForm({ ...contactForm, account_id: e.target.value })}>
+                <option value="">-- Select --</option>
+                {scopedAccounts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+              </Select>
+              <Select label="Owner" value={contactForm.owner_id} onChange={(e) => setContactForm({ ...contactForm, owner_id: e.target.value })}>
+                {users.map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
+              </Select>
+            </div>
+            <Input label="Tags (comma separated)" value={contactForm.tags} onChange={(e) => setContactForm({ ...contactForm, tags: e.target.value })} />
+            {customFields.filter(f => f.entity_type === 'contact' && f.is_visible).map(f => (
+              <Input key={f.id} label={f.label} type={f.field_type === 'number' ? 'number' : 'text'}
+                value={String(contactForm.custom_values[f.key] || '')}
+                onChange={(e) => setContactForm({ ...contactForm, custom_values: { ...contactForm.custom_values, [f.key]: f.field_type === 'number' ? Number(e.target.value) : e.target.value } })}
+              />
+            ))}
+          </div>
+        </Modal>
+      )}
 
       {/* MODAL: CREATE ACCOUNT */}
       {showCreateAccount && (
@@ -1320,6 +1468,66 @@ export default function ContactsModule() {
         </div>
       )}
 
+      {/* MODAL: EDIT ACCOUNT */}
+      {showEditAccount && (
+        <Modal
+          open={showEditAccount}
+          onClose={() => setShowEditAccount(false)}
+          title="Edit Account"
+          footer={
+            <div className="flex gap-2">
+              <Button variant="secondary" onClick={() => setShowEditAccount(false)}>Cancel</Button>
+              <Button variant="primary" onClick={() => {
+                if (!selectedAccountId) return;
+                updateAccount(selectedAccountId, {
+                  name: accountForm.name,
+                  domain: accountForm.domain,
+                  industry: accountForm.industry,
+                  size: accountForm.size,
+                  website: accountForm.website,
+                  arr: accountForm.arr,
+                  owner_id: accountForm.owner_id,
+                  tags: accountForm.tags.split(',').map((t: string) => t.trim()).filter(Boolean),
+                  custom_fields: accountForm.custom_values,
+                });
+                setShowEditAccount(false);
+                toast.success('Account updated', accountForm.name);
+              }}>Save Changes</Button>
+            </div>
+          }
+        >
+          <div className="space-y-3 text-xs">
+            <div className="grid grid-cols-2 gap-3">
+              <Input label="Company Name" required value={accountForm.name} onChange={(e) => setAccountForm({ ...accountForm, name: e.target.value })} />
+              <Input label="Domain" required value={accountForm.domain} onChange={(e) => setAccountForm({ ...accountForm, domain: e.target.value })} />
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <Input label="Industry" value={accountForm.industry} onChange={(e) => setAccountForm({ ...accountForm, industry: e.target.value })} />
+              <Input label="ARR" type="number" value={String(accountForm.arr)} onChange={(e) => setAccountForm({ ...accountForm, arr: Number(e.target.value) })} />
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <Select label="Size" value={accountForm.size} onChange={(e) => setAccountForm({ ...accountForm, size: e.target.value as Account['size'] })}>
+                <option value="1-10">1-10</option>
+                <option value="11-50">11-50</option>
+                <option value="51-200">51-200</option>
+                <option value="201-1000">201-1000</option>
+                <option value="1000+">1000+</option>
+              </Select>
+              <Input label="Website" value={accountForm.website} onChange={(e) => setAccountForm({ ...accountForm, website: e.target.value })} />
+            </div>
+            <Input label="Tags (comma separated)" value={accountForm.tags} onChange={(e) => setAccountForm({ ...accountForm, tags: e.target.value })} />
+            <Select label="Owner" value={accountForm.owner_id} onChange={(e) => setAccountForm({ ...accountForm, owner_id: e.target.value })}>
+              {users.map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
+            </Select>
+            {customFields.filter(f => f.entity_type === 'account' && f.is_visible).map(f => (
+              <Input key={f.id} label={f.label} type={f.field_type === 'number' ? 'number' : 'text'}
+                value={String(accountForm.custom_values[f.key] || '')}
+                onChange={(e) => setAccountForm({ ...accountForm, custom_values: { ...accountForm.custom_values, [f.key]: f.field_type === 'number' ? Number(e.target.value) : e.target.value } })}
+              />
+            ))}
+          </div>
+        </Modal>
+      )}
 
       {/* MODAL: BULK CSV IMPORT */}
       {showImportModal && (

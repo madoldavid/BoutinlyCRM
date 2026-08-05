@@ -11,13 +11,14 @@
 
 import React, { useMemo, useState } from 'react';
 import { useCRM } from '../store';
-import { Check, ChevronRight, Rocket, X } from 'lucide-react';
+import { Check, ChevronRight, Rocket, X, Building2 } from 'lucide-react';
 
 const DISMISS_KEY = 'boutinly_setup_dismissed';
 
 export default function SetupChecklist() {
   const {
     contacts,
+    accounts,
     deals,
     activities,
     users,
@@ -30,6 +31,13 @@ export default function SetupChecklist() {
   });
 
   const items = useMemo(() => [
+    {
+      id: 'account',
+      label: 'Create your company account',
+      hint: 'Add your organization as the primary account.',
+      done: accounts.length > 0,
+      module: 'contacts' as const,
+    },
     {
       id: 'contact',
       label: 'Add your first contact',
@@ -65,7 +73,7 @@ export default function SetupChecklist() {
       done: emailTemplates.length > 0,
       module: 'emails' as const,
     },
-  ], [contacts.length, deals.length, activities.length, users.length, emailTemplates.length]);
+  ], [contacts.length, accounts.length, deals.length, activities.length, users.length, emailTemplates.length]);
 
   const doneCount = items.filter(i => i.done).length;
   const pct = Math.round((doneCount / items.length) * 100);
@@ -115,7 +123,7 @@ export default function SetupChecklist() {
         />
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-2 mt-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2 mt-4">
         {items.map(item => (
           <button
             key={item.id}

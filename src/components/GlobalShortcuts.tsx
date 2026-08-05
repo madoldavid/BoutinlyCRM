@@ -20,10 +20,21 @@ import { Keyboard, X } from 'lucide-react';
 export const NEW_RECORD_EVENT = 'boutinly:new-record';
 export const NAVIGATE_EVENT = 'boutinly:navigate';
 export const SELECT_ENTITY_EVENT = 'boutinly:select-entity';
+export const DRILL_DOWN_EVENT = 'boutinly:drill-down';
+
+export interface DrillDownDetail {
+  module: string;
+  filterKey: string;
+  filterValue: string;
+}
 
 export interface SelectEntityDetail {
   module: 'contacts' | 'deals' | 'tasks';
   entityId: string;
+}
+
+export function dispatchDrillDown(detail: DrillDownDetail): void {
+  window.dispatchEvent(new CustomEvent(DRILL_DOWN_EVENT, { detail }));
 }
 
 export function dispatchSelectEntity(detail: SelectEntityDetail): void {

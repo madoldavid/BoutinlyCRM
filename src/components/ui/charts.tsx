@@ -33,12 +33,19 @@ function formatValue(v: number, money?: boolean) {
 
 /* ────────────────────────── Horizontal BarChart ────────────────────────── */
 
-export function BarChart({ data, money = false }: { data: ChartDatum[]; money?: boolean }) {
+export function BarChart({ data, money = false, onDrillDown }: { data: ChartDatum[]; money?: boolean; onDrillDown?: (label: string) => void }) {
   const max = Math.max(...data.map(d => d.value), 1);
   return (
     <div className="space-y-2.5" role="img" aria-label="Bar chart">
       {data.map((d, i) => (
-        <div key={d.label}>
+        <div
+          key={d.label}
+          className={onDrillDown ? 'cursor-pointer hover:opacity-80 transition-opacity' : ''}
+          onClick={() => onDrillDown?.(d.label)}
+          role={onDrillDown ? 'button' : undefined}
+          tabIndex={onDrillDown ? 0 : undefined}
+          onKeyDown={onDrillDown ? (e) => { if (e.key === 'Enter') onDrillDown(d.label); } : undefined}
+        >
           <div className="flex items-center justify-between mb-1">
             <span className="text-2xs text-theme-secondary font-sans truncate pr-2">{d.label}</span>
             <span className="text-2xs font-semibold text-theme-primary tnum">{formatValue(d.value, money)}</span>
@@ -64,10 +71,12 @@ export function DonutChart({
   data,
   money = false,
   centerLabel,
+  onDrillDown,
 }: {
   data: ChartDatum[];
   money?: boolean;
   centerLabel?: string;
+  onDrillDown?: (label: string) => void;
 }) {
   const [hovered, setHovered] = useState<number | null>(null);
   const total = data.reduce((s, d) => s + d.value, 0);
@@ -105,8 +114,12 @@ export function DonutChart({
             className="transition-all duration-200 cursor-pointer"
             onMouseEnter={() => setHovered(s.i)}
             onMouseLeave={() => setHovered(null)}
+            onClick={() => onDrillDown?.(s.label)}
           />
         ))}
+        {onDrillDown && (
+          <rect x="0" y="0" width="160" height="95" fill="transparent" style={{ cursor: 'pointer' }} onClick={() => onDrillDown?.(centerLabel || 'Total')} />
+        )}
         <text
           x="80"
           y="76"
@@ -131,9 +144,10 @@ export function DonutChart({
         {segments.map(s => (
           <div
             key={s.label}
-            className={`flex items-center gap-2 cursor-pointer rounded px-1 -mx-1 transition-colors ${hovered === s.i ? 'bg-theme-hover' : ''}`}
+            className={`flex items-center gap-2 rounded px-1 -mx-1 transition-colors ${hovered === s.i ? 'bg-theme-hover' : ''} ${onDrillDown ? 'cursor-pointer' : ''}`}
             onMouseEnter={() => setHovered(s.i)}
             onMouseLeave={() => setHovered(null)}
+            onClick={() => onDrillDown?.(s.label)}
           >
             <span
               className="w-2 h-2 rounded-sm shrink-0"
@@ -261,14 +275,14 @@ export function TrendLine({
 
 /* ────────────────────────── FunnelChart (pipeline stages) ────────────────────────── */
 
-export function FunnelChart({ data, money = false }: { data: ChartDatum[]; money?: boolean }) {
+export function FunnelChart({ data, money = false, onDrillDown }: { data: ChartDatum[]; money?: boolean; onDrillDown?: (label: string) => void }) {
   const max = Math.max(...data.map(d => d.value), 1);
   return (
     <div className="space-y-1.5" role="img" aria-label="Funnel chart">
       {data.map((d, i) => {
         const pct = (d.value / max) * 100;
         return (
-          <div key={d.label} className="flex items-center gap-3">
+          <div key={d.label} className={`flex items-center gap-3 ${onDrillDown ? 'cursor-pointer hover:opacity-85 transition-opacity' : ''}`} onClick={() => onDrillDown?.(d.label)} role={onDrillDown ? 'button' : undefined} tabIndex={onDrillDown ? 0 : undefined} onKeyDown={onDrillDown ? (e) => { if (e.key === 'Enter') onDrillDown(d.label); } : undefined}>
             <span className="text-2xs text-theme-secondary font-sans w-28 truncate text-right shrink-0">{d.label}</span>
             <div className="flex-1 h-6 bg-theme-inset/60 rounded-md overflow-hidden flex items-center">
               <div

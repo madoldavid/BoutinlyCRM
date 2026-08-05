@@ -6,13 +6,13 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useCRM } from '../store';
 import { Deal, UserRole, DealLineItem } from '../types';
-import { toast, ConfirmDialog, RecordDetailPage, ActivityTimeline } from './ui';
+import { toast, ConfirmDialog, RecordDetailPage, ActivityTimeline, Modal, Input, Select, Button } from './ui';
 import { FieldRow } from './ui/RecordDetailPage';
 import type { RecordDetailPageProps } from './ui';
 import { DataTable, type DataTableColumn } from './ui/DataTable';
 import { useSavedViews, ViewSwitcher, type SavedView } from './ui/SavedViews';
 import KanbanBoard from './ui/KanbanBoard';
-import { NEW_RECORD_EVENT, SELECT_ENTITY_EVENT, type SelectEntityDetail } from './GlobalShortcuts';
+import { NEW_RECORD_EVENT, SELECT_ENTITY_EVENT, DRILL_DOWN_EVENT, type SelectEntityDetail, type DrillDownDetail } from './GlobalShortcuts';
 import { exportCsv } from '../utils/exportCsv';
 import { scoreDeal,
   forecastConfidence,
@@ -47,6 +47,7 @@ import {
   AlertTriangle,
   Printer,
   Maximize2,
+  Pencil,
   Phone,
   Mail,
   Clock,
@@ -90,6 +91,25 @@ export default function PipelineModule() {
     window.addEventListener(SELECT_ENTITY_EVENT, onSelect);
     return () => window.removeEventListener(SELECT_ENTITY_EVENT, onSelect);
   }, []);
+
+  // Drill-down from reports charts → filter deals by stage
+  useEffect(() => {
+    const onDrill = (e: Event) => {
+      const detail = (e as CustomEvent<DrillDownDetail>).detail;
+      if (!detail || detail.module !== 'deals') return;
+      if (detail.filterKey === 'stage') {
+        setViewType('list');
+        setSearchQuery('');
+        const matchingStage = stages.find(s => s.name.toLowerCase().includes(detail.filterValue.toLowerCase()));
+        if (matchingStage) {
+          // Switch to list view and filter by matched stage
+          setSearchQuery(matchingStage.name);
+        }
+      }
+    };
+    window.addEventListener(DRILL_DOWN_EVENT, onDrill);
+    return () => window.removeEventListener(DRILL_DOWN_EVENT, onDrill);
+  }, [stages]);
 
   // Delete confirmation
   const [confirmDeleteDealId, setConfirmDeleteDealId] = useState<string | null>(null);
@@ -143,6 +163,7 @@ export default function PipelineModule() {
   // Selection / Drawer
   const [selectedDealId, setSelectedDealId] = useState<string | null>(null);
   const [fullDealDetail, setFullDealDetail] = useState<string | null>(null);
+  const [showEditDeal, setShowEditDeal] = useState(false);
 
   // Kanban drag-and-drop state
   const [dragDealId, setDragDealId] = useState<string | null>(null);
@@ -929,6 +950,27 @@ export default function PipelineModule() {
                   <Printer className="w-4.5 h-4.5" />
                 </button>
                 <button
+                  onClick={() => {
+                    if (!activeDeal) return;
+                    setDealForm({
+                      name: activeDeal.name,
+                      value: activeDeal.value,
+                      close_date: activeDeal.close_date.slice(0, 10),
+                      account_id: activeDeal.account_id,
+                      owner_id: activeDeal.owner_id,
+                      stage_id: activeDeal.stage_id,
+                      tags: '',
+                      custom_values: { ...activeDeal.custom_fields },
+                    });
+                    setShowEditDeal(true);
+                  }}
+                  className="p-1.5 text-theme-secondary hover:text-theme-accent rounded hover:bg-theme-base transition-colors cursor-pointer bg-transparent border-none"
+                  aria-label={`Edit deal ${activeDeal.name}`}
+                  title="Edit Deal"
+                >
+                  <Pencil className="w-4.5 h-4.5" />
+                </button>
+                <button
                   onClick={() => setFullDealDetail(activeDeal.id)}
                   className="p-1.5 text-theme-secondary hover:text-theme-accent rounded hover:bg-theme-base transition-colors cursor-pointer bg-transparent border-none"
                   aria-label={`View full record for ${activeDeal.name}`}
@@ -1149,7 +1191,60 @@ export default function PipelineModule() {
                       </button>
                     </div>
                   </form>
-                )}
+      )}
+
+      {/* MODAL: EDIT DEAL */}
+      {showEditDeal && (
+        <Modal
+          open={showEditDeal}
+          onClose={() => setShowEditDeal(false)}
+          title="Edit Deal"
+          footer={
+            <div className="flex gap-2">
+              <Button variant="secondary" onClick={() => setShowEditDeal(false)}>Cancel</Button>
+              <Button variant="primary" onClick={() => {
+                if (!selectedDealId) return;
+                updateDeal(selectedDealId, {
+                  name: dealForm.name,
+                  value: dealForm.value,
+                  close_date: dealForm.close_date,
+                  account_id: dealForm.account_id,
+                  owner_id: dealForm.owner_id,
+                  stage_id: dealForm.stage_id,
+                  custom_fields: dealForm.custom_values,
+                });
+                setShowEditDeal(false);
+                toast.success('Deal updated', dealForm.name);
+              }}>Save Changes</Button>
+            </div>
+          }
+        >
+          <div className="space-y-3 text-xs">
+            <Input label="Deal Name" required value={dealForm.name} onChange={(e) => setDealForm({ ...dealForm, name: e.target.value })} />
+            <div className="grid grid-cols-2 gap-3">
+              <Input label="Value (USD)" type="number" required value={String(dealForm.value)} onChange={(e) => setDealForm({ ...dealForm, value: Number(e.target.value) })} />
+              <Input label="Close Date" type="date" required value={dealForm.close_date} onChange={(e) => setDealForm({ ...dealForm, close_date: e.target.value })} />
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <Select label="Account" required value={dealForm.account_id} onChange={(e) => setDealForm({ ...dealForm, account_id: e.target.value })}>
+                <option value="">-- Select --</option>
+                {accounts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+              </Select>
+              <Select label="Owner" required value={dealForm.owner_id} onChange={(e) => setDealForm({ ...dealForm, owner_id: e.target.value })}>
+                {users.map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
+              </Select>
+            </div>
+            <Select label="Stage" value={dealForm.stage_id} onChange={(e) => setDealForm({ ...dealForm, stage_id: e.target.value })}>
+              {activeStages.map(stg => <option key={stg.id} value={stg.id}>{stg.name} ({stg.probability}%)</option>)}
+            </Select>
+            {customFields.filter(f => f.entity_type === 'deal' && f.is_visible).map(f => (
+              <Input key={f.id} label={f.label} value={String(dealForm.custom_values[f.key] || '')}
+                onChange={(e) => setDealForm({ ...dealForm, custom_values: { ...dealForm.custom_values, [f.key]: e.target.value } })}
+              />
+            ))}
+          </div>
+        </Modal>
+      )}
 
                 {/* Line items list */}
                 <div className="divide-y divide-theme-border text-xs">

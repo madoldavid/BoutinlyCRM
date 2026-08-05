@@ -20,12 +20,13 @@ import {
   ArrowRight,
   AlertTriangle,
   ClipboardList,
-  ShieldCheck
+  ShieldCheck,
+  Building2,
 } from 'lucide-react';
 import { FunnelChart, DonutChart, TrendLine } from './ui/charts';
 import DashboardWidgetGrid, { type DashboardWidget } from './ui/DashboardWidgetGrid';
 import { buildNextBestActions, findDuplicateContacts, type InsightContext } from '../ai/insights';
-import { dispatchSelectEntity } from './GlobalShortcuts';
+import { dispatchSelectEntity, dispatchDrillDown } from './GlobalShortcuts';
 import SetupChecklist from './SetupChecklist';
 
 export default function ReportsModule() {
@@ -298,10 +299,13 @@ export default function ReportsModule() {
       span: 'md',
       content: (
         <div className="p-4">
-          <FunnelChart data={activeStagesForChart.map(stg => ({
-            label: stg.name,
-            value: scopedDeals.filter(d => d.stage_id === stg.id).reduce((sum, d) => sum + d.value, 0),
-          }))} />
+          <FunnelChart
+            data={activeStagesForChart.map(stg => ({
+              label: stg.name,
+              value: scopedDeals.filter(d => d.stage_id === stg.id).reduce((sum, d) => sum + d.value, 0),
+            }))}
+            onDrillDown={(label) => dispatchDrillDown({ module: 'deals', filterKey: 'stage', filterValue: label })}
+          />
         </div>
       ),
     },
@@ -365,6 +369,7 @@ export default function ReportsModule() {
               value: scopedDeals.filter(d => d.stage_id === stg.id).length,
               color: stg.type === 'won' ? 'var(--success)' : stg.type === 'lost' ? 'var(--text-secondary)' : undefined,
             }))}
+            onDrillDown={(label) => dispatchDrillDown({ module: 'deals', filterKey: 'stage', filterValue: label })}
           />
         </div>
       ),
@@ -461,6 +466,25 @@ export default function ReportsModule() {
         {activeSubTab === 'dash' && (
           <div className="space-y-6">
             <SetupChecklist />
+            {accounts.length === 0 && (
+              <div className="bg-theme-card border border-theme-border border-dashed rounded-[10px] p-4 flex items-center justify-between gap-4 shadow-card">
+                <div className="flex items-center gap-3">
+                  <div className="w-9 h-9 rounded-lg bg-theme-accent-soft text-theme-accent flex items-center justify-center shrink-0">
+                    <Building2 className="w-4.5 h-4.5" />
+                  </div>
+                  <div>
+                    <p className="text-xs font-semibold text-theme-primary">No company account yet</p>
+                    <p className="text-2xs text-theme-secondary">Create your organization as an account to associate contacts and deals.</p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => { setActiveModule('contacts'); setTimeout(() => window.dispatchEvent(new Event('boutinly:new-record')), 100); }}
+                  className="shrink-0 text-xs font-medium text-white bg-theme-accent hover:opacity-90 rounded-md px-3 py-1.5 cursor-pointer transition-opacity shadow-card"
+                >
+                  Create Account
+                </button>
+              </div>
+            )}
             <DashboardWidgetGrid widgets={dashboardWidgets} />
           </div>
         )}
