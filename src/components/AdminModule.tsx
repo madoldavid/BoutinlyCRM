@@ -3,10 +3,10 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useCRM } from '../store';
 import { UserRole } from '../types';
-import type { Pipeline, Stage } from '../types';
+import type { Pipeline, Stage, ApiKey, Webhook, WebhookDelivery, Quota, ApprovalRequest, OrgSecurityPolicy, FieldPermission } from '../types';
 import { apiClient } from '../apiClient';
 import {
   Users,
@@ -27,6 +27,18 @@ import {
   Download,
   AlertTriangle,
   Layers,
+  Webhook as WebhookIcon,
+  Target,
+  ClipboardCheck,
+  Lock,
+  Rows3,
+  Copy,
+  Send,
+  PauseCircle,
+  PlayCircle,
+  ChevronDown,
+  ChevronRight,
+  X,
 } from 'lucide-react';
 
 export default function AdminModule() {
@@ -44,7 +56,7 @@ export default function AdminModule() {
     stages,
   } = useCRM();
 
-  const [activeSubView, setActiveSubView] = useState<'users' | 'fields' | 'domain' | 'audit' | 'pipelines'>('users');
+  const [activeSubView, setActiveSubView] = useState<'users' | 'fields' | 'domain' | 'audit' | 'pipelines' | 'integrations' | 'quotas' | 'approvals' | 'governance'>('users');
   const [showInviteModal, setShowInviteModal] = useState(false);
   const [inviteForm, setInviteForm] = useState({
     name: '',
@@ -93,6 +105,57 @@ export default function AdminModule() {
     order: 1,
     type: 'open' as 'open' | 'won' | 'lost',
   });
+
+  // ─── Integrations: API keys ───────────────────────
+  const [apiKeys, setApiKeys] = useState<ApiKey[]>([]);
+  const [apiKeysLoaded, setApiKeysLoaded] = useState(false);
+  const [showApiKeyModal, setShowApiKeyModal] = useState(false);
+  const [apiKeyForm, setApiKeyForm] = useState({ name: '', scopes: ['read', 'write'] as string[], expires_at: '' });
+  const [newApiKeyRaw, setNewApiKeyRaw] = useState<string | null>(null);
+
+  // ─── Integrations: Webhooks ────────────────────────
+  const [webhooks, setWebhooks] = useState<Webhook[]>([]);
+  const [availableEvents, setAvailableEvents] = useState<string[]>([]);
+  const [webhooksLoaded, setWebhooksLoaded] = useState(false);
+  const [showWebhookModal, setShowWebhookModal] = useState(false);
+  const [webhookForm, setWebhookForm] = useState({ name: '', url: '', events: [] as string[] });
+  const [expandedWebhook, setExpandedWebhook] = useState<string | null>(null);
+  const [webhookDeliveries, setWebhookDeliveries] = useState<Record<string, WebhookDelivery[]>>({});
+  const [webhookBusy, setWebhookBusy] = useState<string | null>(null);
+
+  // ─── Quotas ─────────────────────────────────────────
+  const [quotas, setQuotas] = useState<Quota[]>([]);
+  const [quotasLoaded, setQuotasLoaded] = useState(false);
+  const [showQuotaModal, setShowQuotaModal] = useState(false);
+  const [quotaForm, setQuotaForm] = useState({
+    user_id: '', period: 'quarterly' as 'monthly' | 'quarterly' | 'annual',
+    amount: '', currency: 'USD', fiscal_year: new Date().getFullYear(), fiscal_period: 1,
+  });
+
+  // ─── Approvals ──────────────────────────────────────
+  const [approvals, setApprovals] = useState<ApprovalRequest[]>([]);
+  const [approvalsLoaded, setApprovalsLoaded] = useState(false);
+  const [approvalStatusFilter, setApprovalStatusFilter] = useState<'pending' | 'approved' | 'rejected' | 'cancelled' | 'all'>('pending');
+  const [approvalNotes, setApprovalNotes] = useState<Record<string, string>>({});
+  const [approvalBusy, setApprovalBusy] = useState<string | null>(null);
+
+  // ─── Governance: security policy & field permissions ─
+  const [securityPolicy, setSecurityPolicy] = useState<OrgSecurityPolicy | null>(null);
+  const [securityPolicyForm, setSecurityPolicyForm] = useState({
+    ip_allowlist: '', session_idle_minutes: 480, max_sessions_per_user: 10,
+    enforce_mfa: false, enforce_sso: false, password_min_length: 8,
+  });
+  const [securityPolicySaving, setSecurityPolicySaving] = useState(false);
+  const [fieldPermissions, setFieldPermissions] = useState<FieldPermission[]>([]);
+  const [governanceLoaded, setGovernanceLoaded] = useState(false);
+  const [showFieldPermModal, setShowFieldPermModal] = useState(false);
+  const [fieldPermForm, setFieldPermForm] = useState({
+    entity_type: 'contact' as 'contact' | 'account' | 'deal',
+    field_key: '', role: UserRole.SALES_REP, can_read: true, can_write: false,
+  });
+
+  // ─── Audit export ───────────────────────────────────
+  const [auditExporting, setAuditExporting] = useState(false);
 
   // Render QR code when MFA setup data changes
   useEffect(() => {
@@ -187,6 +250,290 @@ export default function AdminModule() {
     }
   };
 
+  // ─── Integrations: API keys ────────────────────────
+  const loadApiKeys = useCallback(async () => {
+    try {
+      setApiKeys(await apiClient.listApiKeys());
+    } catch (err: any) {
+      alert(err.message || 'Failed to load API keys');
+    } finally {
+      setApiKeysLoaded(true);
+    }
+  }, []);
+
+  const handleCreateApiKey = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!apiKeyForm.name.trim()) return;
+    try {
+      const key = await apiClient.createApiKey({
+        name: apiKeyForm.name.trim(),
+        scopes: apiKeyForm.scopes,
+        expires_at: apiKeyForm.expires_at || null,
+      });
+      setApiKeys(prev => [key, ...prev]);
+      setNewApiKeyRaw(key.raw_key || null);
+      setApiKeyForm({ name: '', scopes: ['read', 'write'], expires_at: '' });
+    } catch (err: any) {
+      alert(err.message || 'Failed to create API key');
+    }
+  };
+
+  const handleRevokeApiKey = async (id: string) => {
+    if (!confirm('Revoke this API key? Any integration using it will stop working immediately.')) return;
+    try {
+      await apiClient.revokeApiKey(id);
+      setApiKeys(prev => prev.filter(k => k.id !== id));
+    } catch (err: any) {
+      alert(err.message || 'Failed to revoke API key');
+    }
+  };
+
+  // ─── Integrations: Webhooks ────────────────────────
+  const loadWebhooks = useCallback(async () => {
+    try {
+      const res = await apiClient.listWebhooks();
+      setWebhooks(res.webhooks);
+      setAvailableEvents(res.available_events);
+    } catch (err: any) {
+      alert(err.message || 'Failed to load webhooks');
+    } finally {
+      setWebhooksLoaded(true);
+    }
+  }, []);
+
+  const handleCreateWebhook = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!webhookForm.name.trim() || !webhookForm.url.trim() || webhookForm.events.length === 0) return;
+    try {
+      const wh = await apiClient.createWebhook(webhookForm);
+      setWebhooks(prev => [wh, ...prev]);
+      setShowWebhookModal(false);
+      setWebhookForm({ name: '', url: '', events: [] });
+    } catch (err: any) {
+      alert(err.message || 'Failed to create webhook');
+    }
+  };
+
+  const handleToggleWebhookStatus = async (wh: Webhook) => {
+    setWebhookBusy(wh.id);
+    try {
+      const updated = await apiClient.updateWebhook(wh.id, { status: wh.status === 'active' ? 'paused' : 'active' });
+      setWebhooks(prev => prev.map(w => (w.id === updated.id ? updated : w)));
+    } catch (err: any) {
+      alert(err.message || 'Failed to update webhook');
+    } finally {
+      setWebhookBusy(null);
+    }
+  };
+
+  const handleDeleteWebhook = async (id: string) => {
+    if (!confirm('Delete this webhook? Delivery history will also be removed.')) return;
+    try {
+      await apiClient.deleteWebhook(id);
+      setWebhooks(prev => prev.filter(w => w.id !== id));
+    } catch (err: any) {
+      alert(err.message || 'Failed to delete webhook');
+    }
+  };
+
+  const handleTestWebhook = async (id: string) => {
+    setWebhookBusy(id);
+    try {
+      await apiClient.testWebhook(id);
+      alert('Test event dispatched.');
+      if (expandedWebhook === id) {
+        setWebhookDeliveries(prev => ({ ...prev, [id]: undefined as any }));
+        await handleToggleDeliveries(id, true);
+      }
+    } catch (err: any) {
+      alert(err.message || 'Failed to send test event');
+    } finally {
+      setWebhookBusy(null);
+    }
+  };
+
+  const handleToggleDeliveries = async (id: string, forceOpen = false) => {
+    if (!forceOpen && expandedWebhook === id) {
+      setExpandedWebhook(null);
+      return;
+    }
+    setExpandedWebhook(id);
+    if (!webhookDeliveries[id]) {
+      try {
+        const deliveries = await apiClient.listWebhookDeliveries(id);
+        setWebhookDeliveries(prev => ({ ...prev, [id]: deliveries }));
+      } catch (err: any) {
+        alert(err.message || 'Failed to load deliveries');
+      }
+    }
+  };
+
+  // ─── Quotas ─────────────────────────────────────────
+  const loadQuotas = useCallback(async () => {
+    try {
+      setQuotas(await apiClient.listQuotas());
+    } catch (err: any) {
+      alert(err.message || 'Failed to load quotas');
+    } finally {
+      setQuotasLoaded(true);
+    }
+  }, []);
+
+  const handleCreateQuota = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const amount = Number(quotaForm.amount);
+    if (!quotaForm.user_id || !Number.isFinite(amount) || amount < 0) return;
+    try {
+      const quota = await apiClient.upsertQuota({
+        user_id: quotaForm.user_id,
+        period: quotaForm.period,
+        amount,
+        currency: quotaForm.currency,
+        fiscal_year: quotaForm.fiscal_year,
+        fiscal_period: quotaForm.fiscal_period,
+      });
+      setQuotas(prev => [quota, ...prev.filter(q => q.id !== quota.id)]);
+      setShowQuotaModal(false);
+      setQuotaForm({ user_id: '', period: 'quarterly', amount: '', currency: 'USD', fiscal_year: new Date().getFullYear(), fiscal_period: 1 });
+    } catch (err: any) {
+      alert(err.message || 'Failed to save quota');
+    }
+  };
+
+  const handleDeleteQuota = async (id: string) => {
+    if (!confirm('Remove this quota assignment?')) return;
+    try {
+      await apiClient.deleteQuota(id);
+      setQuotas(prev => prev.filter(q => q.id !== id));
+    } catch (err: any) {
+      alert(err.message || 'Failed to delete quota');
+    }
+  };
+
+  // ─── Approvals ──────────────────────────────────────
+  const loadApprovals = useCallback(async (status: string) => {
+    try {
+      setApprovals(await apiClient.listApprovals(status === 'all' ? undefined : status));
+    } catch (err: any) {
+      alert(err.message || 'Failed to load approvals');
+    } finally {
+      setApprovalsLoaded(true);
+    }
+  }, []);
+
+  const handleDecideApproval = async (id: string, decision: 'approved' | 'rejected') => {
+    setApprovalBusy(id);
+    try {
+      await apiClient.decideApproval(id, decision, approvalNotes[id]);
+      setApprovals(prev => prev.filter(a => a.id !== id));
+      setApprovalNotes(prev => { const next = { ...prev }; delete next[id]; return next; });
+    } catch (err: any) {
+      alert(err.message || 'Failed to record decision');
+    } finally {
+      setApprovalBusy(null);
+    }
+  };
+
+  // ─── Governance ─────────────────────────────────────
+  const loadGovernance = useCallback(async () => {
+    try {
+      const [policy, perms] = await Promise.all([apiClient.getSecurityPolicy(), apiClient.listFieldPermissions()]);
+      setSecurityPolicy(policy);
+      setSecurityPolicyForm({
+        ip_allowlist: (policy.ip_allowlist || []).join('\n'),
+        session_idle_minutes: policy.session_idle_minutes,
+        max_sessions_per_user: policy.max_sessions_per_user,
+        enforce_mfa: policy.enforce_mfa,
+        enforce_sso: policy.enforce_sso,
+        password_min_length: policy.password_min_length,
+      });
+      setFieldPermissions(perms);
+    } catch (err: any) {
+      alert(err.message || 'Failed to load security governance settings');
+    } finally {
+      setGovernanceLoaded(true);
+    }
+  }, []);
+
+  const handleSaveSecurityPolicy = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSecurityPolicySaving(true);
+    try {
+      const policy = await apiClient.updateSecurityPolicy({
+        ip_allowlist: securityPolicyForm.ip_allowlist.split('\n').map(s => s.trim()).filter(Boolean),
+        session_idle_minutes: securityPolicyForm.session_idle_minutes,
+        max_sessions_per_user: securityPolicyForm.max_sessions_per_user,
+        enforce_mfa: securityPolicyForm.enforce_mfa,
+        enforce_sso: securityPolicyForm.enforce_sso,
+        password_min_length: securityPolicyForm.password_min_length,
+      });
+      setSecurityPolicy(policy);
+      alert('Security policy updated.');
+    } catch (err: any) {
+      alert(err.message || 'Failed to save security policy');
+    } finally {
+      setSecurityPolicySaving(false);
+    }
+  };
+
+  const handleCreateFieldPermission = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!fieldPermForm.field_key.trim()) return;
+    try {
+      const fp = await apiClient.createFieldPermission({
+        ...fieldPermForm,
+        field_key: fieldPermForm.field_key.trim().toLowerCase().replace(/[^a-z0-9_]/g, '_'),
+      });
+      setFieldPermissions(prev => [fp, ...prev.filter(f => f.id !== fp.id)]);
+      setShowFieldPermModal(false);
+      setFieldPermForm({ entity_type: 'contact', field_key: '', role: UserRole.SALES_REP, can_read: true, can_write: false });
+    } catch (err: any) {
+      alert(err.message || 'Failed to save field permission');
+    }
+  };
+
+  const handleDeleteFieldPermission = async (id: string) => {
+    try {
+      await apiClient.deleteFieldPermission(id);
+      setFieldPermissions(prev => prev.filter(f => f.id !== id));
+    } catch (err: any) {
+      alert(err.message || 'Failed to delete field permission');
+    }
+  };
+
+  // ─── Audit export ───────────────────────────────────
+  const handleExportAuditLogs = async (format: 'json' | 'csv') => {
+    setAuditExporting(true);
+    try {
+      const blob = await apiClient.exportAuditLogs(format);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `audit-export-${new Date().toISOString().split('T')[0]}.${format}`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (err: any) {
+      alert(err.message || 'Export failed');
+    } finally {
+      setAuditExporting(false);
+    }
+  };
+
+  // Lazy-load each enterprise tab's data the first time it's opened
+  useEffect(() => {
+    if (activeSubView === 'integrations') {
+      if (!apiKeysLoaded) loadApiKeys();
+      if (!webhooksLoaded) loadWebhooks();
+    } else if (activeSubView === 'quotas' && !quotasLoaded) {
+      loadQuotas();
+    } else if (activeSubView === 'approvals') {
+      loadApprovals(approvalStatusFilter);
+    } else if (activeSubView === 'governance' && !governanceLoaded) {
+      loadGovernance();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeSubView, approvalStatusFilter]);
+
   // Invite handler
   const handleInviteSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -244,8 +591,8 @@ export default function AdminModule() {
         
         {/* Navigation headers */}
         <div className="p-4 border-b border-theme-border space-y-3 shrink-0">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2 bg-theme-base p-0.5 rounded-lg border border-theme-border text-xs font-semibold">
+          <div className="flex items-start justify-between gap-2 flex-wrap">
+            <div className="flex items-center gap-2 bg-theme-base p-0.5 rounded-lg border border-theme-border text-xs font-semibold flex-wrap">
               <button
                 onClick={() => setActiveSubView('users')}
                 className={`px-3 py-1.5 rounded-md cursor-pointer transition-all flex items-center gap-1.5 ${
@@ -269,6 +616,38 @@ export default function AdminModule() {
                 }`}
               >
                 <Layers className="w-3.5 h-3.5 text-theme-accent" /> Pipelines
+              </button>
+              <button
+                onClick={() => setActiveSubView('quotas')}
+                className={`px-3 py-1.5 rounded-md cursor-pointer transition-all flex items-center gap-1.5 ${
+                  activeSubView === 'quotas' ? 'bg-theme-card text-theme-primary shadow-xs border border-theme-border/50' : 'text-theme-secondary hover:text-theme-primary'
+                }`}
+              >
+                <Target className="w-3.5 h-3.5 text-theme-accent" /> Quotas
+              </button>
+              <button
+                onClick={() => setActiveSubView('approvals')}
+                className={`px-3 py-1.5 rounded-md cursor-pointer transition-all flex items-center gap-1.5 ${
+                  activeSubView === 'approvals' ? 'bg-theme-card text-theme-primary shadow-xs border border-theme-border/50' : 'text-theme-secondary hover:text-theme-primary'
+                }`}
+              >
+                <ClipboardCheck className="w-3.5 h-3.5 text-theme-accent" /> Approvals
+              </button>
+              <button
+                onClick={() => setActiveSubView('integrations')}
+                className={`px-3 py-1.5 rounded-md cursor-pointer transition-all flex items-center gap-1.5 ${
+                  activeSubView === 'integrations' ? 'bg-theme-card text-theme-primary shadow-xs border border-theme-border/50' : 'text-theme-secondary hover:text-theme-primary'
+                }`}
+              >
+                <WebhookIcon className="w-3.5 h-3.5 text-theme-accent" /> Integrations
+              </button>
+              <button
+                onClick={() => setActiveSubView('governance')}
+                className={`px-3 py-1.5 rounded-md cursor-pointer transition-all flex items-center gap-1.5 ${
+                  activeSubView === 'governance' ? 'bg-theme-card text-theme-primary shadow-xs border border-theme-border/50' : 'text-theme-secondary hover:text-theme-primary'
+                }`}
+              >
+                <Lock className="w-3.5 h-3.5 text-theme-accent" /> Governance
               </button>
               <button
                 onClick={() => setActiveSubView('domain')}
@@ -305,6 +684,40 @@ export default function AdminModule() {
                 >
                   <Plus className="w-3.5 h-3.5" /> Attribute
                 </button>
+              )}
+              {activeSubView === 'quotas' && (
+                <button
+                  onClick={() => setShowQuotaModal(true)}
+                  className="bg-theme-accent hover:opacity-90 text-white px-3 py-1.5 rounded-lg flex items-center gap-1 text-xs font-semibold shadow-xs cursor-pointer"
+                >
+                  <Plus className="w-3.5 h-3.5" /> Assign Quota
+                </button>
+              )}
+              {activeSubView === 'governance' && (
+                <button
+                  onClick={() => setShowFieldPermModal(true)}
+                  className="bg-theme-accent hover:opacity-90 text-white px-3 py-1.5 rounded-lg flex items-center gap-1 text-xs font-semibold shadow-xs cursor-pointer"
+                >
+                  <Plus className="w-3.5 h-3.5" /> Field Rule
+                </button>
+              )}
+              {activeSubView === 'audit' && (
+                <>
+                  <button
+                    onClick={() => handleExportAuditLogs('csv')}
+                    disabled={auditExporting}
+                    className="bg-theme-base hover:bg-theme-hover border border-theme-border text-theme-primary px-3 py-1.5 rounded-lg flex items-center gap-1 text-xs font-semibold cursor-pointer disabled:opacity-50"
+                  >
+                    <Download className="w-3.5 h-3.5" /> CSV
+                  </button>
+                  <button
+                    onClick={() => handleExportAuditLogs('json')}
+                    disabled={auditExporting}
+                    className="bg-theme-base hover:bg-theme-hover border border-theme-border text-theme-primary px-3 py-1.5 rounded-lg flex items-center gap-1 text-xs font-semibold cursor-pointer disabled:opacity-50"
+                  >
+                    <Download className="w-3.5 h-3.5" /> JSON
+                  </button>
+                </>
               )}
             </div>
           </div>
@@ -548,6 +961,336 @@ export default function AdminModule() {
                   )}
                 </div>
               ))
+            )}
+          </div>
+        )}
+
+        {/* WORKSPACE VIEW: INTEGRATIONS (API KEYS & WEBHOOKS) */}
+        {activeSubView === 'integrations' && (
+          <div className="flex-1 overflow-y-auto p-4 space-y-6 text-left bg-theme-base">
+            {/* API Keys */}
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <h4 className="text-xs font-bold uppercase tracking-wider text-theme-secondary flex items-center gap-1.5">
+                  <KeyRound className="w-3.5 h-3.5 text-theme-accent" /> API Keys
+                </h4>
+                <button
+                  onClick={() => { setNewApiKeyRaw(null); setShowApiKeyModal(true); }}
+                  className="text-[10px] text-theme-accent hover:opacity-80 font-semibold cursor-pointer bg-transparent border-none flex items-center gap-1"
+                >
+                  <Plus className="w-3 h-3" /> New Key
+                </button>
+              </div>
+              {!apiKeysLoaded ? (
+                <p className="text-xs text-theme-secondary">Loading…</p>
+              ) : apiKeys.length === 0 ? (
+                <div className="text-center py-6 text-xs text-theme-secondary bg-theme-card border border-theme-border rounded-xl">
+                  <KeyRound className="w-6 h-6 mx-auto mb-2 text-theme-secondary/40" />
+                  <p>No API keys issued</p>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {apiKeys.map(k => (
+                    <div key={k.id} className="bg-theme-card border border-theme-border rounded-lg p-3 flex items-center justify-between gap-2">
+                      <div className="min-w-0">
+                        <p className="text-xs font-bold text-theme-primary truncate">{k.name}</p>
+                        <p className="text-[10px] text-theme-secondary font-mono mt-0.5">{k.key_prefix}••••••••• • {k.scopes.join(', ')}</p>
+                        <p className="text-[9px] text-theme-secondary/70 mt-0.5">
+                          Created {new Date(k.created_at).toLocaleDateString()}
+                          {k.last_used_at && ` • Last used ${new Date(k.last_used_at).toLocaleDateString()}`}
+                          {k.expires_at && ` • Expires ${new Date(k.expires_at).toLocaleDateString()}`}
+                        </p>
+                      </div>
+                      <button
+                        onClick={() => handleRevokeApiKey(k.id)}
+                        className="p-1.5 text-theme-secondary/40 hover:text-danger rounded transition-colors cursor-pointer bg-transparent border-none shrink-0"
+                        title="Revoke key"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Webhooks */}
+            <div className="space-y-3 border-t border-theme-border pt-5">
+              <div className="flex items-center justify-between">
+                <h4 className="text-xs font-bold uppercase tracking-wider text-theme-secondary flex items-center gap-1.5">
+                  <WebhookIcon className="w-3.5 h-3.5 text-theme-accent" /> Webhooks
+                </h4>
+                <button
+                  onClick={() => setShowWebhookModal(true)}
+                  className="text-[10px] text-theme-accent hover:opacity-80 font-semibold cursor-pointer bg-transparent border-none flex items-center gap-1"
+                >
+                  <Plus className="w-3 h-3" /> New Webhook
+                </button>
+              </div>
+              {!webhooksLoaded ? (
+                <p className="text-xs text-theme-secondary">Loading…</p>
+              ) : webhooks.length === 0 ? (
+                <div className="text-center py-6 text-xs text-theme-secondary bg-theme-card border border-theme-border rounded-xl">
+                  <WebhookIcon className="w-6 h-6 mx-auto mb-2 text-theme-secondary/40" />
+                  <p>No webhooks configured</p>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {webhooks.map(wh => (
+                    <div key={wh.id} className="bg-theme-card border border-theme-border rounded-lg overflow-hidden">
+                      <div className="p-3 flex items-center justify-between gap-2">
+                        <div className="min-w-0 flex-1 cursor-pointer" onClick={() => handleToggleDeliveries(wh.id)}>
+                          <div className="flex items-center gap-1.5">
+                            {expandedWebhook === wh.id ? <ChevronDown className="w-3 h-3 text-theme-secondary shrink-0" /> : <ChevronRight className="w-3 h-3 text-theme-secondary shrink-0" />}
+                            <p className="text-xs font-bold text-theme-primary truncate">{wh.name}</p>
+                            <span className={`text-[8px] font-bold uppercase px-1.5 py-0.5 rounded shrink-0 ${wh.status === 'active' ? 'bg-success-soft text-success' : 'bg-theme-inset text-theme-secondary'}`}>
+                              {wh.status}
+                            </span>
+                          </div>
+                          <p className="text-[10px] text-theme-secondary font-mono mt-0.5 truncate">{wh.url}</p>
+                          <p className="text-[9px] text-theme-secondary/70 mt-0.5">
+                            {wh.events.length} event{wh.events.length === 1 ? '' : 's'}
+                            {wh.last_triggered_at && ` • Last fired ${new Date(wh.last_triggered_at).toLocaleString()}`}
+                            {wh.failure_count > 0 && ` • ${wh.failure_count} failures`}
+                          </p>
+                        </div>
+                        <div className="flex items-center gap-1 shrink-0">
+                          <button onClick={() => handleTestWebhook(wh.id)} disabled={webhookBusy === wh.id}
+                            className="p-1.5 text-theme-secondary/60 hover:text-theme-accent rounded cursor-pointer bg-transparent border-none disabled:opacity-40" title="Send test event">
+                            <Send className="w-3.5 h-3.5" />
+                          </button>
+                          <button onClick={() => handleToggleWebhookStatus(wh)} disabled={webhookBusy === wh.id}
+                            className="p-1.5 text-theme-secondary/60 hover:text-theme-accent rounded cursor-pointer bg-transparent border-none disabled:opacity-40"
+                            title={wh.status === 'active' ? 'Pause webhook' : 'Activate webhook'}>
+                            {wh.status === 'active' ? <PauseCircle className="w-3.5 h-3.5" /> : <PlayCircle className="w-3.5 h-3.5" />}
+                          </button>
+                          <button onClick={() => handleDeleteWebhook(wh.id)}
+                            className="p-1.5 text-theme-secondary/40 hover:text-danger rounded cursor-pointer bg-transparent border-none" title="Delete webhook">
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      </div>
+                      {expandedWebhook === wh.id && (
+                        <div className="border-t border-theme-border bg-theme-base/50 p-3 space-y-1.5 max-h-48 overflow-y-auto">
+                          <p className="text-[9px] font-bold uppercase tracking-wider text-theme-secondary">Recent deliveries</p>
+                          {!webhookDeliveries[wh.id] ? (
+                            <p className="text-[10px] text-theme-secondary">Loading…</p>
+                          ) : webhookDeliveries[wh.id].length === 0 ? (
+                            <p className="text-[10px] text-theme-secondary">No deliveries yet.</p>
+                          ) : (
+                            webhookDeliveries[wh.id].map(d => (
+                              <div key={d.id} className="flex items-center justify-between text-[10px] bg-theme-card border border-theme-border rounded px-2 py-1">
+                                <span className="font-mono text-theme-primary">{d.event}</span>
+                                <span className={d.success ? 'text-success font-semibold' : 'text-danger font-semibold'}>{d.response_status || (d.success ? 'OK' : 'FAILED')}</span>
+                                <span className="text-theme-secondary">{new Date(d.created_at).toLocaleTimeString()}</span>
+                              </div>
+                            ))
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* WORKSPACE VIEW: QUOTAS */}
+        {activeSubView === 'quotas' && (
+          <div className="flex-1 overflow-y-auto p-4 space-y-2 text-left bg-theme-base">
+            <h4 className="text-xs font-bold uppercase tracking-wider text-theme-secondary flex items-center gap-1.5 mb-1">
+              <Target className="w-3.5 h-3.5 text-theme-accent" /> Sales Quotas
+            </h4>
+            {!quotasLoaded ? (
+              <p className="text-xs text-theme-secondary">Loading…</p>
+            ) : quotas.length === 0 ? (
+              <div className="text-center py-8 text-xs text-theme-secondary bg-theme-card border border-theme-border rounded-xl">
+                <Target className="w-8 h-8 mx-auto mb-2 text-theme-secondary/40" />
+                <p className="font-semibold text-theme-secondary">No quotas assigned</p>
+                <p className="mt-1">Set revenue targets per rep for each fiscal period.</p>
+              </div>
+            ) : (
+              quotas.map(q => {
+                const owner = users.find(u => u.id === q.user_id);
+                return (
+                  <div key={q.id} className="bg-theme-card border border-theme-border rounded-lg p-3 flex items-center justify-between">
+                    <div>
+                      <p className="text-xs font-bold text-theme-primary">{owner?.name || (q.team_id ? `Team ${q.team_id}` : 'Unassigned')}</p>
+                      <p className="text-[10px] text-theme-secondary font-sans mt-0.5">{q.period.toUpperCase()} • FY{q.fiscal_year} P{q.fiscal_period}</p>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <span className="text-sm font-bold text-theme-accent">{q.currency} {Number(q.amount).toLocaleString()}</span>
+                      <button onClick={() => handleDeleteQuota(q.id)} className="p-1.5 text-theme-secondary/40 hover:text-danger rounded cursor-pointer bg-transparent border-none">
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
+                  </div>
+                );
+              })
+            )}
+          </div>
+        )}
+
+        {/* WORKSPACE VIEW: APPROVALS */}
+        {activeSubView === 'approvals' && (
+          <div className="flex-1 flex flex-col overflow-hidden text-left h-full bg-theme-card">
+            <div className="p-3 border-b border-theme-border bg-theme-base shrink-0 flex items-center gap-1.5 flex-wrap">
+              {(['pending', 'approved', 'rejected', 'cancelled', 'all'] as const).map(s => (
+                <button
+                  key={s}
+                  onClick={() => setApprovalStatusFilter(s)}
+                  className={`px-2.5 py-1 rounded-md text-[10px] font-bold uppercase cursor-pointer transition-colors ${
+                    approvalStatusFilter === s ? 'bg-theme-accent text-white' : 'bg-theme-card border border-theme-border text-theme-secondary hover:text-theme-primary'
+                  }`}
+                >
+                  {s}
+                </button>
+              ))}
+            </div>
+            <div className="flex-1 overflow-y-auto divide-y divide-theme-border">
+              {!approvalsLoaded ? (
+                <p className="p-4 text-xs text-theme-secondary">Loading…</p>
+              ) : approvals.length === 0 ? (
+                <div className="p-8 text-center text-xs text-theme-secondary/70 font-sans">
+                  <ClipboardCheck className="w-8 h-8 mx-auto mb-2 text-theme-secondary/40" />
+                  <p className="font-semibold text-theme-secondary">No {approvalStatusFilter !== 'all' ? approvalStatusFilter : ''} approval requests</p>
+                </div>
+              ) : (
+                approvals.map(a => {
+                  const requester = users.find(u => u.id === a.requested_by_id);
+                  return (
+                    <div key={a.id} className="p-3 space-y-2">
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0">
+                          <p className="text-xs font-bold text-theme-primary">{a.title}</p>
+                          <p className="text-[10px] text-theme-secondary mt-0.5">{a.entity_type} • requested by {requester?.name || 'Unknown'} • {new Date(a.created_at).toLocaleString()}</p>
+                          {a.reason && <p className="text-[10px] text-theme-secondary mt-1 italic">"{a.reason}"</p>}
+                        </div>
+                        <span className={`text-[8px] font-bold uppercase px-1.5 py-0.5 rounded shrink-0 ${
+                          a.status === 'pending' ? 'bg-theme-accent/10 text-theme-accent' :
+                          a.status === 'approved' ? 'bg-success-soft text-success' :
+                          a.status === 'rejected' ? 'bg-danger-soft text-danger' : 'bg-theme-inset text-theme-secondary'
+                        }`}>
+                          {a.status}
+                        </span>
+                      </div>
+                      {a.status === 'pending' && (
+                        <div className="flex items-center gap-2">
+                          <input
+                            type="text" placeholder="Optional note…"
+                            value={approvalNotes[a.id] || ''}
+                            onChange={e => setApprovalNotes(prev => ({ ...prev, [a.id]: e.target.value }))}
+                            className="flex-1 bg-theme-base border border-theme-border rounded px-2 py-1 text-[10px] focus:outline-none focus:ring-1 focus:ring-theme-accent"
+                          />
+                          <button onClick={() => handleDecideApproval(a.id, 'approved')} disabled={approvalBusy === a.id}
+                            className="text-[10px] font-bold bg-success text-white px-2.5 py-1 rounded cursor-pointer disabled:opacity-50">Approve</button>
+                          <button onClick={() => handleDecideApproval(a.id, 'rejected')} disabled={approvalBusy === a.id}
+                            className="text-[10px] font-bold bg-danger text-white px-2.5 py-1 rounded cursor-pointer disabled:opacity-50">Reject</button>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* WORKSPACE VIEW: GOVERNANCE (SECURITY POLICY & FIELD PERMISSIONS) */}
+        {activeSubView === 'governance' && (
+          <div className="flex-1 overflow-y-auto p-4 space-y-6 text-left bg-theme-base">
+            {!governanceLoaded ? (
+              <p className="text-xs text-theme-secondary">Loading…</p>
+            ) : (
+              <>
+                <form onSubmit={handleSaveSecurityPolicy} className="bg-theme-card border border-theme-border rounded-xl p-4 space-y-3">
+                  <h4 className="text-xs font-bold uppercase tracking-wider text-theme-secondary flex items-center gap-1.5">
+                    <Lock className="w-3.5 h-3.5 text-theme-accent" /> Organization Security Policy
+                  </h4>
+                  <div className="space-y-1">
+                    <label className="block text-[10px] font-semibold text-theme-secondary">IP Allowlist (one CIDR / address per line, blank = unrestricted)</label>
+                    <textarea
+                      value={securityPolicyForm.ip_allowlist}
+                      onChange={e => setSecurityPolicyForm({ ...securityPolicyForm, ip_allowlist: e.target.value })}
+                      rows={3} placeholder="203.0.113.0/24"
+                      className="w-full bg-theme-base text-theme-primary border border-theme-border rounded px-2.5 py-1.5 text-xs font-mono focus:outline-none focus:ring-1 focus:ring-theme-accent"
+                    />
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="space-y-1">
+                      <label className="block text-[10px] font-semibold text-theme-secondary">Session Idle Timeout (min)</label>
+                      <input type="number" min={5} max={10080} value={securityPolicyForm.session_idle_minutes}
+                        onChange={e => setSecurityPolicyForm({ ...securityPolicyForm, session_idle_minutes: Number(e.target.value) })}
+                        className="w-full bg-theme-base text-theme-primary border border-theme-border rounded px-2.5 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-theme-accent" />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="block text-[10px] font-semibold text-theme-secondary">Max Sessions / User</label>
+                      <input type="number" min={1} max={100} value={securityPolicyForm.max_sessions_per_user}
+                        onChange={e => setSecurityPolicyForm({ ...securityPolicyForm, max_sessions_per_user: Number(e.target.value) })}
+                        className="w-full bg-theme-base text-theme-primary border border-theme-border rounded px-2.5 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-theme-accent" />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="block text-[10px] font-semibold text-theme-secondary">Min Password Length</label>
+                      <input type="number" min={8} max={128} value={securityPolicyForm.password_min_length}
+                        onChange={e => setSecurityPolicyForm({ ...securityPolicyForm, password_min_length: Number(e.target.value) })}
+                        className="w-full bg-theme-base text-theme-primary border border-theme-border rounded px-2.5 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-theme-accent" />
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-4 pt-1">
+                    <label className="flex items-center gap-1.5 text-[10px] font-semibold text-theme-secondary cursor-pointer">
+                      <input type="checkbox" checked={securityPolicyForm.enforce_mfa}
+                        onChange={e => setSecurityPolicyForm({ ...securityPolicyForm, enforce_mfa: e.target.checked })} />
+                      Enforce MFA for all users
+                    </label>
+                    <label className="flex items-center gap-1.5 text-[10px] font-semibold text-theme-secondary cursor-pointer">
+                      <input type="checkbox" checked={securityPolicyForm.enforce_sso}
+                        onChange={e => setSecurityPolicyForm({ ...securityPolicyForm, enforce_sso: e.target.checked })} />
+                      Enforce SSO login
+                    </label>
+                  </div>
+                  <div className="flex items-center justify-between pt-2 border-t border-theme-border">
+                    {securityPolicy && <span className="text-[9px] text-theme-secondary">Last updated {new Date(securityPolicy.updated_at).toLocaleString()}</span>}
+                    <button type="submit" disabled={securityPolicySaving}
+                      className="bg-theme-accent hover:opacity-90 text-white px-4 py-1.5 rounded-lg text-xs font-semibold cursor-pointer disabled:opacity-50 ml-auto">
+                      {securityPolicySaving ? 'Saving…' : 'Save Policy'}
+                    </button>
+                  </div>
+                </form>
+
+                <div className="space-y-3">
+                  <h4 className="text-xs font-bold uppercase tracking-wider text-theme-secondary flex items-center gap-1.5">
+                    <Rows3 className="w-3.5 h-3.5 text-theme-accent" /> Field-Level Permissions
+                  </h4>
+                  {fieldPermissions.length === 0 ? (
+                    <div className="text-center py-6 text-xs text-theme-secondary bg-theme-card border border-theme-border rounded-xl">
+                      <Rows3 className="w-6 h-6 mx-auto mb-2 text-theme-secondary/40" />
+                      <p>No field-level restrictions defined</p>
+                      <p className="mt-1">By default, all roles can read and write every field.</p>
+                    </div>
+                  ) : (
+                    <div className="space-y-1.5">
+                      {fieldPermissions.map(fp => (
+                        <div key={fp.id} className="bg-theme-card border border-theme-border rounded-lg p-2.5 flex items-center justify-between gap-2">
+                          <div className="flex items-center gap-2 text-[10px] font-sans min-w-0">
+                            <span className="bg-theme-accent/10 text-theme-accent border border-theme-accent/20 px-1.5 py-0.5 rounded font-bold uppercase shrink-0">{fp.entity_type}</span>
+                            <span className="font-mono text-theme-primary truncate">{fp.field_key}</span>
+                            <span className="text-theme-secondary shrink-0">for</span>
+                            <span className="font-bold text-theme-primary uppercase shrink-0">{fp.role.replace('_', ' ')}</span>
+                          </div>
+                          <div className="flex items-center gap-2 shrink-0">
+                            <span className={`text-[8px] font-bold uppercase px-1.5 py-0.5 rounded ${fp.can_read ? 'bg-success-soft text-success' : 'bg-theme-inset text-theme-secondary'}`}>Read</span>
+                            <span className={`text-[8px] font-bold uppercase px-1.5 py-0.5 rounded ${fp.can_write ? 'bg-success-soft text-success' : 'bg-theme-inset text-theme-secondary'}`}>Write</span>
+                            <button onClick={() => handleDeleteFieldPermission(fp.id)} className="p-1 text-theme-secondary/40 hover:text-danger rounded cursor-pointer bg-transparent border-none">
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </>
             )}
           </div>
         )}
@@ -809,6 +1552,304 @@ export default function AdminModule() {
                 >
                   Provision Attribute
                 </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: CREATE API KEY */}
+      {showApiKeyModal && (
+        <div className="fixed inset-0 z-[90] flex items-center justify-center p-4 bg-theme-primary/60 backdrop-blur-[2px] animate-fade-in">
+          <div className="bg-theme-card rounded-xl shadow-overlay border border-theme-border w-full max-w-sm overflow-hidden flex flex-col max-h-[85vh] animate-overlay-in">
+            <header className="bg-theme-inset px-5 py-4 border-b border-theme-border flex justify-between items-center shrink-0">
+              <h3 className="text-sm font-bold text-theme-primary">{newApiKeyRaw ? 'API Key Created' : 'Create API Key'}</h3>
+              <button
+                onClick={() => { setShowApiKeyModal(false); setNewApiKeyRaw(null); }}
+                className="text-theme-secondary hover:text-theme-primary font-bold text-xs cursor-pointer bg-transparent border-none"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </header>
+            {newApiKeyRaw ? (
+              <div className="p-5 space-y-4 text-xs text-left">
+                <div className="p-3 bg-danger-soft border border-danger/20 rounded-lg flex gap-2">
+                  <AlertTriangle className="w-4 h-4 text-danger shrink-0 mt-0.5" />
+                  <p className="text-danger text-[11px] leading-normal">This key is only shown once. Copy it now — you won't be able to view it again.</p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <code className="flex-1 bg-theme-base border border-theme-border rounded px-2.5 py-2 text-[11px] font-mono break-all select-all">{newApiKeyRaw}</code>
+                  <button
+                    type="button"
+                    onClick={() => { navigator.clipboard?.writeText(newApiKeyRaw); }}
+                    className="p-2 border border-theme-border rounded-lg hover:bg-theme-base cursor-pointer shrink-0"
+                    title="Copy to clipboard"
+                  >
+                    <Copy className="w-3.5 h-3.5 text-theme-secondary" />
+                  </button>
+                </div>
+                <button
+                  onClick={() => { setShowApiKeyModal(false); setNewApiKeyRaw(null); }}
+                  className="w-full px-4 py-2 bg-theme-accent hover:opacity-90 text-white rounded-lg font-semibold cursor-pointer"
+                >
+                  Done
+                </button>
+              </div>
+            ) : (
+              <form onSubmit={handleCreateApiKey} className="p-5 space-y-4 text-xs text-left overflow-y-auto">
+                <div className="space-y-1">
+                  <label className="block font-semibold text-theme-secondary">Key Name *</label>
+                  <input
+                    type="text" required placeholder="e.g. Zapier Integration"
+                    value={apiKeyForm.name}
+                    onChange={(e) => setApiKeyForm({ ...apiKeyForm, name: e.target.value })}
+                    className="w-full bg-theme-base text-theme-primary rounded border border-theme-border px-2.5 py-1.5 focus:ring-1 focus:ring-theme-accent focus:outline-none"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="block font-semibold text-theme-secondary">Scopes</label>
+                  <div className="flex gap-3">
+                    {(['read', 'write', 'admin'] as const).map(scope => (
+                      <label key={scope} className="flex items-center gap-1.5 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={apiKeyForm.scopes.includes(scope)}
+                          onChange={(e) => setApiKeyForm({
+                            ...apiKeyForm,
+                            scopes: e.target.checked ? [...apiKeyForm.scopes, scope] : apiKeyForm.scopes.filter(s => s !== scope),
+                          })}
+                        />
+                        <span className="capitalize">{scope}</span>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+                <div className="space-y-1">
+                  <label className="block font-semibold text-theme-secondary">Expires (optional)</label>
+                  <input
+                    type="date"
+                    value={apiKeyForm.expires_at}
+                    onChange={(e) => setApiKeyForm({ ...apiKeyForm, expires_at: e.target.value })}
+                    className="w-full bg-theme-base text-theme-primary rounded border border-theme-border px-2.5 py-1.5 focus:ring-1 focus:ring-theme-accent focus:outline-none"
+                  />
+                </div>
+                <div className="pt-4 border-t border-theme-border flex justify-end gap-2">
+                  <button type="button" onClick={() => setShowApiKeyModal(false)} className="px-4 py-2 border border-theme-border hover:bg-theme-base text-theme-primary rounded-lg font-semibold cursor-pointer">Cancel</button>
+                  <button type="submit" disabled={!apiKeyForm.name.trim()} className="px-4 py-2 bg-theme-accent hover:opacity-90 text-white rounded-lg font-semibold cursor-pointer disabled:opacity-50">Create Key</button>
+                </div>
+              </form>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: CREATE WEBHOOK */}
+      {showWebhookModal && (
+        <div className="fixed inset-0 z-[90] flex items-center justify-center p-4 bg-theme-primary/60 backdrop-blur-[2px] animate-fade-in">
+          <div className="bg-theme-card rounded-xl shadow-overlay border border-theme-border w-full max-w-sm overflow-hidden flex flex-col max-h-[85vh] animate-overlay-in">
+            <header className="bg-theme-inset px-5 py-4 border-b border-theme-border flex justify-between items-center shrink-0">
+              <h3 className="text-sm font-bold text-theme-primary">Create Webhook</h3>
+              <button onClick={() => setShowWebhookModal(false)} className="text-theme-secondary hover:text-theme-primary font-bold text-xs cursor-pointer bg-transparent border-none">
+                <X className="w-4 h-4" />
+              </button>
+            </header>
+            <form onSubmit={handleCreateWebhook} className="p-5 space-y-4 text-xs text-left overflow-y-auto">
+              <div className="space-y-1">
+                <label className="block font-semibold text-theme-secondary">Name *</label>
+                <input
+                  type="text" required placeholder="e.g. Slack Deal Alerts"
+                  value={webhookForm.name}
+                  onChange={(e) => setWebhookForm({ ...webhookForm, name: e.target.value })}
+                  className="w-full bg-theme-base text-theme-primary rounded border border-theme-border px-2.5 py-1.5 focus:ring-1 focus:ring-theme-accent focus:outline-none"
+                />
+              </div>
+              <div className="space-y-1">
+                <label className="block font-semibold text-theme-secondary">Endpoint URL *</label>
+                <input
+                  type="url" required placeholder="https://example.com/webhooks/boutinly"
+                  value={webhookForm.url}
+                  onChange={(e) => setWebhookForm({ ...webhookForm, url: e.target.value })}
+                  className="w-full bg-theme-base text-theme-primary rounded border border-theme-border px-2.5 py-1.5 focus:ring-1 focus:ring-theme-accent focus:outline-none"
+                />
+              </div>
+              <div className="space-y-1">
+                <label className="block font-semibold text-theme-secondary">Events * ({webhookForm.events.length} selected)</label>
+                <div className="max-h-40 overflow-y-auto border border-theme-border rounded-lg p-2 space-y-1 bg-theme-base">
+                  {availableEvents.map(evt => (
+                    <label key={evt} className="flex items-center gap-1.5 cursor-pointer text-[11px] font-mono">
+                      <input
+                        type="checkbox"
+                        checked={webhookForm.events.includes(evt)}
+                        onChange={(e) => setWebhookForm({
+                          ...webhookForm,
+                          events: e.target.checked ? [...webhookForm.events, evt] : webhookForm.events.filter(ev => ev !== evt),
+                        })}
+                      />
+                      {evt}
+                    </label>
+                  ))}
+                </div>
+              </div>
+              <div className="pt-4 border-t border-theme-border flex justify-end gap-2">
+                <button type="button" onClick={() => setShowWebhookModal(false)} className="px-4 py-2 border border-theme-border hover:bg-theme-base text-theme-primary rounded-lg font-semibold cursor-pointer">Cancel</button>
+                <button
+                  type="submit"
+                  disabled={!webhookForm.name.trim() || !webhookForm.url.trim() || webhookForm.events.length === 0}
+                  className="px-4 py-2 bg-theme-accent hover:opacity-90 text-white rounded-lg font-semibold cursor-pointer disabled:opacity-50"
+                >
+                  Create Webhook
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: ASSIGN QUOTA */}
+      {showQuotaModal && (
+        <div className="fixed inset-0 z-[90] flex items-center justify-center p-4 bg-theme-primary/60 backdrop-blur-[2px] animate-fade-in">
+          <div className="bg-theme-card rounded-xl shadow-overlay border border-theme-border w-full max-w-sm overflow-hidden flex flex-col max-h-[85vh] animate-overlay-in">
+            <header className="bg-theme-inset px-5 py-4 border-b border-theme-border flex justify-between items-center shrink-0">
+              <h3 className="text-sm font-bold text-theme-primary">Assign Sales Quota</h3>
+              <button onClick={() => setShowQuotaModal(false)} className="text-theme-secondary hover:text-theme-primary font-bold text-xs cursor-pointer bg-transparent border-none">
+                <X className="w-4 h-4" />
+              </button>
+            </header>
+            <form onSubmit={handleCreateQuota} className="p-5 space-y-4 text-xs text-left overflow-y-auto">
+              <div className="space-y-1">
+                <label className="block font-semibold text-theme-secondary">Rep *</label>
+                <select
+                  required value={quotaForm.user_id}
+                  onChange={(e) => setQuotaForm({ ...quotaForm, user_id: e.target.value })}
+                  className="w-full bg-theme-base text-theme-primary border border-theme-border rounded px-2.5 py-1.5 focus:outline-none focus:ring-1 focus:ring-theme-accent"
+                >
+                  <option value="" className="bg-theme-card text-theme-primary">Select a user…</option>
+                  {users.map(u => (
+                    <option key={u.id} value={u.id} className="bg-theme-card text-theme-primary">{u.name}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <label className="block font-semibold text-theme-secondary">Period</label>
+                  <select
+                    value={quotaForm.period}
+                    onChange={(e) => setQuotaForm({ ...quotaForm, period: e.target.value as any })}
+                    className="w-full bg-theme-base text-theme-primary border border-theme-border rounded px-2.5 py-1.5 focus:outline-none focus:ring-1 focus:ring-theme-accent"
+                  >
+                    <option value="monthly" className="bg-theme-card text-theme-primary">Monthly</option>
+                    <option value="quarterly" className="bg-theme-card text-theme-primary">Quarterly</option>
+                    <option value="annual" className="bg-theme-card text-theme-primary">Annual</option>
+                  </select>
+                </div>
+                <div className="space-y-1">
+                  <label className="block font-semibold text-theme-secondary">Currency</label>
+                  <input
+                    type="text" value={quotaForm.currency} maxLength={3}
+                    onChange={(e) => setQuotaForm({ ...quotaForm, currency: e.target.value.toUpperCase() })}
+                    className="w-full bg-theme-base text-theme-primary rounded border border-theme-border px-2.5 py-1.5 focus:ring-1 focus:ring-theme-accent focus:outline-none uppercase"
+                  />
+                </div>
+              </div>
+              <div className="space-y-1">
+                <label className="block font-semibold text-theme-secondary">Target Amount *</label>
+                <input
+                  type="number" required min={0} step="0.01" placeholder="e.g. 150000"
+                  value={quotaForm.amount}
+                  onChange={(e) => setQuotaForm({ ...quotaForm, amount: e.target.value })}
+                  className="w-full bg-theme-base text-theme-primary rounded border border-theme-border px-2.5 py-1.5 focus:ring-1 focus:ring-theme-accent focus:outline-none"
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <label className="block font-semibold text-theme-secondary">Fiscal Year</label>
+                  <input
+                    type="number" value={quotaForm.fiscal_year}
+                    onChange={(e) => setQuotaForm({ ...quotaForm, fiscal_year: Number(e.target.value) })}
+                    className="w-full bg-theme-base text-theme-primary rounded border border-theme-border px-2.5 py-1.5 focus:ring-1 focus:ring-theme-accent focus:outline-none"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="block font-semibold text-theme-secondary">Fiscal Period</label>
+                  <input
+                    type="number" min={1} value={quotaForm.fiscal_period}
+                    onChange={(e) => setQuotaForm({ ...quotaForm, fiscal_period: Number(e.target.value) })}
+                    className="w-full bg-theme-base text-theme-primary rounded border border-theme-border px-2.5 py-1.5 focus:ring-1 focus:ring-theme-accent focus:outline-none"
+                  />
+                </div>
+              </div>
+              <div className="pt-4 border-t border-theme-border flex justify-end gap-2">
+                <button type="button" onClick={() => setShowQuotaModal(false)} className="px-4 py-2 border border-theme-border hover:bg-theme-base text-theme-primary rounded-lg font-semibold cursor-pointer">Cancel</button>
+                <button
+                  type="submit"
+                  disabled={!quotaForm.user_id || !quotaForm.amount}
+                  className="px-4 py-2 bg-theme-accent hover:opacity-90 text-white rounded-lg font-semibold cursor-pointer disabled:opacity-50"
+                >
+                  Save Quota
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: ADD FIELD PERMISSION RULE */}
+      {showFieldPermModal && (
+        <div className="fixed inset-0 z-[90] flex items-center justify-center p-4 bg-theme-primary/60 backdrop-blur-[2px] animate-fade-in">
+          <div className="bg-theme-card rounded-xl shadow-overlay border border-theme-border w-full max-w-sm overflow-hidden flex flex-col max-h-[85vh] animate-overlay-in">
+            <header className="bg-theme-inset px-5 py-4 border-b border-theme-border flex justify-between items-center shrink-0">
+              <h3 className="text-sm font-bold text-theme-primary">Add Field Permission Rule</h3>
+              <button onClick={() => setShowFieldPermModal(false)} className="text-theme-secondary hover:text-theme-primary font-bold text-xs cursor-pointer bg-transparent border-none">
+                <X className="w-4 h-4" />
+              </button>
+            </header>
+            <form onSubmit={handleCreateFieldPermission} className="p-5 space-y-4 text-xs text-left overflow-y-auto">
+              <div className="space-y-1">
+                <label className="block font-semibold text-theme-secondary">Entity Type</label>
+                <select
+                  value={fieldPermForm.entity_type}
+                  onChange={(e) => setFieldPermForm({ ...fieldPermForm, entity_type: e.target.value as any })}
+                  className="w-full bg-theme-base text-theme-primary border border-theme-border rounded px-2.5 py-1.5 focus:outline-none focus:ring-1 focus:ring-theme-accent"
+                >
+                  <option value="contact" className="bg-theme-card text-theme-primary">Contact</option>
+                  <option value="account" className="bg-theme-card text-theme-primary">Account</option>
+                  <option value="deal" className="bg-theme-card text-theme-primary">Deal</option>
+                </select>
+              </div>
+              <div className="space-y-1">
+                <label className="block font-semibold text-theme-secondary">Field Key *</label>
+                <input
+                  type="text" required placeholder="e.g. arr"
+                  value={fieldPermForm.field_key}
+                  onChange={(e) => setFieldPermForm({ ...fieldPermForm, field_key: e.target.value })}
+                  className="w-full bg-theme-base text-theme-primary rounded border border-theme-border px-2.5 py-1.5 focus:ring-1 focus:ring-theme-accent focus:outline-none"
+                />
+              </div>
+              <div className="space-y-1">
+                <label className="block font-semibold text-theme-secondary">Role</label>
+                <select
+                  value={fieldPermForm.role}
+                  onChange={(e) => setFieldPermForm({ ...fieldPermForm, role: e.target.value as UserRole })}
+                  className="w-full bg-theme-base text-theme-primary border border-theme-border rounded px-2.5 py-1.5 focus:outline-none focus:ring-1 focus:ring-theme-accent"
+                >
+                  <option value={UserRole.MANAGER} className="bg-theme-card text-theme-primary">Manager</option>
+                  <option value={UserRole.SALES_REP} className="bg-theme-card text-theme-primary">Sales Rep</option>
+                  <option value={UserRole.VIEWER} className="bg-theme-card text-theme-primary">Viewer</option>
+                </select>
+              </div>
+              <div className="flex items-center gap-4">
+                <label className="flex items-center gap-1.5 cursor-pointer font-semibold text-theme-secondary">
+                  <input type="checkbox" checked={fieldPermForm.can_read} onChange={(e) => setFieldPermForm({ ...fieldPermForm, can_read: e.target.checked })} />
+                  Can Read
+                </label>
+                <label className="flex items-center gap-1.5 cursor-pointer font-semibold text-theme-secondary">
+                  <input type="checkbox" checked={fieldPermForm.can_write} onChange={(e) => setFieldPermForm({ ...fieldPermForm, can_write: e.target.checked })} />
+                  Can Write
+                </label>
+              </div>
+              <div className="pt-4 border-t border-theme-border flex justify-end gap-2">
+                <button type="button" onClick={() => setShowFieldPermModal(false)} className="px-4 py-2 border border-theme-border hover:bg-theme-base text-theme-primary rounded-lg font-semibold cursor-pointer">Cancel</button>
+                <button type="submit" disabled={!fieldPermForm.field_key.trim()} className="px-4 py-2 bg-theme-accent hover:opacity-90 text-white rounded-lg font-semibold cursor-pointer disabled:opacity-50">Save Rule</button>
               </div>
             </form>
           </div>

@@ -604,91 +604,94 @@ export default function ContactsModule() {
     <div className="flex-1 flex overflow-hidden bg-theme-base text-theme-primary">
       
       {/* LEFT COLUMN: LIST PANEL */}
-      <div className="w-1/2 flex flex-col border-r border-theme-border bg-theme-card h-full select-none">
+      <div className={`${selectedContactId || selectedAccountId ? 'hidden lg:flex' : 'flex'} w-full lg:w-1/2 min-w-0 flex-col border-r border-theme-border bg-theme-card h-full select-none`}>
         
         {/* Module Header Toolbar */}
-        <div className="p-4 border-b border-theme-border space-y-3 shrink-0">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2 bg-theme-base p-0.5 rounded-lg border border-theme-border text-xs font-semibold">
+        <div className="p-3 sm:p-4 border-b border-theme-border space-y-3 shrink-0">
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex items-center gap-0.5 bg-theme-base p-0.5 rounded-lg border border-theme-border text-xs font-semibold min-w-0 overflow-x-auto scrollbar-none">
               <button
                 onClick={() => { setActiveTab('contacts'); setSelectedTag('All'); }}
-                className={`px-3 py-1.5 rounded-md cursor-pointer transition-all flex items-center gap-1.5 ${
-                  activeTab === 'contacts' ? 'bg-theme-card text-theme-primary shadow-xs border border-theme-border/50' : 'text-theme-secondary hover:text-theme-primary'
+                className={`px-2.5 sm:px-3 py-1.5 rounded-md cursor-pointer transition-all flex items-center gap-1.5 shrink-0 whitespace-nowrap ${
+                  activeTab === 'contacts' ? 'bg-theme-card text-theme-primary shadow-card border border-theme-border/50' : 'text-theme-secondary hover:text-theme-primary'
                 }`}
               >
-                <User className="w-3.5 h-3.5 text-theme-accent" /> Contacts ({filteredContacts.length})
+                <User className="w-3.5 h-3.5 text-theme-accent" /> Contacts <span className="text-theme-secondary font-medium">({filteredContacts.length})</span>
               </button>
               <button
                 onClick={() => { setActiveTab('accounts'); setSelectedTag('All'); }}
-                className={`px-3 py-1.5 rounded-md cursor-pointer transition-all flex items-center gap-1.5 ${
-                  activeTab === 'accounts' ? 'bg-theme-card text-theme-primary shadow-xs border border-theme-border/50' : 'text-theme-secondary hover:text-theme-primary'
+                className={`px-2.5 sm:px-3 py-1.5 rounded-md cursor-pointer transition-all flex items-center gap-1.5 shrink-0 whitespace-nowrap ${
+                  activeTab === 'accounts' ? 'bg-theme-card text-theme-primary shadow-card border border-theme-border/50' : 'text-theme-secondary hover:text-theme-primary'
                 }`}
               >
-                <Building2 className="w-3.5 h-3.5 text-theme-accent" /> Accounts ({filteredAccounts.length})
+                <Building2 className="w-3.5 h-3.5 text-theme-accent" /> Accounts <span className="text-theme-secondary font-medium">({filteredAccounts.length})</span>
               </button>
             </div>
 
-            {/* View Toggle */}
-            <div className="flex items-center gap-0.5 bg-theme-base border border-theme-border rounded-lg p-0.5 mr-2">
-              <button onClick={() => setViewMode('cards')}
-                className={`p-1 rounded cursor-pointer ${viewMode === 'cards' ? 'bg-theme-card text-theme-primary shadow-xs' : 'text-theme-secondary hover:text-theme-primary'}`}
-                title="Card view"><LayoutGrid className="w-3.5 h-3.5" /></button>
-              <button onClick={() => setViewMode('table')}
-                className={`p-1 rounded cursor-pointer ${viewMode === 'table' ? 'bg-theme-card text-theme-primary shadow-xs' : 'text-theme-secondary hover:text-theme-primary'}`}
-                title="Table view"><List className="w-3.5 h-3.5" /></button>
-            </div>
-
-            {/* Quick Actions */}
-            {!isReadOnly && (
-              <div className="flex gap-2">
-                {activeTab === 'contacts' && (
-                  <button
-                    onClick={() => handleExportContacts()}
-                    disabled={filteredContacts.length === 0}
-                    className="p-1.5 rounded-lg border border-theme-border text-theme-secondary hover:bg-theme-base transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
-                    title="Export contacts to CSV"
-                    aria-label="Export contacts to CSV"
-                  >
-                    <Download className="w-4 h-4" />
-                  </button>
-                )}
-                <button
-                  onClick={() => setShowImportModal(true)}
-                  className="p-1.5 rounded-lg border border-theme-border text-theme-secondary hover:bg-theme-base transition-colors cursor-pointer"
-                  title="Bulk CSV Import"
-                  aria-label="Bulk CSV import"
-                >
-                  <Upload className="w-4 h-4" />
-                </button>
-                {activeTab === 'contacts' && (
-                  <button
-                    onClick={() => setShowMergeModal(true)}
-                    className="p-1.5 rounded-lg border border-theme-border text-theme-secondary hover:bg-theme-base transition-colors cursor-pointer"
-                    title="Merge Duplicates"
-                  >
-                    <Shuffle className="w-4 h-4" />
-                  </button>
-                )}
-                <button
-                  onClick={() => activeTab === 'contacts' ? setShowCreateContact(true) : setShowCreateAccount(true)}
-                  className="bg-theme-accent hover:opacity-90 text-white p-1.5 rounded-lg flex items-center justify-center transition-colors shadow-xs cursor-pointer"
-                >
-                  <Plus className="w-4 h-4" />
-                </button>
+            <div className="flex items-center gap-1.5 shrink-0">
+              {/* View Toggle */}
+              <div className="flex items-center gap-0.5 bg-theme-base border border-theme-border rounded-lg p-0.5">
+                <button onClick={() => setViewMode('cards')}
+                  className={`p-1.5 rounded-md cursor-pointer ${viewMode === 'cards' ? 'bg-theme-card text-theme-primary shadow-card' : 'text-theme-secondary hover:text-theme-primary'}`}
+                  title="Card view"><LayoutGrid className="w-3.5 h-3.5" /></button>
+                <button onClick={() => setViewMode('table')}
+                  className={`p-1.5 rounded-md cursor-pointer ${viewMode === 'table' ? 'bg-theme-card text-theme-primary shadow-card' : 'text-theme-secondary hover:text-theme-primary'}`}
+                  title="Table view"><List className="w-3.5 h-3.5" /></button>
               </div>
-            )}
+
+              {/* Quick Actions */}
+              {!isReadOnly && (
+                <div className="flex items-center gap-1">
+                  {activeTab === 'contacts' && (
+                    <button
+                      onClick={() => handleExportContacts()}
+                      disabled={filteredContacts.length === 0}
+                      className="p-1.5 rounded-lg border border-theme-border text-theme-secondary hover:bg-theme-hover transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+                      title="Export contacts to CSV"
+                      aria-label="Export contacts to CSV"
+                    >
+                      <Download className="w-4 h-4" />
+                    </button>
+                  )}
+                  <button
+                    onClick={() => setShowImportModal(true)}
+                    className="p-1.5 rounded-lg border border-theme-border text-theme-secondary hover:bg-theme-hover transition-colors cursor-pointer"
+                    title="Bulk CSV Import"
+                    aria-label="Bulk CSV import"
+                  >
+                    <Upload className="w-4 h-4" />
+                  </button>
+                  {activeTab === 'contacts' && (
+                    <button
+                      onClick={() => setShowMergeModal(true)}
+                      className="p-1.5 rounded-lg border border-theme-border text-theme-secondary hover:bg-theme-hover transition-colors cursor-pointer"
+                      title="Merge Duplicates"
+                    >
+                      <Shuffle className="w-4 h-4" />
+                    </button>
+                  )}
+                  <button
+                    onClick={() => activeTab === 'contacts' ? setShowCreateContact(true) : setShowCreateAccount(true)}
+                    className="bg-theme-accent hover:bg-theme-accent-strong text-white p-1.5 rounded-lg flex items-center justify-center transition-colors shadow-card cursor-pointer"
+                    aria-label={activeTab === 'contacts' ? 'Create contact' : 'Create account'}
+                  >
+                    <Plus className="w-4 h-4" />
+                  </button>
+                </div>
+              )}
+            </div>
           </div>
 
           {/* Search bar, saved views & Tag segment filter */}
-          <div className="flex gap-2">
-            <div className="relative flex-1">
-              <Search className="w-3.5 h-3.5 absolute left-3 top-3 text-theme-secondary" />
+          <div className="flex gap-2 items-center">
+            <div className="relative flex-1 min-w-0">
+              <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-theme-secondary pointer-events-none" />
               <input
                 type="text"
-                placeholder={activeTab === 'contacts' ? 'Search contacts by name, email, title...' : 'Search accounts by name, domain, industry...'}
+                placeholder={activeTab === 'contacts' ? 'Search contacts…' : 'Search accounts…'}
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                className="w-full bg-theme-base text-theme-primary border border-theme-border rounded-lg pl-9 pr-4 py-2 text-xs focus:ring-1 focus:ring-theme-accent focus:outline-none"
+                className="w-full bg-theme-base text-theme-primary border border-theme-border rounded-lg pl-9 pr-3 h-9 text-xs focus:ring-1 focus:ring-theme-accent focus:outline-none"
               />
             </div>
             <ViewSwitcher
@@ -799,6 +802,7 @@ export default function ContactsModule() {
                 selectable={!isReadOnly}
                 selectedKeys={selectedRowKeys}
                 onSelectionChange={setSelectedRowKeys}
+                onRowClick={(c: any) => setSelectedContactId(c.id)}
               />
             ) : (
               filteredContacts.map(c => {
@@ -880,51 +884,60 @@ export default function ContactsModule() {
 
 
       {/* RIGHT COLUMN: DETAILS & TIMELINE PANEL */}
-      <div className="w-1/2 flex flex-col bg-theme-base h-full overflow-hidden print-area">
+      <div className={`${selectedContactId || selectedAccountId ? 'flex' : 'hidden lg:flex'} w-full lg:w-1/2 min-w-0 flex-col bg-theme-base h-full overflow-hidden print-area`}>
         {activeTab === 'contacts' ? (
           activeContact ? (
             <div className="flex-1 flex flex-col h-full overflow-hidden">
               
               {/* Profile Card Header */}
-              <div className="bg-theme-card p-5 border-b border-theme-border shrink-0">
-                <div className="flex justify-between items-start">
-                  <div className="flex items-center gap-3">
-                    <div className="w-12 h-12 bg-theme-accent/15 text-theme-accent font-bold rounded-full flex items-center justify-center uppercase shadow-xs">
+              <div className="bg-theme-card p-4 sm:p-5 border-b border-theme-border shrink-0">
+                <button
+                  type="button"
+                  onClick={() => setSelectedContactId(null)}
+                  className="lg:hidden mb-3 text-xs font-semibold text-theme-accent hover:text-theme-accent-strong cursor-pointer bg-transparent border-none px-0"
+                >
+                  ← Back to list
+                </button>
+                <div className="flex justify-between items-start gap-3">
+                  <div className="flex items-center gap-3 min-w-0">
+                    <div className="w-12 h-12 shrink-0 bg-theme-accent/15 text-theme-accent font-bold rounded-full flex items-center justify-center uppercase shadow-card">
                       {activeContact.first_name[0]}{activeContact.last_name[0]}
                     </div>
-                    <div>
-                      <h3 className="text-base font-bold text-theme-primary">{activeContact.first_name} {activeContact.last_name}</h3>
+                    <div className="min-w-0">
+                      <h3 className="text-base font-bold text-theme-primary truncate">{activeContact.first_name} {activeContact.last_name}</h3>
                       <p className="text-xs text-theme-secondary">{activeContact.title} at <span className="font-bold text-theme-primary">
                         {scopedAccounts.find(a => a.id === activeContact.account_id)?.name || 'Unassigned'}
                       </span></p>
                     </div>
                   </div>
 
-                  {!isReadOnly && (
+                  <div className="flex items-center gap-1 shrink-0">
+                    {!isReadOnly && (
+                      <button
+                        onClick={() => setConfirmDeleteContactId(activeContact.id)}
+                        className="p-1.5 text-theme-secondary hover:text-theme-accent rounded-md hover:bg-theme-hover transition-all cursor-pointer bg-transparent border-none"
+                        aria-label={`Delete contact ${activeContact.first_name} ${activeContact.last_name}`}
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    )}
                     <button
-                      onClick={() => setConfirmDeleteContactId(activeContact.id)}
-                      className="p-1.5 text-theme-secondary hover:text-theme-accent rounded hover:bg-theme-base transition-all cursor-pointer bg-transparent border-none"
-                      aria-label={`Delete contact ${activeContact.first_name} ${activeContact.last_name}`}
+                      onClick={() => setFullContactDetail(activeContact.id)}
+                      className="p-1.5 text-theme-secondary hover:text-theme-accent rounded-md hover:bg-theme-hover transition-all cursor-pointer bg-transparent border-none"
+                      aria-label={`View full record for ${activeContact.first_name} ${activeContact.last_name}`}
+                      title="View Full Record"
                     >
-                      <Trash2 className="w-4 h-4" />
+                      <Maximize2 className="w-4 h-4" />
                     </button>
-                  )}
-                  <button
-                    onClick={() => setFullContactDetail(activeContact.id)}
-                    className="p-1.5 text-theme-secondary hover:text-theme-accent rounded hover:bg-theme-base transition-all cursor-pointer bg-transparent border-none"
-                    aria-label={`View full record for ${activeContact.first_name} ${activeContact.last_name}`}
-                    title="View Full Record"
-                  >
-                    <Maximize2 className="w-4 h-4" />
-                  </button>
-                  <button
-                    onClick={printRecord}
-                    className="p-1.5 text-theme-secondary hover:text-theme-primary rounded hover:bg-theme-base transition-all cursor-pointer bg-transparent border-none"
-                    aria-label={`Print or save ${activeContact.first_name} ${activeContact.last_name} as PDF`}
-                    title="Print / Save as PDF"
-                  >
-                    <Printer className="w-4 h-4" />
-                  </button>
+                    <button
+                      onClick={printRecord}
+                      className="p-1.5 text-theme-secondary hover:text-theme-primary rounded-md hover:bg-theme-hover transition-all cursor-pointer bg-transparent border-none"
+                      aria-label={`Print or save ${activeContact.first_name} ${activeContact.last_name} as PDF`}
+                      title="Print / Save as PDF"
+                    >
+                      <Printer className="w-4 h-4" />
+                    </button>
+                  </div>
                 </div>
 
                 <div className="grid grid-cols-2 gap-3 mt-4 text-[11px] text-theme-secondary border-t border-theme-border pt-3 font-sans">
@@ -1043,39 +1056,48 @@ export default function ContactsModule() {
           /* ACCOUNTS DETAILS VIEW */
           activeAccount ? (
             <div className="flex-1 flex flex-col h-full overflow-hidden">
-              <div className="bg-theme-card p-5 border-b border-theme-border shrink-0">
-                <div className="flex justify-between items-start">
-                  <div className="flex items-center gap-3">
-                    <div className="w-12 h-12 bg-theme-base rounded-lg border border-theme-border flex items-center justify-center text-theme-secondary shadow-2xs">
+              <div className="bg-theme-card p-4 sm:p-5 border-b border-theme-border shrink-0">
+                <button
+                  type="button"
+                  onClick={() => setSelectedAccountId(null)}
+                  className="lg:hidden mb-3 text-xs font-semibold text-theme-accent hover:text-theme-accent-strong cursor-pointer bg-transparent border-none px-0"
+                >
+                  ← Back to list
+                </button>
+                <div className="flex justify-between items-start gap-3">
+                  <div className="flex items-center gap-3 min-w-0">
+                    <div className="w-12 h-12 shrink-0 bg-theme-base rounded-lg border border-theme-border flex items-center justify-center text-theme-secondary shadow-card">
                       <Building2 className="w-6 h-6 text-theme-accent" />
                     </div>
-                    <div>
-                      <h3 className="text-base font-bold text-theme-primary">{activeAccount.name}</h3>
-                      <p className="text-xs text-theme-secondary">{activeAccount.industry} • <span className="font-semibold text-theme-primary">{activeAccount.size} employees</span></p>
+                    <div className="min-w-0">
+                      <h3 className="text-base font-bold text-theme-primary truncate">{activeAccount.name}</h3>
+                      <p className="text-xs text-theme-secondary truncate">{activeAccount.industry} • <span className="font-semibold text-theme-primary">{activeAccount.size} employees</span></p>
                     </div>
                   </div>
 
-                  {!isReadOnly && (
+                  <div className="flex items-center gap-1 shrink-0">
+                    {!isReadOnly && (
+                      <button
+                        onClick={() => {
+                          if (confirm('Are you sure you want to soft-delete this account?')) {
+                            deleteAccount(activeAccount.id);
+                            setSelectedAccountId(null);
+                          }
+                        }}
+                        className="p-1.5 text-theme-secondary hover:text-theme-accent rounded-md hover:bg-theme-hover transition-all cursor-pointer"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    )}
                     <button
-                      onClick={() => {
-                        if (confirm('Are you sure you want to soft-delete this account?')) {
-                          deleteAccount(activeAccount.id);
-                          setSelectedAccountId(null);
-                        }
-                      }}
-                      className="p-1.5 text-theme-secondary hover:text-theme-accent rounded hover:bg-theme-base transition-all cursor-pointer"
+                      onClick={() => setFullAccountDetail(activeAccount.id)}
+                      className="p-1.5 text-theme-secondary hover:text-theme-accent rounded-md hover:bg-theme-hover transition-all cursor-pointer bg-transparent border-none"
+                      aria-label={`View full record for ${activeAccount.name}`}
+                      title="View Full Record"
                     >
-                      <Trash2 className="w-4 h-4" />
+                      <Maximize2 className="w-4 h-4" />
                     </button>
-                  )}
-                  <button
-                    onClick={() => setFullAccountDetail(activeAccount.id)}
-                    className="p-1.5 text-theme-secondary hover:text-theme-accent rounded hover:bg-theme-base transition-all cursor-pointer bg-transparent border-none"
-                    aria-label={`View full record for ${activeAccount.name}`}
-                    title="View Full Record"
-                  >
-                    <Maximize2 className="w-4 h-4" />
-                  </button>
+                  </div>
                 </div>
 
                 <div className="grid grid-cols-2 gap-3 mt-4 text-[11px] text-theme-secondary border-t border-theme-border pt-3">

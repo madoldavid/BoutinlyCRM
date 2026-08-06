@@ -67,10 +67,13 @@ export interface Account {
   website: string;
   arr: number;
   owner_id: string; // Assigned User ID
+  parent_account_id?: string | null;
   tags: string[];
   custom_fields: Record<string, any>;
   created_at: string;
 }
+
+export type ForecastCategory = 'pipeline' | 'best_case' | 'commit' | 'omitted' | 'closed';
 
 export interface Pipeline {
   id: string;
@@ -108,6 +111,7 @@ export interface Deal {
   value: number;
   currency: string;
   probability?: number; // Optional override
+  forecast_category?: ForecastCategory;
   close_date: string;
   stage_entered_at: string;
   won_at?: string;
@@ -244,4 +248,100 @@ export interface AuditLog {
   ip_address: string;
   user_agent: string;
   created_at: string;
+}
+
+export interface ApiKey {
+  id: string;
+  organization_id?: string;
+  name: string;
+  key_prefix: string;
+  scopes: string[];
+  created_by_id?: string;
+  last_used_at?: string;
+  expires_at?: string | null;
+  revoked_at?: string | null;
+  created_at: string;
+  /** Only returned once at creation time */
+  raw_key?: string;
+}
+
+export interface Webhook {
+  id: string;
+  organization_id?: string;
+  name: string;
+  url: string;
+  secret: string;
+  events: string[];
+  status: 'active' | 'paused' | 'disabled';
+  created_by_id?: string;
+  last_triggered_at?: string;
+  failure_count: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface WebhookDelivery {
+  id: string;
+  organization_id?: string;
+  webhook_id: string;
+  event: string;
+  payload: Record<string, unknown>;
+  response_status?: number;
+  response_body?: string;
+  success: boolean;
+  attempt: number;
+  created_at: string;
+}
+
+export interface Quota {
+  id: string;
+  organization_id?: string;
+  user_id?: string | null;
+  team_id?: string | null;
+  period: 'monthly' | 'quarterly' | 'annual';
+  amount: number;
+  currency: string;
+  fiscal_year: number;
+  fiscal_period: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export type ApprovalStatus = 'pending' | 'approved' | 'rejected' | 'cancelled';
+
+export interface ApprovalRequest {
+  id: string;
+  organization_id?: string;
+  entity_type: 'deal' | 'discount' | 'stage_change';
+  entity_id: string;
+  requested_by_id: string;
+  approver_id?: string | null;
+  status: ApprovalStatus;
+  title: string;
+  reason?: string;
+  payload: Record<string, unknown>;
+  decision_note?: string;
+  decided_at?: string;
+  created_at: string;
+}
+
+export interface OrgSecurityPolicy {
+  organization_id: string;
+  ip_allowlist: string[];
+  session_idle_minutes: number;
+  max_sessions_per_user: number;
+  enforce_mfa: boolean;
+  enforce_sso: boolean;
+  password_min_length: number;
+  updated_at: string;
+}
+
+export interface FieldPermission {
+  id: string;
+  organization_id?: string;
+  entity_type: 'contact' | 'account' | 'deal';
+  field_key: string;
+  role: UserRole;
+  can_read: boolean;
+  can_write: boolean;
 }

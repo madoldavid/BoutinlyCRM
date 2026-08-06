@@ -185,7 +185,7 @@ function DashboardLayout() {
             <div className="flex items-center gap-2">
               <button
                 onClick={() => window.dispatchEvent(new Event('boutinly:open-palette'))}
-                className="flex items-center gap-2 text-sm text-theme-primary bg-theme-inset hover:bg-theme-hover border border-theme-border rounded-lg px-3 h-8.5 cursor-pointer transition-colors w-40 sm:w-52"
+                className="flex items-center gap-2 text-sm text-theme-primary bg-theme-inset hover:bg-theme-hover border border-theme-border rounded-lg px-3 h-9 cursor-pointer transition-colors w-36 sm:w-52 min-w-0"
                 aria-label="Open global search (Ctrl+K)"
               >
                 <Search className="w-3.5 h-3.5 shrink-0 text-theme-secondary" />
@@ -194,7 +194,7 @@ function DashboardLayout() {
               </button>
               <button
                 onClick={dispatchNewRecord}
-                className="hidden sm:flex items-center gap-1.5 text-xs font-semibold text-white bg-theme-accent hover:bg-theme-accent-strong rounded-lg px-3.5 h-8.5 cursor-pointer transition-colors shadow-card"
+                className="hidden sm:inline-flex items-center gap-1.5 text-xs font-semibold text-white bg-theme-accent hover:bg-theme-accent-strong rounded-lg px-3.5 h-9 cursor-pointer transition-colors shadow-card shrink-0"
                 aria-label="Create new record (N)"
                 title="New record (N)"
               >

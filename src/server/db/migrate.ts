@@ -31,7 +31,7 @@ export class MigrationRunner {
     }
 
     const files = fs.readdirSync(this.migrationsDir)
-      .filter(f => f.endsWith('.sql'))
+      .filter(f => f.endsWith('.sql') && !f.endsWith('.down.sql'))
       .sort();
 
     const applied = await this.getAppliedMigrations();

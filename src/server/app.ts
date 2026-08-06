@@ -38,6 +38,7 @@ import { registerTasksRoutes } from './routes/tasks.routes.js';
 import { registerFlagsRoutes } from './routes/flags.routes.js';
 import { registerInsightsRoutes } from './routes/insights.routes.js';
 import { registerPipelinesRoutes } from './routes/pipelines.routes.js';
+import { registerEnterpriseRoutes } from './routes/enterprise.routes.js';
 import { FeatureFlagService } from './services/featureFlags.js';
 
 interface CreateAppOptions {
@@ -219,6 +220,7 @@ export function createApp({ config, logger, repository, emailService, fileServic
   registerFlagsRoutes(app, config, repository, flags);
   registerPipelinesRoutes(app, config, repository);
   registerInsightsRoutes(app, config, repository, flags);
+  registerEnterpriseRoutes(app, config, repository);
 
   app.use(notFoundHandler);
   app.use(createErrorHandler(logger));

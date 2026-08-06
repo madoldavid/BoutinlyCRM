@@ -182,44 +182,44 @@ export default function EmailsModule() {
     <div className="flex-1 flex overflow-hidden bg-theme-base text-theme-primary">
       
       {/* LEFT COLUMN: MODULE WORKSPACE */}
-      <div className="w-1/2 flex flex-col border-r border-theme-border bg-theme-card h-full select-none">
+      <div className="w-full lg:w-1/2 min-w-0 flex flex-col border-r border-theme-border bg-theme-card h-full select-none">
         
         {/* Module Header Navigation */}
-        <div className="p-4 border-b border-theme-border space-y-3.5 shrink-0">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2 bg-theme-base p-0.5 rounded-lg border border-theme-border text-xs font-semibold">
+        <div className="p-3 sm:p-4 border-b border-theme-border space-y-3 shrink-0">
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex items-center gap-0.5 bg-theme-base p-0.5 rounded-lg border border-theme-border text-xs font-semibold min-w-0 overflow-x-auto scrollbar-none">
               <button
                 onClick={() => setActiveSubView('compose')}
-                className={`px-3 py-1.5 rounded-md cursor-pointer transition-all flex items-center gap-1.5 ${
-                  activeSubView === 'compose' ? 'bg-theme-card text-theme-primary shadow-xs border border-theme-border/50' : 'text-theme-secondary hover:text-theme-primary'
+                className={`px-2.5 sm:px-3 py-1.5 rounded-md cursor-pointer transition-all flex items-center gap-1.5 shrink-0 whitespace-nowrap ${
+                  activeSubView === 'compose' ? 'bg-theme-card text-theme-primary shadow-card border border-theme-border/50' : 'text-theme-secondary hover:text-theme-primary'
                 }`}
               >
-                <Mail className="w-3.5 h-3.5 text-theme-accent" /> Compose Email
+                <Mail className="w-3.5 h-3.5 text-theme-accent" /> Compose
               </button>
               <button
                 onClick={() => setActiveSubView('templates')}
-                className={`px-3 py-1.5 rounded-md cursor-pointer transition-all flex items-center gap-1.5 ${
-                  activeSubView === 'templates' ? 'bg-theme-card text-theme-primary shadow-xs border border-theme-border/50' : 'text-theme-secondary hover:text-theme-primary'
+                className={`px-2.5 sm:px-3 py-1.5 rounded-md cursor-pointer transition-all flex items-center gap-1.5 shrink-0 whitespace-nowrap ${
+                  activeSubView === 'templates' ? 'bg-theme-card text-theme-primary shadow-card border border-theme-border/50' : 'text-theme-secondary hover:text-theme-primary'
                 }`}
               >
-                <BookOpen className="w-3.5 h-3.5 text-theme-accent" /> Templates Library
+                <BookOpen className="w-3.5 h-3.5 text-theme-accent" /> Templates
               </button>
               <button
                 onClick={() => setActiveSubView('campaigns')}
-                className={`px-3 py-1.5 rounded-md cursor-pointer transition-all flex items-center gap-1.5 ${
-                  activeSubView === 'campaigns' ? 'bg-theme-card text-theme-primary shadow-xs border border-theme-border/50' : 'text-theme-secondary hover:text-theme-primary'
+                className={`px-2.5 sm:px-3 py-1.5 rounded-md cursor-pointer transition-all flex items-center gap-1.5 shrink-0 whitespace-nowrap ${
+                  activeSubView === 'campaigns' ? 'bg-theme-card text-theme-primary shadow-card border border-theme-border/50' : 'text-theme-secondary hover:text-theme-primary'
                 }`}
               >
-                <PieChart className="w-3.5 h-3.5 text-theme-accent" /> SES Bulk Campaigns
+                <PieChart className="w-3.5 h-3.5 text-theme-accent" /> Campaigns
               </button>
             </div>
 
             {!isReadOnly && (
-              <div className="flex gap-2">
+              <div className="flex gap-2 shrink-0">
                 {activeSubView === 'templates' && (
                   <button
                     onClick={() => setShowCreateTemplate(true)}
-                    className="bg-theme-accent hover:opacity-90 text-white px-3 py-1.5 rounded-lg flex items-center gap-1 text-xs font-semibold shadow-xs cursor-pointer"
+                    className="bg-theme-accent hover:bg-theme-accent-strong text-white px-3 h-9 rounded-lg flex items-center gap-1 text-xs font-semibold shadow-card cursor-pointer"
                   >
                     <Plus className="w-3.5 h-3.5" /> Template
                   </button>
@@ -227,7 +227,7 @@ export default function EmailsModule() {
                 {activeSubView === 'campaigns' && (
                   <button
                     onClick={() => setShowCreateCampaign(true)}
-                    className="bg-theme-accent hover:opacity-90 text-white px-3 py-1.5 rounded-lg flex items-center gap-1 text-xs font-semibold shadow-xs cursor-pointer"
+                    className="bg-theme-accent hover:bg-theme-accent-strong text-white px-3 h-9 rounded-lg flex items-center gap-1 text-xs font-semibold shadow-card cursor-pointer"
                   >
                     <Plus className="w-3.5 h-3.5" /> Campaign
                   </button>
@@ -417,7 +417,7 @@ export default function EmailsModule() {
 
 
       {/* RIGHT COLUMN: SES DISPATCH METRICS & GDPR COMPLIANCE */}
-      <div className="w-1/2 p-5 overflow-y-auto bg-theme-base text-left space-y-6 select-none">
+      <div className="hidden lg:block w-1/2 min-w-0 p-5 overflow-y-auto bg-theme-base text-left space-y-6 select-none">
         <div className="bg-theme-card p-5 rounded-xl border border-theme-border shadow-2xs space-y-4">
           <h4 className="text-xs font-bold uppercase font-sans tracking-wider text-theme-secondary flex items-center gap-1.5">
             <PieChart className="w-4 h-4 text-theme-accent" /> Tracked Communication Performance

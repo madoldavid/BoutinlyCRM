@@ -17,6 +17,8 @@ import {
 import type {
   Account,
   Activity,
+  ApiKey,
+  ApprovalRequest,
   AuditLog,
   CalendarTokenRecord,
   Contact,
@@ -24,14 +26,20 @@ import type {
   Deal,
   EmailCampaign,
   EmailTemplate,
+  FieldPermission,
   FileRecord,
+  ForecastCategory,
   Notification,
   Organization,
+  OrgSecurityPolicy,
   Pipeline,
+  Quota,
   Stage,
   Task,
   User,
   UserRole,
+  Webhook,
+  WebhookDelivery,
 } from '../../types.js';
 import { getCurrentOrgId } from '../db/connection.js';
 import { hashPassword, verifyPassword } from '../security/password.js';
@@ -50,6 +58,12 @@ export interface CrmSnapshot {
   emailTemplates: EmailTemplate[];
   emailCampaigns: EmailCampaign[];
   auditLogs: AuditLog[];
+  apiKeys?: ApiKey[];
+  webhooks?: Webhook[];
+  quotas?: Quota[];
+  approvals?: ApprovalRequest[];
+  securityPolicy?: OrgSecurityPolicy | null;
+  fieldPermissions?: FieldPermission[];
 }
 
 export interface CreateContactInput extends Omit<Contact, 'id' | 'created_at'> {}
@@ -207,6 +221,43 @@ export interface CrmRepository {
   // GDPR
   exportUserData(userId: string): Promise<Record<string, unknown>>;
   deleteUserData(userId: string): Promise<void>;
+
+  // Bulk ops
+  bulkUpdateContacts(ids: string[], patch: UpdateContactInput): Promise<Contact[]>;
+  bulkUpdateDeals(ids: string[], patch: UpdateDealInput): Promise<Deal[]>;
+
+  // API keys
+  listApiKeys(): Promise<ApiKey[]>;
+  createApiKey(input: { name: string; scopes: string[]; created_by_id: string; expires_at?: string | null }): Promise<ApiKey>;
+  revokeApiKey(id: string): Promise<ApiKey | null>;
+  verifyApiKey(rawKey: string): Promise<{ organization_id: string; scopes: string[]; key_id: string } | null>;
+
+  // Webhooks
+  listWebhooks(): Promise<Webhook[]>;
+  createWebhook(input: { name: string; url: string; events: string[]; created_by_id: string }): Promise<Webhook>;
+  updateWebhook(id: string, input: Partial<Pick<Webhook, 'name' | 'url' | 'events' | 'status'>>): Promise<Webhook | null>;
+  deleteWebhook(id: string): Promise<boolean>;
+  listWebhookDeliveries(webhookId: string, limit?: number): Promise<WebhookDelivery[]>;
+  dispatchWebhookEvent(event: string, payload: Record<string, unknown>): Promise<void>;
+
+  // Quotas
+  listQuotas(): Promise<Quota[]>;
+  upsertQuota(input: Omit<Quota, 'id' | 'created_at' | 'updated_at'> & { id?: string }): Promise<Quota>;
+  deleteQuota(id: string): Promise<boolean>;
+
+  // Approvals
+  listApprovals(params?: { status?: string }): Promise<ApprovalRequest[]>;
+  createApproval(input: Omit<ApprovalRequest, 'id' | 'created_at' | 'status' | 'decided_at' | 'decision_note'>): Promise<ApprovalRequest>;
+  decideApproval(id: string, decision: 'approved' | 'rejected', approverId: string, note?: string): Promise<ApprovalRequest | null>;
+
+  // Security policy
+  getSecurityPolicy(): Promise<OrgSecurityPolicy | null>;
+  upsertSecurityPolicy(input: Partial<Omit<OrgSecurityPolicy, 'organization_id' | 'updated_at'>>): Promise<OrgSecurityPolicy>;
+
+  // Field permissions
+  listFieldPermissions(): Promise<FieldPermission[]>;
+  upsertFieldPermission(input: Omit<FieldPermission, 'id'> & { id?: string }): Promise<FieldPermission>;
+  deleteFieldPermission(id: string): Promise<boolean>;
 }
 
 function clone<T>(value: T): T {
@@ -234,6 +285,14 @@ export class InMemoryCrmRepository implements CrmRepository {
   private resetTokens = new Map<string, { userId: string; expiresAt: number }>(); // sha256(token) → { userId, expiresAt }
   private totpSecrets = new Map<string, string>(); // userId → secret
   private passwordPepper: string;
+  private apiKeys: ApiKey[] = [];
+  private apiKeyHashes = new Map<string, string>(); // key id → sha256 hash
+  private webhooks: Webhook[] = [];
+  private webhookDeliveries: WebhookDelivery[] = [];
+  private quotas: Quota[] = [];
+  private approvals: ApprovalRequest[] = [];
+  private securityPolicies = new Map<string, OrgSecurityPolicy>();
+  private fieldPermissions: FieldPermission[] = [];
 
   constructor(passwordPepper = 'development-password-pepper') {
     this.passwordPepper = passwordPepper;
@@ -929,6 +988,8 @@ export class InMemoryCrmRepository implements CrmRepository {
   // ─── Snapshot ───────────────────────────────────────
 
   async snapshot() {
+    const orgId = getCurrentOrgId();
+    const policy = orgId ? this.securityPolicies.get(orgId) ?? null : null;
     const all = clone({
       users: this.users,
       accounts: this.accounts,
@@ -943,9 +1004,14 @@ export class InMemoryCrmRepository implements CrmRepository {
       emailTemplates: this.emailTemplates,
       emailCampaigns: this.emailCampaigns,
       auditLogs: this.auditLogs,
+      apiKeys: this.apiKeys.map(k => ({ ...k, raw_key: undefined })),
+      webhooks: this.webhooks,
+      quotas: this.quotas,
+      approvals: this.approvals,
+      securityPolicy: policy,
+      fieldPermissions: this.fieldPermissions,
     });
     // Apply org scoping to all tenant-scoped entities
-    const orgId = getCurrentOrgId();
     if (!orgId) return all;
     return {
       ...all,
@@ -960,6 +1026,12 @@ export class InMemoryCrmRepository implements CrmRepository {
       emailTemplates: this.filterByOrg(all.emailTemplates),
       emailCampaigns: this.filterByOrg(all.emailCampaigns),
       auditLogs: this.filterByOrg(all.auditLogs),
+      apiKeys: this.filterByOrg(all.apiKeys || []),
+      webhooks: this.filterByOrg(all.webhooks || []),
+      quotas: this.filterByOrg(all.quotas || []),
+      approvals: this.filterByOrg(all.approvals || []),
+      fieldPermissions: this.filterByOrg(all.fieldPermissions || []),
+      securityPolicy: policy,
     };
   }
 
@@ -1034,5 +1106,279 @@ export class InMemoryCrmRepository implements CrmRepository {
       this.passwordHashes.delete(userId);
       this.totpSecrets.delete(userId);
     }
+  }
+
+  // ─── Bulk ops ───────────────────────────────────────
+
+  async bulkUpdateContacts(ids: string[], patch: UpdateContactInput): Promise<Contact[]> {
+    const updated: Contact[] = [];
+    for (const id of ids) {
+      const c = await this.updateContact(id, patch);
+      if (c) updated.push(c);
+    }
+    return clone(updated);
+  }
+
+  async bulkUpdateDeals(ids: string[], patch: UpdateDealInput): Promise<Deal[]> {
+    const updated: Deal[] = [];
+    for (const id of ids) {
+      const d = await this.updateDeal(id, patch);
+      if (d) updated.push(d);
+    }
+    return clone(updated);
+  }
+
+  // ─── API keys ───────────────────────────────────────
+
+  async listApiKeys(): Promise<ApiKey[]> {
+    return clone(this.filterByOrg(this.apiKeys).filter(k => !k.revoked_at).map(k => {
+      const { raw_key: _, ...rest } = k;
+      return rest;
+    }));
+  }
+
+  async createApiKey(input: { name: string; scopes: string[]; created_by_id: string; expires_at?: string | null }): Promise<ApiKey> {
+    const raw = `bnt_${randomBytes(24).toString('base64url')}`;
+    const prefix = raw.slice(0, 12);
+    const hash = createHash('sha256').update(raw).digest('hex');
+    const key: ApiKey = {
+      id: randomUUID(),
+      organization_id: getCurrentOrgId() || undefined,
+      name: input.name,
+      key_prefix: prefix,
+      scopes: input.scopes.length ? input.scopes : ['read', 'write'],
+      created_by_id: input.created_by_id,
+      expires_at: input.expires_at ?? null,
+      created_at: new Date().toISOString(),
+    };
+    this.apiKeys.push(key);
+    this.apiKeyHashes.set(key.id, hash);
+    return clone({ ...key, raw_key: raw });
+  }
+
+  async revokeApiKey(id: string): Promise<ApiKey | null> {
+    const key = this.apiKeys.find(k => k.id === id && this.checkOrg(k));
+    if (!key) return null;
+    key.revoked_at = new Date().toISOString();
+    return clone({ ...key, raw_key: undefined });
+  }
+
+  async verifyApiKey(rawKey: string): Promise<{ organization_id: string; scopes: string[]; key_id: string } | null> {
+    const hash = createHash('sha256').update(rawKey).digest('hex');
+    for (const [id, h] of this.apiKeyHashes.entries()) {
+      if (h !== hash) continue;
+      const key = this.apiKeys.find(k => k.id === id);
+      if (!key || key.revoked_at) return null;
+      if (key.expires_at && new Date(key.expires_at).getTime() < Date.now()) return null;
+      key.last_used_at = new Date().toISOString();
+      return { organization_id: key.organization_id || '', scopes: key.scopes, key_id: key.id };
+    }
+    return null;
+  }
+
+  // ─── Webhooks ───────────────────────────────────────
+
+  async listWebhooks(): Promise<Webhook[]> {
+    return clone(this.filterByOrg(this.webhooks));
+  }
+
+  async createWebhook(input: { name: string; url: string; events: string[]; created_by_id: string }): Promise<Webhook> {
+    const wh: Webhook = {
+      id: randomUUID(),
+      organization_id: getCurrentOrgId() || undefined,
+      name: input.name,
+      url: input.url,
+      secret: `whsec_${randomBytes(16).toString('hex')}`,
+      events: input.events,
+      status: 'active',
+      created_by_id: input.created_by_id,
+      failure_count: 0,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+    this.webhooks.push(wh);
+    return clone(wh);
+  }
+
+  async updateWebhook(id: string, input: Partial<Pick<Webhook, 'name' | 'url' | 'events' | 'status'>>): Promise<Webhook | null> {
+    const wh = this.webhooks.find(w => w.id === id && this.checkOrg(w));
+    if (!wh) return null;
+    Object.assign(wh, input, { updated_at: new Date().toISOString() });
+    return clone(wh);
+  }
+
+  async deleteWebhook(id: string): Promise<boolean> {
+    const before = this.webhooks.length;
+    this.webhooks = this.webhooks.filter(w => !(w.id === id && this.checkOrg(w)));
+    this.webhookDeliveries = this.webhookDeliveries.filter(d => d.webhook_id !== id);
+    return this.webhooks.length < before;
+  }
+
+  async listWebhookDeliveries(webhookId: string, limit = 50): Promise<WebhookDelivery[]> {
+    return clone(
+      this.webhookDeliveries
+        .filter(d => d.webhook_id === webhookId && this.checkOrg(d))
+        .sort((a, b) => b.created_at.localeCompare(a.created_at))
+        .slice(0, limit),
+    );
+  }
+
+  async dispatchWebhookEvent(event: string, payload: Record<string, unknown>): Promise<void> {
+    const targets = this.filterByOrg(this.webhooks).filter(w => w.status === 'active' && w.events.includes(event));
+    for (const wh of targets) {
+      const delivery: WebhookDelivery = {
+        id: randomUUID(),
+        organization_id: wh.organization_id,
+        webhook_id: wh.id,
+        event,
+        payload,
+        success: false,
+        attempt: 1,
+        created_at: new Date().toISOString(),
+      };
+      // In-memory: record as queued success without real HTTP (tests/dev)
+      delivery.success = true;
+      delivery.response_status = 200;
+      delivery.response_body = 'queued';
+      wh.last_triggered_at = delivery.created_at;
+      this.webhookDeliveries.push(delivery);
+    }
+  }
+
+  // ─── Quotas ─────────────────────────────────────────
+
+  async listQuotas(): Promise<Quota[]> {
+    return clone(this.filterByOrg(this.quotas));
+  }
+
+  async upsertQuota(input: Omit<Quota, 'id' | 'created_at' | 'updated_at'> & { id?: string }): Promise<Quota> {
+    if (input.id) {
+      const existing = this.quotas.find(q => q.id === input.id && this.checkOrg(q));
+      if (existing) {
+        Object.assign(existing, input, { updated_at: new Date().toISOString() });
+        return clone(existing);
+      }
+    }
+    const q: Quota = {
+      id: input.id || randomUUID(),
+      organization_id: input.organization_id || getCurrentOrgId() || undefined,
+      user_id: input.user_id ?? null,
+      team_id: input.team_id ?? null,
+      period: input.period,
+      amount: input.amount,
+      currency: input.currency || 'USD',
+      fiscal_year: input.fiscal_year,
+      fiscal_period: input.fiscal_period,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+    this.quotas.push(q);
+    return clone(q);
+  }
+
+  async deleteQuota(id: string): Promise<boolean> {
+    const before = this.quotas.length;
+    this.quotas = this.quotas.filter(q => !(q.id === id && this.checkOrg(q)));
+    return this.quotas.length < before;
+  }
+
+  // ─── Approvals ──────────────────────────────────────
+
+  async listApprovals(params?: { status?: string }): Promise<ApprovalRequest[]> {
+    let items = this.filterByOrg(this.approvals);
+    if (params?.status) items = items.filter(a => a.status === params.status);
+    return clone(items.sort((a, b) => b.created_at.localeCompare(a.created_at)));
+  }
+
+  async createApproval(input: Omit<ApprovalRequest, 'id' | 'created_at' | 'status' | 'decided_at' | 'decision_note'>): Promise<ApprovalRequest> {
+    const a: ApprovalRequest = {
+      ...input,
+      id: randomUUID(),
+      organization_id: input.organization_id || getCurrentOrgId() || undefined,
+      status: 'pending',
+      created_at: new Date().toISOString(),
+    };
+    this.approvals.push(a);
+    return clone(a);
+  }
+
+  async decideApproval(id: string, decision: 'approved' | 'rejected', approverId: string, note?: string): Promise<ApprovalRequest | null> {
+    const a = this.approvals.find(x => x.id === id && this.checkOrg(x));
+    if (!a || a.status !== 'pending') return null;
+    a.status = decision;
+    a.approver_id = approverId;
+    a.decision_note = note;
+    a.decided_at = new Date().toISOString();
+
+    // Apply payload side-effects for deal approvals
+    if (decision === 'approved' && a.entity_type === 'deal' && a.payload) {
+      const patch = a.payload as UpdateDealInput;
+      if (Object.keys(patch).length) await this.updateDeal(a.entity_id, patch);
+    }
+    if (decision === 'approved' && a.entity_type === 'stage_change' && a.payload?.stage_id) {
+      await this.moveDealStage(a.entity_id, String(a.payload.stage_id));
+    }
+    return clone(a);
+  }
+
+  // ─── Security policy ────────────────────────────────
+
+  async getSecurityPolicy(): Promise<OrgSecurityPolicy | null> {
+    const orgId = getCurrentOrgId();
+    if (!orgId) return null;
+    return clone(this.securityPolicies.get(orgId) ?? null);
+  }
+
+  async upsertSecurityPolicy(input: Partial<Omit<OrgSecurityPolicy, 'organization_id' | 'updated_at'>>): Promise<OrgSecurityPolicy> {
+    const orgId = getCurrentOrgId() || 'default';
+    const existing = this.securityPolicies.get(orgId);
+    const next: OrgSecurityPolicy = {
+      organization_id: orgId,
+      ip_allowlist: input.ip_allowlist ?? existing?.ip_allowlist ?? [],
+      session_idle_minutes: input.session_idle_minutes ?? existing?.session_idle_minutes ?? 480,
+      max_sessions_per_user: input.max_sessions_per_user ?? existing?.max_sessions_per_user ?? 10,
+      enforce_mfa: input.enforce_mfa ?? existing?.enforce_mfa ?? false,
+      enforce_sso: input.enforce_sso ?? existing?.enforce_sso ?? false,
+      password_min_length: input.password_min_length ?? existing?.password_min_length ?? 8,
+      updated_at: new Date().toISOString(),
+    };
+    this.securityPolicies.set(orgId, next);
+    return clone(next);
+  }
+
+  // ─── Field permissions ──────────────────────────────
+
+  async listFieldPermissions(): Promise<FieldPermission[]> {
+    return clone(this.filterByOrg(this.fieldPermissions));
+  }
+
+  async upsertFieldPermission(input: Omit<FieldPermission, 'id'> & { id?: string }): Promise<FieldPermission> {
+    const existing = this.fieldPermissions.find(
+      f =>
+        (input.id && f.id === input.id) ||
+        (f.entity_type === input.entity_type && f.field_key === input.field_key && f.role === input.role && this.checkOrg(f)),
+    );
+    if (existing) {
+      existing.can_read = input.can_read;
+      existing.can_write = input.can_write;
+      return clone(existing);
+    }
+    const fp: FieldPermission = {
+      id: input.id || randomUUID(),
+      organization_id: input.organization_id || getCurrentOrgId() || undefined,
+      entity_type: input.entity_type,
+      field_key: input.field_key,
+      role: input.role,
+      can_read: input.can_read,
+      can_write: input.can_write,
+    };
+    this.fieldPermissions.push(fp);
+    return clone(fp);
+  }
+
+  async deleteFieldPermission(id: string): Promise<boolean> {
+    const before = this.fieldPermissions.length;
+    this.fieldPermissions = this.fieldPermissions.filter(f => !(f.id === id && this.checkOrg(f)));
+    return this.fieldPermissions.length < before;
   }
 }

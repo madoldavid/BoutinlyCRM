@@ -202,42 +202,42 @@ export default function TasksModule() {
     <div className="flex-1 flex overflow-hidden bg-theme-base text-theme-primary">
       
       {/* LEFT COLUMN: MAIN WORKSPACE */}
-      <div className="w-1/2 flex flex-col border-r border-theme-border bg-theme-card h-full select-none">
+      <div className="w-full lg:w-1/2 min-w-0 flex flex-col border-r border-theme-border bg-theme-card h-full select-none">
         
         {/* Module Header Toolbar */}
-        <div className="p-4 border-b border-theme-border space-y-3.5 shrink-0">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2 bg-theme-base p-0.5 rounded-lg border border-theme-border text-xs font-semibold">
+        <div className="p-3 sm:p-4 border-b border-theme-border space-y-3 shrink-0">
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex items-center gap-0.5 bg-theme-base p-0.5 rounded-lg border border-theme-border text-xs font-semibold min-w-0 overflow-x-auto scrollbar-none">
               <button
                 onClick={() => setActiveSubView('list')}
-                className={`px-3 py-1.5 rounded-md cursor-pointer transition-all flex items-center gap-1.5 ${
-                  activeSubView === 'list' ? 'bg-theme-card text-theme-primary shadow-xs border border-theme-border/50' : 'text-theme-secondary hover:text-theme-primary'
+                className={`px-2.5 sm:px-3 py-1.5 rounded-md cursor-pointer transition-all flex items-center gap-1.5 shrink-0 whitespace-nowrap ${
+                  activeSubView === 'list' ? 'bg-theme-card text-theme-primary shadow-card border border-theme-border/50' : 'text-theme-secondary hover:text-theme-primary'
                 }`}
               >
-                <CheckSquare className="w-3.5 h-3.5 text-theme-accent" /> Tasks List
+                <CheckSquare className="w-3.5 h-3.5 text-theme-accent" /> Tasks
               </button>
               <button
                 onClick={() => setActiveSubView('calendar')}
-                className={`px-3 py-1.5 rounded-md cursor-pointer transition-all flex items-center gap-1.5 ${
-                  activeSubView === 'calendar' ? 'bg-theme-card text-theme-primary shadow-xs border border-theme-border/50' : 'text-theme-secondary hover:text-theme-primary'
+                className={`px-2.5 sm:px-3 py-1.5 rounded-md cursor-pointer transition-all flex items-center gap-1.5 shrink-0 whitespace-nowrap ${
+                  activeSubView === 'calendar' ? 'bg-theme-card text-theme-primary shadow-card border border-theme-border/50' : 'text-theme-secondary hover:text-theme-primary'
                 }`}
               >
-                <CalendarIcon className="w-3.5 h-3.5 text-theme-accent" /> Calendar View
+                <CalendarIcon className="w-3.5 h-3.5 text-theme-accent" /> Calendar
               </button>
               <button
                 onClick={() => setActiveSubView('call-logger')}
-                className={`px-3 py-1.5 rounded-md cursor-pointer transition-all flex items-center gap-1.5 ${
-                  activeSubView === 'call-logger' ? 'bg-theme-card text-theme-primary shadow-xs border border-theme-border/50' : 'text-theme-secondary hover:text-theme-primary'
+                className={`px-2.5 sm:px-3 py-1.5 rounded-md cursor-pointer transition-all flex items-center gap-1.5 shrink-0 whitespace-nowrap ${
+                  activeSubView === 'call-logger' ? 'bg-theme-card text-theme-primary shadow-card border border-theme-border/50' : 'text-theme-secondary hover:text-theme-primary'
                 }`}
               >
-                <Phone className="w-3.5 h-3.5 text-theme-accent" /> Log Call Activity
+                <Phone className="w-3.5 h-3.5 text-theme-accent" /> Log Call
               </button>
             </div>
 
             {!isReadOnly && activeSubView === 'list' && (
               <button
                 onClick={() => setShowCreateTask(true)}
-                className="bg-theme-accent hover:opacity-90 text-white px-3 py-1.5 rounded-lg flex items-center gap-1 text-xs font-semibold shadow-xs cursor-pointer"
+                className="bg-theme-accent hover:bg-theme-accent-strong text-white px-3 h-9 rounded-lg flex items-center gap-1 text-xs font-semibold shadow-card cursor-pointer shrink-0"
               >
                 <Plus className="w-3.5 h-3.5" /> Task
               </button>
@@ -246,30 +246,30 @@ export default function TasksModule() {
 
           {/* Sub Tab Filter selectors for List */}
           {activeSubView === 'list' && (
-            <div className="flex gap-1.5 text-[11px] font-semibold text-theme-secondary">
+            <div className="flex gap-1.5 text-[11px] font-semibold text-theme-secondary overflow-x-auto scrollbar-none">
               <button
                 onClick={() => setTaskFilter('open')}
-                className={`px-2.5 py-1 rounded-md cursor-pointer ${taskFilter === 'open' ? 'bg-theme-primary text-theme-card' : 'hover:bg-theme-base'}`}
+                className={`px-2.5 py-1 rounded-md cursor-pointer shrink-0 whitespace-nowrap ${taskFilter === 'open' ? 'bg-theme-primary text-theme-card' : 'hover:bg-theme-hover'}`}
               >
-                Active Tasks
+                Active
               </button>
               <button
                 onClick={() => setTaskFilter('overdue')}
-                className={`px-2.5 py-1 rounded-md cursor-pointer text-theme-accent flex items-center gap-1 ${taskFilter === 'overdue' ? 'bg-theme-accent/10 font-bold border border-theme-accent/30' : 'hover:bg-theme-base'}`}
+                className={`px-2.5 py-1 rounded-md cursor-pointer text-theme-accent flex items-center gap-1 shrink-0 whitespace-nowrap ${taskFilter === 'overdue' ? 'bg-theme-accent/10 font-bold border border-theme-accent/30' : 'hover:bg-theme-hover'}`}
               >
                 <AlertCircle className="w-3.5 h-3.5" /> Overdue
               </button>
               <button
                 onClick={() => setTaskFilter('completed')}
-                className={`px-2.5 py-1 rounded-md cursor-pointer ${taskFilter === 'completed' ? 'bg-theme-primary text-theme-card' : 'hover:bg-theme-base'}`}
+                className={`px-2.5 py-1 rounded-md cursor-pointer shrink-0 whitespace-nowrap ${taskFilter === 'completed' ? 'bg-theme-primary text-theme-card' : 'hover:bg-theme-hover'}`}
               >
                 Completed
               </button>
               <button
                 onClick={() => setTaskFilter('all')}
-                className={`px-2.5 py-1 rounded-md cursor-pointer ${taskFilter === 'all' ? 'bg-theme-primary text-theme-card' : 'hover:bg-theme-base'}`}
+                className={`px-2.5 py-1 rounded-md cursor-pointer shrink-0 whitespace-nowrap ${taskFilter === 'all' ? 'bg-theme-primary text-theme-card' : 'hover:bg-theme-hover'}`}
               >
-                All Scoped
+                All
               </button>
             </div>
           )}
@@ -512,7 +512,7 @@ export default function TasksModule() {
 
 
       {/* RIGHT COLUMN: CALENDAR SYNC CONFIGURATORS */}
-      <div className="w-1/2 p-5 overflow-y-auto bg-theme-base text-left space-y-6">
+      <div className="hidden lg:block w-1/2 min-w-0 p-5 overflow-y-auto bg-theme-base text-left space-y-6">
         <div className="bg-theme-card p-5 rounded-xl border border-theme-border shadow-2xs space-y-4">
           <h4 className="text-xs font-bold uppercase font-sans tracking-wider text-theme-secondary flex items-center gap-1.5">
             <Sparkles className="w-4 h-4 text-theme-accent" /> Bidirectional Calendar Integrations

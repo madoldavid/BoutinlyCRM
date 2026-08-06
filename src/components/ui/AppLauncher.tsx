@@ -154,7 +154,7 @@ export function getDefaultApps(activeModule: string, navigate: (id: string) => v
       label: 'Pipeline',
       description: 'Sales deals, kanban board, and opportunity tracking',
       icon: <Briefcase className="w-4 h-4" />,
-      colorClass: 'bg-accent-soft text-theme-accent',
+      colorClass: 'bg-theme-accent-soft text-theme-accent',
     },
     {
       id: 'tasks',

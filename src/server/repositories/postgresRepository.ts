@@ -2,6 +2,8 @@ import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import type {
   Account,
   Activity,
+  ApiKey,
+  ApprovalRequest,
   AuditLog,
   CalendarTokenRecord,
   Contact,
@@ -9,14 +11,19 @@ import type {
   Deal,
   EmailCampaign,
   EmailTemplate,
+  FieldPermission,
   FileRecord,
   Notification,
   Organization,
+  OrgSecurityPolicy,
   Pipeline,
+  Quota,
   Stage,
   Task,
   User,
   UserRole,
+  Webhook,
+  WebhookDelivery,
 } from '../../types.js';
 import { query } from '../db/connection.js';
 import type { DbRow } from '../db/types.js';
@@ -954,10 +961,282 @@ export class PostgresCrmRepository implements CrmRepository {
     return this.rowToAuditLog(result.rows[0]);
   }
 
+  // ─── Bulk ops ───────────────────────────────────────
+
+  async bulkUpdateContacts(ids: string[], patch: UpdateContactInput): Promise<Contact[]> {
+    const updated: Contact[] = [];
+    for (const id of ids) {
+      const c = await this.updateContact(id, patch);
+      if (c) updated.push(c);
+    }
+    return updated;
+  }
+
+  async bulkUpdateDeals(ids: string[], patch: UpdateDealInput): Promise<Deal[]> {
+    const updated: Deal[] = [];
+    for (const id of ids) {
+      const d = await this.updateDeal(id, patch);
+      if (d) updated.push(d);
+    }
+    return updated;
+  }
+
+  // ─── API keys ───────────────────────────────────────
+
+  async listApiKeys(): Promise<ApiKey[]> {
+    const result = await query(
+      `SELECT id, organization_id, name, key_prefix, scopes, created_by_id, last_used_at, expires_at, revoked_at, created_at
+       FROM api_keys WHERE revoked_at IS NULL ORDER BY created_at DESC`,
+    );
+    return result.rows.map((row: DbRow) => this.rowToApiKey(row));
+  }
+
+  async createApiKey(input: { name: string; scopes: string[]; created_by_id: string; expires_at?: string | null }): Promise<ApiKey> {
+    const raw = `bnt_${randomBytes(24).toString('base64url')}`;
+    const prefix = raw.slice(0, 12);
+    const hash = createHash('sha256').update(raw).digest('hex');
+    const scopes = input.scopes.length ? input.scopes : ['read', 'write'];
+    const result = await query(
+      `INSERT INTO api_keys (id, organization_id, name, key_prefix, key_hash, scopes, created_by_id, expires_at)
+       VALUES ($1, current_setting('app.organization_id'), $2, $3, $4, $5, $6, $7)
+       RETURNING id, organization_id, name, key_prefix, scopes, created_by_id, last_used_at, expires_at, revoked_at, created_at`,
+      [randomUUID(), input.name, prefix, hash, scopes, input.created_by_id, input.expires_at ?? null],
+    );
+    return { ...this.rowToApiKey(result.rows[0]), raw_key: raw };
+  }
+
+  async revokeApiKey(id: string): Promise<ApiKey | null> {
+    const result = await query(
+      `UPDATE api_keys SET revoked_at = NOW() WHERE id = $1 AND revoked_at IS NULL
+       RETURNING id, organization_id, name, key_prefix, scopes, created_by_id, last_used_at, expires_at, revoked_at, created_at`,
+      [id],
+    );
+    return result.rows.length > 0 ? this.rowToApiKey(result.rows[0]) : null;
+  }
+
+  async verifyApiKey(rawKey: string): Promise<{ organization_id: string; scopes: string[]; key_id: string } | null> {
+    const hash = createHash('sha256').update(rawKey).digest('hex');
+    const result = await query(
+      `SELECT id, organization_id, scopes FROM api_keys
+       WHERE key_hash = $1 AND revoked_at IS NULL AND (expires_at IS NULL OR expires_at > NOW())`,
+      [hash],
+    );
+    if (result.rows.length === 0) return null;
+    const row = result.rows[0];
+    await query('UPDATE api_keys SET last_used_at = NOW() WHERE id = $1', [row.id]);
+    return { organization_id: row.organization_id, scopes: row.scopes || [], key_id: row.id };
+  }
+
+  // ─── Webhooks ───────────────────────────────────────
+
+  async listWebhooks(): Promise<Webhook[]> {
+    const result = await query('SELECT * FROM webhooks ORDER BY created_at DESC');
+    return result.rows.map((row: DbRow) => this.rowToWebhook(row));
+  }
+
+  async createWebhook(input: { name: string; url: string; events: string[]; created_by_id: string }): Promise<Webhook> {
+    const secret = `whsec_${randomBytes(16).toString('hex')}`;
+    const result = await query(
+      `INSERT INTO webhooks (id, organization_id, name, url, secret, events, status, created_by_id)
+       VALUES ($1, current_setting('app.organization_id'), $2, $3, $4, $5, 'active', $6)
+       RETURNING *`,
+      [randomUUID(), input.name, input.url, secret, input.events, input.created_by_id],
+    );
+    return this.rowToWebhook(result.rows[0]);
+  }
+
+  async updateWebhook(id: string, input: Partial<Pick<Webhook, 'name' | 'url' | 'events' | 'status'>>): Promise<Webhook | null> {
+    const fields: string[] = [];
+    const values: unknown[] = [id];
+    let idx = 2;
+    if (input.name !== undefined) { fields.push(`name = $${idx++}`); values.push(input.name); }
+    if (input.url !== undefined) { fields.push(`url = $${idx++}`); values.push(input.url); }
+    if (input.events !== undefined) { fields.push(`events = $${idx++}`); values.push(input.events); }
+    if (input.status !== undefined) { fields.push(`status = $${idx++}`); values.push(input.status); }
+
+    if (fields.length === 0) {
+      const r = await query('SELECT * FROM webhooks WHERE id = $1', [id]);
+      return r.rows.length > 0 ? this.rowToWebhook(r.rows[0]) : null;
+    }
+    fields.push(`updated_at = NOW()`);
+    const result = await query(
+      `UPDATE webhooks SET ${fields.join(', ')} WHERE id = $1 RETURNING *`,
+      values,
+    );
+    return result.rows.length > 0 ? this.rowToWebhook(result.rows[0]) : null;
+  }
+
+  async deleteWebhook(id: string): Promise<boolean> {
+    const result = await query('DELETE FROM webhooks WHERE id = $1', [id]);
+    return (result.rowCount || 0) > 0;
+  }
+
+  async listWebhookDeliveries(webhookId: string, limit = 50): Promise<WebhookDelivery[]> {
+    const result = await query(
+      'SELECT * FROM webhook_deliveries WHERE webhook_id = $1 ORDER BY created_at DESC LIMIT $2',
+      [webhookId, limit],
+    );
+    return result.rows.map((row: DbRow) => this.rowToWebhookDelivery(row));
+  }
+
+  async dispatchWebhookEvent(event: string, payload: Record<string, unknown>): Promise<void> {
+    const targets = await query(
+      `SELECT * FROM webhooks WHERE status = 'active' AND $1 = ANY(events)`,
+      [event],
+    );
+    for (const row of targets.rows) {
+      const wh = this.rowToWebhook(row);
+      // No outbound HTTP worker yet — record as queued so deliveries are visible in the admin UI.
+      await query(
+        `INSERT INTO webhook_deliveries (id, organization_id, webhook_id, event, payload, response_status, response_body, success, attempt)
+         VALUES ($1, $2, $3, $4, $5, 200, 'queued', true, 1)`,
+        [randomUUID(), wh.organization_id, wh.id, event, JSON.stringify(payload)],
+      );
+      await query('UPDATE webhooks SET last_triggered_at = NOW() WHERE id = $1', [wh.id]);
+    }
+  }
+
+  // ─── Quotas ─────────────────────────────────────────
+
+  async listQuotas(): Promise<Quota[]> {
+    const result = await query('SELECT * FROM quotas ORDER BY fiscal_year DESC, fiscal_period DESC');
+    return result.rows.map((row: DbRow) => this.rowToQuota(row));
+  }
+
+  async upsertQuota(input: Omit<Quota, 'id' | 'created_at' | 'updated_at'> & { id?: string }): Promise<Quota> {
+    if (input.id) {
+      const result = await query(
+        `UPDATE quotas SET user_id = $2, team_id = $3, period = $4, amount = $5, currency = $6,
+                fiscal_year = $7, fiscal_period = $8, updated_at = NOW()
+         WHERE id = $1 RETURNING *`,
+        [input.id, input.user_id ?? null, input.team_id ?? null, input.period, input.amount,
+         input.currency || 'USD', input.fiscal_year, input.fiscal_period],
+      );
+      if (result.rows.length > 0) return this.rowToQuota(result.rows[0]);
+    }
+    const result = await query(
+      `INSERT INTO quotas (id, organization_id, user_id, team_id, period, amount, currency, fiscal_year, fiscal_period)
+       VALUES ($1, current_setting('app.organization_id'), $2, $3, $4, $5, $6, $7, $8)
+       RETURNING *`,
+      [input.id || randomUUID(), input.user_id ?? null, input.team_id ?? null, input.period,
+       input.amount, input.currency || 'USD', input.fiscal_year, input.fiscal_period],
+    );
+    return this.rowToQuota(result.rows[0]);
+  }
+
+  async deleteQuota(id: string): Promise<boolean> {
+    const result = await query('DELETE FROM quotas WHERE id = $1', [id]);
+    return (result.rowCount || 0) > 0;
+  }
+
+  // ─── Approvals ──────────────────────────────────────
+
+  async listApprovals(params?: { status?: string }): Promise<ApprovalRequest[]> {
+    let sql = 'SELECT * FROM approval_requests';
+    const values: unknown[] = [];
+    if (params?.status) {
+      sql += ' WHERE status = $1';
+      values.push(params.status);
+    }
+    sql += ' ORDER BY created_at DESC';
+    const result = await query(sql, values);
+    return result.rows.map((row: DbRow) => this.rowToApproval(row));
+  }
+
+  async createApproval(input: Omit<ApprovalRequest, 'id' | 'created_at' | 'status' | 'decided_at' | 'decision_note'>): Promise<ApprovalRequest> {
+    const result = await query(
+      `INSERT INTO approval_requests (id, organization_id, entity_type, entity_id, requested_by_id, approver_id, status, title, reason, payload)
+       VALUES ($1, current_setting('app.organization_id'), $2, $3, $4, $5, 'pending', $6, $7, $8)
+       RETURNING *`,
+      [randomUUID(), input.entity_type, input.entity_id, input.requested_by_id, input.approver_id ?? null,
+       input.title, input.reason ?? null, JSON.stringify(input.payload || {})],
+    );
+    return this.rowToApproval(result.rows[0]);
+  }
+
+  async decideApproval(id: string, decision: 'approved' | 'rejected', approverId: string, note?: string): Promise<ApprovalRequest | null> {
+    const result = await query(
+      `UPDATE approval_requests SET status = $2, approver_id = $3, decision_note = $4, decided_at = NOW()
+       WHERE id = $1 AND status = 'pending' RETURNING *`,
+      [id, decision, approverId, note ?? null],
+    );
+    if (result.rows.length === 0) return null;
+    const approval = this.rowToApproval(result.rows[0]);
+
+    // Apply payload side-effects for deal approvals
+    if (decision === 'approved' && approval.entity_type === 'deal' && approval.payload) {
+      const patch = approval.payload as UpdateDealInput;
+      if (Object.keys(patch).length) await this.updateDeal(approval.entity_id, patch);
+    }
+    if (decision === 'approved' && approval.entity_type === 'stage_change' && approval.payload?.stage_id) {
+      await this.moveDealStage(approval.entity_id, String(approval.payload.stage_id));
+    }
+    return approval;
+  }
+
+  // ─── Security policy ────────────────────────────────
+
+  async getSecurityPolicy(): Promise<OrgSecurityPolicy | null> {
+    const result = await query(
+      `SELECT * FROM org_security_policies WHERE organization_id = current_setting('app.organization_id', true)`,
+    );
+    return result.rows.length > 0 ? this.rowToSecurityPolicy(result.rows[0]) : null;
+  }
+
+  async upsertSecurityPolicy(input: Partial<Omit<OrgSecurityPolicy, 'organization_id' | 'updated_at'>>): Promise<OrgSecurityPolicy> {
+    const existing = await this.getSecurityPolicy();
+    const next = {
+      ip_allowlist: input.ip_allowlist ?? existing?.ip_allowlist ?? [],
+      session_idle_minutes: input.session_idle_minutes ?? existing?.session_idle_minutes ?? 480,
+      max_sessions_per_user: input.max_sessions_per_user ?? existing?.max_sessions_per_user ?? 10,
+      enforce_mfa: input.enforce_mfa ?? existing?.enforce_mfa ?? false,
+      enforce_sso: input.enforce_sso ?? existing?.enforce_sso ?? false,
+      password_min_length: input.password_min_length ?? existing?.password_min_length ?? 8,
+    };
+    const result = await query(
+      `INSERT INTO org_security_policies (organization_id, ip_allowlist, session_idle_minutes, max_sessions_per_user, enforce_mfa, enforce_sso, password_min_length, updated_at)
+       VALUES (current_setting('app.organization_id'), $1, $2, $3, $4, $5, $6, NOW())
+       ON CONFLICT (organization_id) DO UPDATE SET
+         ip_allowlist = $1, session_idle_minutes = $2, max_sessions_per_user = $3,
+         enforce_mfa = $4, enforce_sso = $5, password_min_length = $6, updated_at = NOW()
+       RETURNING *`,
+      [next.ip_allowlist, next.session_idle_minutes, next.max_sessions_per_user, next.enforce_mfa, next.enforce_sso, next.password_min_length],
+    );
+    return this.rowToSecurityPolicy(result.rows[0]);
+  }
+
+  // ─── Field permissions ──────────────────────────────
+
+  async listFieldPermissions(): Promise<FieldPermission[]> {
+    const result = await query('SELECT * FROM field_permissions ORDER BY entity_type, field_key, role');
+    return result.rows.map((row: DbRow) => this.rowToFieldPermission(row));
+  }
+
+  async upsertFieldPermission(input: Omit<FieldPermission, 'id'> & { id?: string }): Promise<FieldPermission> {
+    const result = await query(
+      `INSERT INTO field_permissions (id, organization_id, entity_type, field_key, role, can_read, can_write)
+       VALUES ($1, current_setting('app.organization_id'), $2, $3, $4, $5, $6)
+       ON CONFLICT (organization_id, entity_type, field_key, role) DO UPDATE SET
+         can_read = $5, can_write = $6
+       RETURNING *`,
+      [input.id || randomUUID(), input.entity_type, input.field_key, input.role, input.can_read, input.can_write],
+    );
+    return this.rowToFieldPermission(result.rows[0]);
+  }
+
+  async deleteFieldPermission(id: string): Promise<boolean> {
+    const result = await query('DELETE FROM field_permissions WHERE id = $1', [id]);
+    return (result.rowCount || 0) > 0;
+  }
+
   // ─── Snapshot ───────────────────────────────────────
 
   async snapshot(): Promise<CrmSnapshot> {
-    const [users, accounts, contacts, pipelines, stages, deals, tasks, activities, notifications, customFields, emailTemplates, emailCampaigns, auditLogs] = await Promise.all([
+    const [
+      users, accounts, contacts, pipelines, stages, deals, tasks, activities, notifications,
+      customFields, emailTemplates, emailCampaigns, auditLogs,
+      apiKeys, webhooks, quotas, approvals, securityPolicy, fieldPermissions,
+    ] = await Promise.all([
       this.listUsers(),
       this.listAccounts(),
       this.listContacts(),
@@ -971,9 +1250,19 @@ export class PostgresCrmRepository implements CrmRepository {
       this.listEmailTemplates(),
       this.listEmailCampaigns(),
       this.listAuditLogs(),
+      this.listApiKeys(),
+      this.listWebhooks(),
+      this.listQuotas(),
+      this.listApprovals(),
+      this.getSecurityPolicy(),
+      this.listFieldPermissions(),
     ]);
 
-    return { users, accounts, contacts, pipelines, stages, deals, tasks, activities, notifications, customFields, emailTemplates, emailCampaigns, auditLogs };
+    return {
+      users, accounts, contacts, pipelines, stages, deals, tasks, activities, notifications,
+      customFields, emailTemplates, emailCampaigns, auditLogs,
+      apiKeys, webhooks, quotas, approvals, securityPolicy, fieldPermissions,
+    };
   }
 
   // ─── Email Tracking ────────────────────────────────
@@ -1278,6 +1567,112 @@ export class PostgresCrmRepository implements CrmRepository {
       storage_provider: row.storage_provider,
       storage_path: row.storage_path,
       created_at: row.created_at instanceof Date ? row.created_at.toISOString() : String(row.created_at),
+    };
+  }
+
+  private rowToApiKey(row: DbRow): ApiKey {
+    return {
+      id: row.id,
+      organization_id: row.organization_id || undefined,
+      name: row.name,
+      key_prefix: row.key_prefix,
+      scopes: row.scopes || [],
+      created_by_id: row.created_by_id || undefined,
+      last_used_at: row.last_used_at ? (row.last_used_at instanceof Date ? row.last_used_at.toISOString() : String(row.last_used_at)) : undefined,
+      expires_at: row.expires_at ? (row.expires_at instanceof Date ? row.expires_at.toISOString() : String(row.expires_at)) : null,
+      revoked_at: row.revoked_at ? (row.revoked_at instanceof Date ? row.revoked_at.toISOString() : String(row.revoked_at)) : null,
+      created_at: row.created_at instanceof Date ? row.created_at.toISOString() : String(row.created_at),
+    };
+  }
+
+  private rowToWebhook(row: DbRow): Webhook {
+    return {
+      id: row.id,
+      organization_id: row.organization_id || undefined,
+      name: row.name,
+      url: row.url,
+      secret: row.secret,
+      events: row.events || [],
+      status: row.status,
+      created_by_id: row.created_by_id || undefined,
+      last_triggered_at: row.last_triggered_at ? (row.last_triggered_at instanceof Date ? row.last_triggered_at.toISOString() : String(row.last_triggered_at)) : undefined,
+      failure_count: row.failure_count || 0,
+      created_at: row.created_at instanceof Date ? row.created_at.toISOString() : String(row.created_at),
+      updated_at: row.updated_at instanceof Date ? row.updated_at.toISOString() : String(row.updated_at),
+    };
+  }
+
+  private rowToWebhookDelivery(row: DbRow): WebhookDelivery {
+    return {
+      id: row.id,
+      organization_id: row.organization_id || undefined,
+      webhook_id: row.webhook_id,
+      event: row.event,
+      payload: row.payload || {},
+      response_status: row.response_status ?? undefined,
+      response_body: row.response_body ?? undefined,
+      success: row.success || false,
+      attempt: row.attempt || 1,
+      created_at: row.created_at instanceof Date ? row.created_at.toISOString() : String(row.created_at),
+    };
+  }
+
+  private rowToQuota(row: DbRow): Quota {
+    return {
+      id: row.id,
+      organization_id: row.organization_id || undefined,
+      user_id: row.user_id || null,
+      team_id: row.team_id || null,
+      period: row.period,
+      amount: Number(row.amount) || 0,
+      currency: row.currency || 'USD',
+      fiscal_year: row.fiscal_year,
+      fiscal_period: row.fiscal_period,
+      created_at: row.created_at instanceof Date ? row.created_at.toISOString() : String(row.created_at),
+      updated_at: row.updated_at instanceof Date ? row.updated_at.toISOString() : String(row.updated_at),
+    };
+  }
+
+  private rowToApproval(row: DbRow): ApprovalRequest {
+    return {
+      id: row.id,
+      organization_id: row.organization_id || undefined,
+      entity_type: row.entity_type,
+      entity_id: row.entity_id,
+      requested_by_id: row.requested_by_id,
+      approver_id: row.approver_id || null,
+      status: row.status,
+      title: row.title,
+      reason: row.reason || undefined,
+      payload: row.payload || {},
+      decision_note: row.decision_note || undefined,
+      decided_at: row.decided_at ? (row.decided_at instanceof Date ? row.decided_at.toISOString() : String(row.decided_at)) : undefined,
+      created_at: row.created_at instanceof Date ? row.created_at.toISOString() : String(row.created_at),
+    };
+  }
+
+  private rowToSecurityPolicy(row: DbRow): OrgSecurityPolicy {
+    return {
+      organization_id: row.organization_id,
+      ip_allowlist: row.ip_allowlist || [],
+      session_idle_minutes: row.session_idle_minutes,
+      max_sessions_per_user: row.max_sessions_per_user,
+      enforce_mfa: row.enforce_mfa || false,
+      enforce_sso: row.enforce_sso || false,
+      password_min_length: row.password_min_length,
+      updated_at: row.updated_at instanceof Date ? row.updated_at.toISOString() : String(row.updated_at),
+    };
+  }
+
+  private rowToFieldPermission(row: DbRow): FieldPermission {
+    return {
+      id: row.id,
+      organization_id: row.organization_id || undefined,
+      entity_type: row.entity_type,
+      field_key: row.field_key,
+      role: row.role,
+      can_read: row.can_read,
+      can_write: row.can_write,
     };
   }
 }

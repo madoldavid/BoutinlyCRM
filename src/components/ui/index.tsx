@@ -39,7 +39,7 @@ const buttonVariants: Record<ButtonVariant, string> = {
 
 const buttonSizes: Record<ButtonSize, string> = {
   sm: 'h-7 text-2xs px-2.5 gap-1.5 rounded-md font-semibold',
-  md: 'h-8.5 text-xs px-3.5 gap-2 rounded-lg font-semibold',
+  md: 'h-9 text-xs px-3.5 gap-2 rounded-lg font-semibold',
 };
 
 export function Button({

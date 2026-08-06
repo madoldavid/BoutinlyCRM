@@ -461,17 +461,17 @@ export default function PipelineModule() {
     <div className="flex-1 flex overflow-hidden bg-theme-base text-theme-primary">
       
       {/* MAIN SALES WORKSPACE COLUMN */}
-      <div className="w-1/2 flex flex-col border-r border-theme-border bg-theme-card h-full select-none">
+      <div className={`${selectedDealId ? 'hidden lg:flex' : 'flex'} w-full lg:w-1/2 min-w-0 flex-col border-r border-theme-border bg-theme-card h-full select-none`}>
         
         {/* Module Controls and Swappers */}
-        <div className="p-4 border-b border-theme-border space-y-3.5 shrink-0">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <Layers className="w-4 h-4 text-theme-accent" />
+        <div className="p-3 sm:p-4 border-b border-theme-border space-y-3 shrink-0">
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2 min-w-0">
+              <Layers className="w-4 h-4 text-theme-accent shrink-0" />
               <select
                 value={activePipelineId}
                 onChange={(e) => setActivePipelineId(e.target.value)}
-                className="bg-transparent text-sm font-bold text-theme-primary focus:outline-none cursor-pointer border border-transparent hover:border-theme-border rounded px-1.5 py-0.5"
+                className="bg-transparent text-sm font-semibold text-theme-primary focus:outline-none cursor-pointer border border-transparent hover:border-theme-border rounded-md px-1.5 py-0.5 min-w-0 max-w-[180px] truncate"
               >
                 {pipelines.map(p => (
                   <option key={p.id} value={p.id} className="bg-theme-card text-theme-primary">{p.name} Pipeline</option>
@@ -480,11 +480,11 @@ export default function PipelineModule() {
             </div>
 
             {/* Layout Toggle buttons */}
-            <div className="flex items-center gap-1 bg-theme-base p-0.5 rounded-lg border border-theme-border text-xs font-semibold">
+            <div className="flex items-center gap-0.5 bg-theme-base p-0.5 rounded-lg border border-theme-border text-xs font-semibold shrink-0">
               <button
                 onClick={() => setViewType('kanban')}
-                className={`p-1.5 rounded cursor-pointer transition-colors ${
-                  viewType === 'kanban' ? 'bg-theme-card text-theme-primary shadow-2xs' : 'text-theme-secondary hover:text-theme-primary'
+                className={`p-1.5 rounded-md cursor-pointer transition-colors ${
+                  viewType === 'kanban' ? 'bg-theme-card text-theme-primary shadow-card' : 'text-theme-secondary hover:text-theme-primary'
                 }`}
                 title="Kanban Board"
               >
@@ -492,8 +492,8 @@ export default function PipelineModule() {
               </button>
               <button
                 onClick={() => setViewType('list')}
-                className={`p-1.5 rounded cursor-pointer transition-colors ${
-                  viewType === 'list' ? 'bg-theme-card text-theme-primary shadow-2xs' : 'text-theme-secondary hover:text-theme-primary'
+                className={`p-1.5 rounded-md cursor-pointer transition-colors ${
+                  viewType === 'list' ? 'bg-theme-card text-theme-primary shadow-card' : 'text-theme-secondary hover:text-theme-primary'
                 }`}
                 title="Deals Grid"
               >
@@ -501,8 +501,8 @@ export default function PipelineModule() {
               </button>
               <button
                 onClick={() => setViewType('forecast')}
-                className={`p-1.5 rounded cursor-pointer transition-colors ${
-                  viewType === 'forecast' ? 'bg-theme-card text-theme-primary shadow-2xs' : 'text-theme-secondary hover:text-theme-primary'
+                className={`p-1.5 rounded-md cursor-pointer transition-colors ${
+                  viewType === 'forecast' ? 'bg-theme-card text-theme-primary shadow-card' : 'text-theme-secondary hover:text-theme-primary'
                 }`}
                 title="Weighted Revenue Forecast"
               >
@@ -512,7 +512,17 @@ export default function PipelineModule() {
           </div>
 
           {/* Search, Filter rep dropdown, saved views, and create deal */}
-          <div className="flex gap-2">
+          <div className="flex gap-2 items-center flex-wrap">
+            <div className="relative flex-1 min-w-[140px]">
+              <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-theme-secondary pointer-events-none" />
+              <input
+                type="text"
+                placeholder="Search deals…"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="w-full bg-theme-base text-theme-primary border border-theme-border rounded-lg pl-9 pr-3 h-9 text-xs focus:ring-1 focus:ring-theme-accent focus:outline-none"
+              />
+            </div>
             <ViewSwitcher
               views={views}
               onApply={applyView}
@@ -523,21 +533,11 @@ export default function PipelineModule() {
               onDelete={deleteView}
               onSetDefault={setDefaultView}
             />
-            <div className="relative flex-1">
-              <Search className="w-3.5 h-3.5 absolute left-3 top-3 text-theme-secondary/80" />
-              <input
-                type="text"
-                placeholder="Search deals or accounts..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="w-full bg-theme-base text-theme-primary border border-theme-border rounded-lg pl-9 pr-4 py-2 text-xs focus:ring-1 focus:ring-theme-accent focus:outline-none"
-              />
-            </div>
             {currentUser.role !== UserRole.SALES_REP && (
               <select
                 value={selectedRepId}
                 onChange={(e) => setSelectedRepId(e.target.value)}
-                className="bg-theme-card border border-theme-border rounded-lg px-2 text-xs font-medium focus:outline-none focus:ring-1 focus:ring-theme-accent cursor-pointer text-theme-primary"
+                className="bg-theme-card border border-theme-border rounded-lg px-2 h-9 text-xs font-medium focus:outline-none focus:ring-1 focus:ring-theme-accent cursor-pointer text-theme-primary shrink-0 max-w-[140px]"
               >
                 <option value="All">All Owners</option>
                 {users.map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
@@ -546,7 +546,7 @@ export default function PipelineModule() {
             {!isReadOnly && (
               <button
                 onClick={() => setShowCreateDeal(true)}
-                className="bg-theme-accent hover:opacity-90 text-white px-3 py-1.5 rounded-lg flex items-center gap-1 text-xs font-semibold transition-colors shadow-xs shrink-0 cursor-pointer"
+                className="bg-theme-accent hover:bg-theme-accent-strong text-white px-3 h-9 rounded-lg flex items-center gap-1 text-xs font-semibold transition-colors shadow-card shrink-0 cursor-pointer"
               >
                 <Plus className="w-3.5 h-3.5" /> Deal
               </button>
@@ -884,51 +884,59 @@ export default function PipelineModule() {
 
 
       {/* RIGHT COLUMN: DEAL DETAIL VIEW PANEL */}
-      <div className="w-1/2 flex flex-col bg-theme-base h-full overflow-hidden select-none print-area">
+      <div className={`${selectedDealId ? 'flex' : 'hidden lg:flex'} w-full lg:w-1/2 min-w-0 flex-col bg-theme-base h-full overflow-hidden select-none print-area`}>
         {activeDeal ? (
           <div className="flex-1 flex flex-col h-full overflow-hidden text-left">
             
             {/* Header profile block */}
-            <div className="bg-theme-card p-5 border-b border-theme-border shrink-0">
-              <div className="flex justify-between items-start">
-                <div className="flex items-center gap-3">
-                  <div className="p-2.5 bg-theme-accent/10 text-theme-accent rounded-xl">
+            <div className="bg-theme-card p-4 sm:p-5 border-b border-theme-border shrink-0">
+              <button
+                type="button"
+                onClick={() => setSelectedDealId(null)}
+                className="lg:hidden mb-3 text-xs font-semibold text-theme-accent hover:text-theme-accent-strong cursor-pointer bg-transparent border-none px-0"
+              >
+                ← Back to list
+              </button>
+              <div className="flex justify-between items-start gap-3">
+                <div className="flex items-center gap-3 min-w-0">
+                  <div className="p-2.5 bg-theme-accent/10 text-theme-accent rounded-xl shrink-0">
                     <Briefcase className="w-6 h-6" />
                   </div>
-                  <div>
-                    <h3 className="text-base font-bold text-theme-primary">{activeDeal.name}</h3>
-                    <p className="text-xs text-theme-secondary">
+                  <div className="min-w-0">
+                    <h3 className="text-base font-bold text-theme-primary truncate">{activeDeal.name}</h3>
+                    <p className="text-xs text-theme-secondary truncate">
                       Company: <strong className="text-theme-primary">{accounts.find(a => a.id === activeDeal.account_id)?.name || 'Unassigned'}</strong>
                     </p>
                   </div>
                 </div>
 
-                {/* CRUD delete */}
-                {!isReadOnly && (
+                <div className="flex items-center gap-1 shrink-0">
+                  {!isReadOnly && (
+                    <button
+                      onClick={() => setConfirmDeleteDealId(activeDeal.id)}
+                      className="p-1.5 text-theme-secondary hover:text-theme-accent rounded-md hover:bg-theme-hover transition-colors cursor-pointer bg-transparent border-none"
+                      aria-label={`Delete deal ${activeDeal.name}`}
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  )}
                   <button
-                    onClick={() => setConfirmDeleteDealId(activeDeal.id)}
-                    className="p-1.5 text-theme-secondary hover:text-theme-accent rounded hover:bg-theme-base transition-colors cursor-pointer bg-transparent border-none"
-                    aria-label={`Delete deal ${activeDeal.name}`}
+                    onClick={printRecord}
+                    className="p-1.5 text-theme-secondary hover:text-theme-primary rounded-md hover:bg-theme-hover transition-colors cursor-pointer bg-transparent border-none"
+                    aria-label={`Print or save ${activeDeal.name} as PDF`}
+                    title="Print / Save as PDF"
                   >
-                    <Trash2 className="w-4.5 h-4.5" />
+                    <Printer className="w-4 h-4" />
                   </button>
-                )}
-                <button
-                  onClick={printRecord}
-                  className="p-1.5 text-theme-secondary hover:text-theme-primary rounded hover:bg-theme-base transition-colors cursor-pointer bg-transparent border-none"
-                  aria-label={`Print or save ${activeDeal.name} as PDF`}
-                  title="Print / Save as PDF"
-                >
-                  <Printer className="w-4.5 h-4.5" />
-                </button>
-                <button
-                  onClick={() => setFullDealDetail(activeDeal.id)}
-                  className="p-1.5 text-theme-secondary hover:text-theme-accent rounded hover:bg-theme-base transition-colors cursor-pointer bg-transparent border-none"
-                  aria-label={`View full record for ${activeDeal.name}`}
-                  title="View Full Record"
-                >
-                  <Maximize2 className="w-4.5 h-4.5" />
-                </button>
+                  <button
+                    onClick={() => setFullDealDetail(activeDeal.id)}
+                    className="p-1.5 text-theme-secondary hover:text-theme-accent rounded-md hover:bg-theme-hover transition-colors cursor-pointer bg-transparent border-none"
+                    aria-label={`View full record for ${activeDeal.name}`}
+                    title="View Full Record"
+                  >
+                    <Maximize2 className="w-4 h-4" />
+                  </button>
+                </div>
               </div>
 
               {/* Core Attributes */}

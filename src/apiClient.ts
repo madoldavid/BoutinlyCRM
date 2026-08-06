@@ -2,18 +2,25 @@ import { runtimeConfig } from './runtimeConfig';
 import type {
   Account,
   Activity,
+  ApiKey,
+  ApprovalRequest,
   AuditLog,
   Contact,
   CustomFieldDefinition,
   Deal,
   EmailCampaign,
   EmailTemplate,
+  FieldPermission,
   Notification,
+  OrgSecurityPolicy,
   Pipeline,
+  Quota,
   Stage,
   Task,
   User,
   UserRole,
+  Webhook,
+  WebhookDelivery,
 } from './types';
 
 // ─── Response types ────────────────────────────────────
@@ -561,6 +568,124 @@ export class ApiClient {
   async getFlags(): Promise<Array<{ key: string; description: string; defaultEnabled: boolean; enabled: boolean; source: string }>> {
     const res = await this.request<{ flags: Array<{ key: string; description: string; defaultEnabled: boolean; enabled: boolean; source: string }> }>('/api/flags');
     return res.flags;
+  }
+
+  // ─── Audit log export ──────────────────────────────
+
+  async exportAuditLogs(format: 'json' | 'csv'): Promise<Blob> {
+    const headers: Record<string, string> = {};
+    if (this.token) headers['Authorization'] = `Bearer ${this.token}`;
+    const response = await fetch(`${this.baseUrl}/api/audit-logs/export?format=${format}`, { headers });
+    if (!response.ok) {
+      const payload = await response.json().catch(() => null);
+      throw new ApiError(response.status, payload?.error?.message || 'Export failed', payload?.error?.code);
+    }
+    return response.blob();
+  }
+
+  // ─── API keys ───────────────────────────────────────
+
+  async listApiKeys(): Promise<ApiKey[]> {
+    const res = await this.request<{ api_keys: ApiKey[] }>('/api/admin/api-keys');
+    return res.api_keys;
+  }
+
+  async createApiKey(data: { name: string; scopes: string[]; expires_at?: string | null }): Promise<ApiKey> {
+    const res = await this.request<{ api_key: ApiKey }>('/api/admin/api-keys', { method: 'POST', body: JSON.stringify(data) });
+    return res.api_key;
+  }
+
+  async revokeApiKey(id: string): Promise<ApiKey> {
+    const res = await this.request<{ api_key: ApiKey }>(`/api/admin/api-keys/${id}`, { method: 'DELETE' });
+    return res.api_key;
+  }
+
+  // ─── Webhooks ───────────────────────────────────────
+
+  async listWebhooks(): Promise<{ webhooks: Webhook[]; available_events: string[] }> {
+    return this.request<{ webhooks: Webhook[]; available_events: string[] }>('/api/admin/webhooks');
+  }
+
+  async createWebhook(data: { name: string; url: string; events: string[] }): Promise<Webhook> {
+    const res = await this.request<{ webhook: Webhook }>('/api/admin/webhooks', { method: 'POST', body: JSON.stringify(data) });
+    return res.webhook;
+  }
+
+  async updateWebhook(id: string, data: Partial<Pick<Webhook, 'name' | 'url' | 'events' | 'status'>>): Promise<Webhook> {
+    const res = await this.request<{ webhook: Webhook }>(`/api/admin/webhooks/${id}`, { method: 'PUT', body: JSON.stringify(data) });
+    return res.webhook;
+  }
+
+  async deleteWebhook(id: string): Promise<void> {
+    await this.request<void>(`/api/admin/webhooks/${id}`, { method: 'DELETE' });
+  }
+
+  async listWebhookDeliveries(id: string): Promise<WebhookDelivery[]> {
+    const res = await this.request<{ deliveries: WebhookDelivery[] }>(`/api/admin/webhooks/${id}/deliveries`);
+    return res.deliveries;
+  }
+
+  async testWebhook(id: string): Promise<{ ok: boolean; signature: string }> {
+    return this.request<{ ok: boolean; signature: string }>(`/api/admin/webhooks/${id}/test`, { method: 'POST' });
+  }
+
+  // ─── Quotas ─────────────────────────────────────────
+
+  async listQuotas(): Promise<Quota[]> {
+    const res = await this.request<{ quotas: Quota[] }>('/api/admin/quotas');
+    return res.quotas;
+  }
+
+  async upsertQuota(data: Record<string, unknown>): Promise<Quota> {
+    const res = await this.request<{ quota: Quota }>('/api/admin/quotas', { method: 'POST', body: JSON.stringify(data) });
+    return res.quota;
+  }
+
+  async deleteQuota(id: string): Promise<void> {
+    await this.request<void>(`/api/admin/quotas/${id}`, { method: 'DELETE' });
+  }
+
+  // ─── Approvals ──────────────────────────────────────
+
+  async listApprovals(status?: string): Promise<ApprovalRequest[]> {
+    const res = await this.request<{ approvals: ApprovalRequest[] }>('/api/approvals' + this.toQuery({ status }));
+    return res.approvals;
+  }
+
+  async decideApproval(id: string, decision: 'approved' | 'rejected', note?: string): Promise<ApprovalRequest> {
+    const res = await this.request<{ approval: ApprovalRequest }>(`/api/approvals/${id}/decide`, {
+      method: 'POST',
+      body: JSON.stringify({ decision, note }),
+    });
+    return res.approval;
+  }
+
+  // ─── Security policy ────────────────────────────────
+
+  async getSecurityPolicy(): Promise<OrgSecurityPolicy> {
+    const res = await this.request<{ policy: OrgSecurityPolicy }>('/api/admin/security-policy');
+    return res.policy;
+  }
+
+  async updateSecurityPolicy(data: Partial<OrgSecurityPolicy>): Promise<OrgSecurityPolicy> {
+    const res = await this.request<{ policy: OrgSecurityPolicy }>('/api/admin/security-policy', { method: 'PUT', body: JSON.stringify(data) });
+    return res.policy;
+  }
+
+  // ─── Field permissions ──────────────────────────────
+
+  async listFieldPermissions(): Promise<FieldPermission[]> {
+    const res = await this.request<{ field_permissions: FieldPermission[] }>('/api/admin/field-permissions');
+    return res.field_permissions;
+  }
+
+  async createFieldPermission(data: { entity_type: string; field_key: string; role: UserRole; can_read: boolean; can_write: boolean }): Promise<FieldPermission> {
+    const res = await this.request<{ field_permission: FieldPermission }>('/api/admin/field-permissions', { method: 'POST', body: JSON.stringify(data) });
+    return res.field_permission;
+  }
+
+  async deleteFieldPermission(id: string): Promise<void> {
+    await this.request<void>(`/api/admin/field-permissions/${id}`, { method: 'DELETE' });
   }
 
   // ─── Helpers ───────────────────────────────────────

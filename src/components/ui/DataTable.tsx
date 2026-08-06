@@ -53,6 +53,8 @@ export interface DataTableProps<T> {
   className?: string;
   /** Loading state */
   loading?: boolean;
+  /** Called when a data row is clicked */
+  onRowClick?: (row: T) => void;
   /**
    * Stable identifier for this table (e.g. "contacts"). When set, column
    * visibility and density preferences persist per user device (G-FE-02).
@@ -112,6 +114,7 @@ export function DataTable<T extends Record<string, unknown>>({
   showDensityToggle = true,
   className = '',
   loading = false,
+  onRowClick,
   tableId,
 }: DataTableProps<T>) {
   const [density, setDensityState] = useState<'compact' | 'normal' | 'comfortable'>(
@@ -412,12 +415,13 @@ export function DataTable<T extends Record<string, unknown>>({
                 return (
                   <tr
                     key={key}
+                    onClick={() => onRowClick?.(row)}
                     className={`border-b border-theme-border last:border-b-0 transition-colors ${
                       isSelected ? 'bg-theme-accent-soft/50' : 'hover:bg-theme-hover/50'
-                    }`}
+                    } ${onRowClick ? 'cursor-pointer' : ''}`}
                   >
                     {selectable && (
-                      <td className={`${densityRowStyles[density]} w-10`}>
+                      <td className={`${densityRowStyles[density]} w-10`} onClick={e => e.stopPropagation()}>
                         <input
                           type="checkbox"
                           checked={isSelected}
