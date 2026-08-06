@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { useCRM } from '../store';
 import { Deal, UserRole, DealLineItem } from '../types';
 import { toast, ConfirmDialog, RecordDetailPage } from './ui';
@@ -13,14 +13,38 @@ import { useSavedViews, ViewSwitcher, type SavedView } from './ui/SavedViews';
 import KanbanBoard from './ui/KanbanBoard';
 import { NEW_RECORD_EVENT, SELECT_ENTITY_EVENT, type SelectEntityDetail } from './GlobalShortcuts';
 import { exportCsv } from '../utils/exportCsv';
-import { scoreDeal,
-  forecastConfidence,
-  GRADE_META,
-  type DealScore,
-  type InsightContext,
-} from '../ai/insights';
 import { relativeDueLabel, formatDateTime } from '../utils/time';
 import { printRecord } from '../utils/print';
+
+// ─── Local deterministic helpers (replaces ai/insights for client)
+type DealGrade = 'excellent' | 'good' | 'watch' | 'at_risk';
+
+function gradeOf(score: number): DealGrade {
+  if (score >= 75) return 'excellent';
+  if (score >= 55) return 'good';
+  if (score >= 35) return 'watch';
+  return 'at_risk';
+}
+
+const GRADE_META: Record<DealGrade, { label: string; tone: 'success' | 'info' | 'warning' | 'danger' }> = {
+  excellent: { label: 'Excellent', tone: 'success' },
+  good:     { label: 'Good',      tone: 'info' },
+  watch:    { label: 'Watch',     tone: 'warning' },
+  at_risk:  { label: 'At Risk',   tone: 'danger' },
+};
+
+interface DealScoreData {
+  score: number;
+  grade: DealGrade;
+  factors: Array<{ key: string; label: string; detail: string; impact: number }>;
+  confidence: number;
+}
+
+function formatFileSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
 import {
   Briefcase,
   Layers,
@@ -70,6 +94,12 @@ export default function PipelineModule() {
     activities,
     tasks,
     contacts,
+    uploadFile,
+    downloadFile,
+    listFiles,
+    deleteFile,
+    getDealScore,
+    getForecast,
   } = useCRM();
 
   // Deep-link from AI next-best-action → select the deal
@@ -88,25 +118,6 @@ export default function PipelineModule() {
 
   const scopedDeals = getScopedDeals();
   const activeStages = stages.filter(s => s.pipeline_id === activePipelineId);
-
-  // ─── Boutinly Intelligence: per-deal explainable scores ───
-  const insightContext = useMemo<InsightContext>(() => ({
-    deals: scopedDeals,
-    stages,
-    contacts: [], // contacts not needed for deal scoring
-    accounts,
-    tasks,
-    activities,
-    users,
-    currentUserId: currentUser?.id ?? '',
-    currentUserRole: currentUser?.role ?? UserRole.VIEWER,
-  }), [scopedDeals, stages, accounts, tasks, activities, users, currentUser]);
-
-  const scoreMap = useMemo(() => {
-    const map = new Map<string, DealScore>();
-    for (const deal of scopedDeals) map.set(deal.id, scoreDeal(deal, insightContext));
-    return map;
-  }, [scopedDeals, insightContext]);
 
   const [viewType, setViewType] = useState<'kanban' | 'list' | 'forecast'>('kanban');
   const [searchQuery, setSearchQuery] = useState('');
@@ -164,8 +175,15 @@ export default function PipelineModule() {
   });
 
   // Attachments state — populated from API
-  const [uploadedFiles, setUploadedFiles] = useState<Array<{name: string, size: string}>>([]);
-  const [showUploadSim, setShowUploadSim] = useState(false);
+  const [dealFiles, setDealFiles] = useState<Array<{ id: string; filename: string; mime_type: string; size_bytes: number; created_at: string }>>([]);
+  const [filesLoading, setFilesLoading] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Forecast data from API
+  const [forecastData, setForecastData] = useState<{ confidence: number; expected_revenue: number; best_case: number; worst_case: number; by_month: Record<string, number> } | null>(null);
+  const [forecastLoading, setForecastLoading] = useState(false);
+  const [scoreRefreshing, setScoreRefreshing] = useState(false);
 
   // Filters
   const filteredDeals = scopedDeals.filter(d => {
@@ -178,6 +196,77 @@ export default function PipelineModule() {
 
   const activeDeal = scopedDeals.find(d => d.id === selectedDealId) || filteredDeals[0];
 
+  // ─── Boutinly Intelligence: per-deal explainable scores (API-driven) ───
+  const [dealScores, setDealScores] = useState<Map<string, DealScoreData>>(new Map());
+  const [scoresLoading, setScoresLoading] = useState(false);
+
+  const dealIdsKey = filteredDeals.map(d => d.id).sort().join(',');
+
+  // Debounce timer for score loading — prevents a thundering herd of API
+  // calls when the user rapidly changes search filters or pipeline views.
+  const scoreDebounceTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const isInitialScoreLoad = useRef(true);
+
+  useEffect(() => {
+    // Clear any pending debounce timer from a previous effect invocation
+    if (scoreDebounceTimer.current) clearTimeout(scoreDebounceTimer.current);
+
+    // Fire immediately on the first load; debounce subsequent filter changes
+    const delay = isInitialScoreLoad.current ? 0 : 400;
+    isInitialScoreLoad.current = false;
+
+    scoreDebounceTimer.current = setTimeout(() => {
+      const cancelled = { value: false };
+      async function loadScores() {
+        setScoresLoading(true);
+        const map = new Map<string, DealScoreData>();
+        const dealIds = filteredDeals.map(d => d.id);
+        // Process in batches of 5 to limit concurrent API requests
+        const BATCH_SIZE = 5;
+        for (let i = 0; i < dealIds.length; i += BATCH_SIZE) {
+          if (cancelled.value) break;
+          const batch = dealIds.slice(i, i + BATCH_SIZE);
+          const results = await Promise.allSettled(
+            batch.map(dealId => getDealScore(dealId))
+          );
+          for (let j = 0; j < batch.length; j++) {
+            if (cancelled.value) break;
+            const result = results[j];
+            if (result.status === 'fulfilled') {
+              const { score, factors, confidence } = result.value;
+              // Skip API fallback values (all zeros means the API call failed)
+              if (score === 0 && factors.length === 0 && confidence === 0) continue;
+              const grade = gradeOf(score);
+              map.set(batch[j], {
+                score,
+                grade,
+                factors: factors.map(f => ({
+                  key: f.name.toLowerCase().replace(/\s+/g, '_'),
+                  label: f.name,
+                  detail: f.explanation,
+                  impact: f.impact,
+                })),
+                confidence,
+              });
+            }
+          }
+        }
+        if (!cancelled.value) {
+          setDealScores(map);
+          setScoresLoading(false);
+        }
+      }
+      loadScores();
+    }, delay);
+
+    return () => {
+      if (scoreDebounceTimer.current) clearTimeout(scoreDebounceTimer.current);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dealIdsKey]);
+
+  const scoreMap = dealScores; // alias so existing references keep working
+
   // Calculations for Forecast
   const forecastMonths = (() => {
     const months: string[] = [];
@@ -188,6 +277,146 @@ export default function PipelineModule() {
     }
     return months;
   })();
+
+  // Client-side forecast fallback: compute KPI values from filtered deals
+  // when the /api/insights/forecast endpoint is unreachable (offline mode).
+  const clientForecast = useMemo(() => {
+    if (filteredDeals.length === 0) return null;
+
+    let weightedSum = 0;
+    let rawSum = 0;
+    let totalScore = 0;
+    let dealsWithScore = 0;
+
+    for (const deal of filteredDeals) {
+      rawSum += deal.value;
+      const stageProb = stages.find(s => s.id === deal.stage_id)?.probability ?? 0;
+      const prob = deal.probability != null ? deal.probability : stageProb;
+      weightedSum += deal.value * (prob / 100);
+      const score = scoreMap.get(deal.id);
+      if (score) {
+        totalScore += score.score;
+        dealsWithScore++;
+      }
+    }
+
+    // Best case = raw pipeline total, Worst case = conservative 50% of weighted
+    const avgScore = dealsWithScore > 0 ? totalScore / dealsWithScore : 50;
+
+    return {
+      expected_revenue: Math.round(weightedSum),
+      best_case: Math.round(rawSum),
+      worst_case: Math.round(weightedSum * 0.5),
+      confidence: Math.round(avgScore),
+    };
+  }, [filteredDeals, stages, scoreMap]);
+
+  const apiHasForecastData = forecastData && (
+    forecastData.expected_revenue > 0 ||
+    forecastData.best_case > 0 ||
+    forecastData.worst_case > 0 ||
+    forecastData.confidence > 0
+  );
+  const displayForecast = apiHasForecastData ? forecastData : clientForecast;
+  const forecastIsClientSide = !apiHasForecastData && clientForecast != null;
+
+  // ─── Load deal files from API when selected deal changes ───
+  useEffect(() => {
+    if (!activeDeal) return;
+    let cancelled = false;
+    async function load() {
+      setFilesLoading(true);
+      try {
+        const files = await listFiles({ entity_type: 'deal', entity_id: activeDeal.id });
+        if (!cancelled) setDealFiles(files);
+      } catch {
+        if (!cancelled) setDealFiles([]);
+      }
+      if (!cancelled) setFilesLoading(false);
+    }
+    load();
+    return () => { cancelled = true; };
+  }, [activeDeal?.id, listFiles]);
+
+  // ─── Load forecast from API when switching to forecast view ───
+  useEffect(() => {
+    if (viewType !== 'forecast') return;
+    let cancelled = false;
+    async function load() {
+      setForecastLoading(true);
+      try {
+        const result = await getForecast();
+        if (!cancelled) setForecastData(result);
+      } catch {
+        if (!cancelled) setForecastData(null);
+      }
+      if (!cancelled) setForecastLoading(false);
+    }
+    load();
+    return () => { cancelled = true; };
+  }, [viewType, getForecast]);
+
+  // ─── File upload / download / delete handlers ───
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !activeDeal) return;
+    setUploading(true);
+    try {
+      await uploadFile(file, 'deal', activeDeal.id);
+      const files = await listFiles({ entity_type: 'deal', entity_id: activeDeal.id });
+      setDealFiles(files);
+    } catch (err: any) {
+      toast.error('Upload failed', err?.message || 'Could not upload file');
+    }
+    setUploading(false);
+    if (fileInputRef.current) fileInputRef.current.value = '';
+  };
+
+  const handleDeleteFile = async (fileId: string) => {
+    try {
+      await deleteFile(fileId);
+      setDealFiles(prev => prev.filter(f => f.id !== fileId));
+      toast.success('File deleted');
+    } catch (err: any) {
+      toast.error('Delete failed', err?.message || 'Could not delete file');
+    }
+  };
+
+  const handleDownloadFile = async (fileId: string, filename: string) => {
+    try {
+      await downloadFile(fileId);
+    } catch (err: any) {
+      toast.error('Download failed', err?.message || 'Could not download file');
+    }
+  };
+
+  const handleRefreshScore = async () => {
+    if (!activeDeal) return;
+    setScoreRefreshing(true);
+    try {
+      const result = await getDealScore(activeDeal.id);
+      const grade = gradeOf(result.score);
+      setDealScores(prev => {
+        const next = new Map(prev);
+        next.set(activeDeal.id, {
+          score: result.score,
+          grade,
+          factors: result.factors.map(f => ({
+            key: f.name.toLowerCase().replace(/\s+/g, '_'),
+            label: f.name,
+            detail: f.explanation,
+            impact: f.impact,
+          })),
+          confidence: result.confidence,
+        });
+        return next;
+      });
+      toast.success('Score refreshed');
+    } catch (err: any) {
+      toast.error('Score refresh failed', err?.message || 'Could not refresh score');
+    }
+    setScoreRefreshing(false);
+  };
 
   // ─── CSV export (list view) ───
   const handleExportDeals = () => {
@@ -212,7 +441,7 @@ export default function PipelineModule() {
 
     const total = lineItemForm.quantity * lineItemForm.unit_price * (1 - lineItemForm.discount_pct / 100);
     const newItem: DealLineItem = {
-      id: 'li-' + Math.random().toString(36).substring(2, 11),
+      id: 'li-' + crypto.randomUUID(),
       product_name: lineItemForm.product_name,
       quantity: Number(lineItemForm.quantity),
       unit_price: Number(lineItemForm.unit_price),
@@ -267,10 +496,12 @@ export default function PipelineModule() {
     setShowCloseDealModal(true);
   };
 
-  const handleCloseDealConfirm = () => {
+  const handleCloseDealConfirm = async () => {
     if (!activeDeal) return;
-    closeDeal(activeDeal.id, closingOutcome, closingOutcome === 'lost' ? lostReason : undefined);
+    const ok = await closeDeal(activeDeal.id, closingOutcome, closingOutcome === 'lost' ? lostReason : undefined);
+    if (!ok) return; // Keep modal open on failure so the user can retry
     setShowCloseDealModal(false);
+    setLostReason('');
   };
 
   // Stall alert calculator (14 days stagnant threshold)
@@ -513,14 +744,14 @@ export default function PipelineModule() {
 
           {/* Search, Filter rep dropdown, saved views, and create deal */}
           <div className="flex gap-2 items-center flex-wrap">
-            <div className="relative flex-1 min-w-[140px]">
+            <div className="relative flex-1 min-w-[180px]">
               <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-theme-secondary pointer-events-none" />
               <input
                 type="text"
                 placeholder="Search deals…"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                className="w-full bg-theme-base text-theme-primary border border-theme-border rounded-lg pl-9 pr-3 h-9 text-xs focus:ring-1 focus:ring-theme-accent focus:outline-none"
+                className="w-full h-9 bg-theme-card text-theme-primary border border-theme-border rounded-lg !pl-9 pr-3 text-sm focus:ring-2 focus:ring-theme-accent/10 focus:border-theme-accent focus:outline-none placeholder:text-theme-secondary/50"
               />
             </div>
             <ViewSwitcher
@@ -653,16 +884,15 @@ export default function PipelineModule() {
               if (!deal) return;
               const toStage = activeStages.find(s => s.id === toStageId);
               if (!toStage) return;
+              let ok = false;
               if (toStage.type === 'won') {
-                await closeDeal(cardId, 'won');
-                toast.success('Deal Won!', '"' + deal.name + '" has been closed as Won.');
+                ok = await closeDeal(cardId, 'won');
               } else if (toStage.type === 'lost') {
-                await closeDeal(cardId, 'lost');
-                toast.success('Deal Lost', '"' + deal.name + '" has been closed as Lost.');
+                ok = await closeDeal(cardId, 'lost');
               } else {
-                await moveDealStage(cardId, toStageId);
-                toast.success('Deal moved', '"' + deal.name + '" → ' + toStage.name);
+                ok = await moveDealStage(cardId, toStageId);
               }
+              if (!ok) throw new Error(`The server rejected the stage change for deal "${deal.name}". The card will snap back to its original stage.`);
             }}
             loading={false}
           />
@@ -790,36 +1020,42 @@ export default function PipelineModule() {
           <div className="flex-1 p-5 overflow-y-auto bg-theme-base text-left space-y-6">
             <div>
               <h4 className="text-xs font-bold uppercase font-sans tracking-wider text-theme-secondary">Weighted Financial Pipeline Rollup</h4>
-              <p className="text-[11px] text-theme-secondary mt-1">Expected revenue is calculated dynamically using stage probability ratios (Deal value × Win probability).</p>
+              <p className="text-[11px] text-theme-secondary mt-1">
+                Expected revenue powered by Boutinly Intelligence API. Forecast is computed server-side from pipeline data, stage probabilities, and historical win rates.
+              </p>
             </div>
 
-            {(() => {
-              const fc = forecastConfidence(filteredDeals, insightContext);
-              if (filteredDeals.length === 0) return null;
-              return (
-                <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-                  <div className="bg-theme-card p-4 rounded-xl border border-theme-border shadow-2xs">
-                    <span className="text-[10px] uppercase font-sans text-theme-secondary block font-bold">Committed (≥75% prob.)</span>
-                    <span className="text-lg font-bold text-theme-primary font-sans tnum">${fc.committed.toLocaleString()}</span>
-                  </div>
-                  <div className="bg-theme-card p-4 rounded-xl border border-theme-border shadow-2xs">
-                    <span className="text-[10px] uppercase font-sans text-theme-secondary block font-bold">Weighted Expected</span>
-                    <span className="text-lg font-bold text-theme-accent font-sans tnum">${fc.weighted.toLocaleString()}</span>
-                  </div>
-                  <div className="bg-theme-card p-4 rounded-xl border border-theme-border shadow-2xs">
-                    <span className="text-[10px] uppercase font-sans text-theme-secondary block font-bold">Expected Range</span>
-                    <span className="text-sm font-bold text-theme-primary font-sans tnum">
-                      ${fc.expectedLow.toLocaleString()} – ${fc.expectedHigh.toLocaleString()}
-                    </span>
-                  </div>
-                  <div className="bg-theme-card p-4 rounded-xl border border-theme-border shadow-2xs">
-                    <span className="text-[10px] uppercase font-sans text-theme-secondary block font-bold">Variance (±)</span>
-                    <span className="text-sm font-bold text-theme-primary font-sans tnum">{fc.variancePct}%</span>
-                    <span className="text-[10px] text-theme-secondary block mt-0.5 font-sans">Why? Spread of stage probabilities on open deals.</span>
-                  </div>
+            {forecastLoading ? (
+              <div className="text-center py-8 text-xs text-theme-secondary/70 font-sans">
+                <Clock className="w-8 h-8 mx-auto mb-2 text-theme-secondary/40" />
+                <p>Loading forecast from Boutinly Intelligence…</p>
+              </div>
+            ) : null}
+            {!forecastLoading && displayForecast && filteredDeals.length > 0 && (
+              <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+                <div className="bg-theme-card p-4 rounded-xl border border-theme-border shadow-2xs">
+                  <span className="text-[10px] uppercase font-sans text-theme-secondary block font-bold">Expected Revenue</span>
+                  <span className="text-lg font-bold text-theme-accent font-sans tnum">${displayForecast.expected_revenue.toLocaleString()}</span>
                 </div>
-              );
-            })()}
+                <div className="bg-theme-card p-4 rounded-xl border border-theme-border shadow-2xs">
+                  <span className="text-[10px] uppercase font-sans text-theme-secondary block font-bold">Best Case</span>
+                  <span className="text-lg font-bold text-success font-sans tnum">${displayForecast.best_case.toLocaleString()}</span>
+                </div>
+                <div className="bg-theme-card p-4 rounded-xl border border-theme-border shadow-2xs">
+                  <span className="text-[10px] uppercase font-sans text-theme-secondary block font-bold">Worst Case</span>
+                  <span className="text-lg font-bold text-danger font-sans tnum">${displayForecast.worst_case.toLocaleString()}</span>
+                </div>
+                <div className="bg-theme-card p-4 rounded-xl border border-theme-border shadow-2xs">
+                  <span className="text-[10px] uppercase font-sans text-theme-secondary block font-bold">Confidence</span>
+                  <span className="text-lg font-bold text-theme-primary font-sans tnum">{displayForecast.confidence}%</span>
+                  <span className="text-[10px] text-theme-secondary block mt-0.5 font-sans">
+                    {forecastIsClientSide
+                      ? 'Locally estimated from stage probabilities.'
+                      : 'Model confidence in the expected revenue projection.'}
+                  </span>
+                </div>
+              </div>
+            )}
 
             <div className="space-y-4 font-sans text-xs">
               {filteredDeals.length === 0 ? (
@@ -836,11 +1072,17 @@ export default function PipelineModule() {
                 });
 
                 const totalRawValue = monthDeals.reduce((sum, d) => sum + d.value, 0);
-                const totalWeightedValue = monthDeals.reduce((sum, d) => {
-                  const stageProb = stages.find(s => s.id === d.stage_id)?.probability || 0;
-                  const prob = d.probability !== undefined ? d.probability : stageProb;
-                  return sum + (d.value * (prob / 100));
-                }, 0);
+                // Prefer API by_month forecast data; fall back to client-side
+                // stage-probability weighting only when the API is unreachable.
+                const apiMonthWeighted = forecastData?.by_month?.[month];
+                const hasApiMonthData = apiMonthWeighted != null;
+                const totalWeightedValue = hasApiMonthData
+                  ? apiMonthWeighted
+                  : monthDeals.reduce((sum, d) => {
+                      const stageProb = stages.find(s => s.id === d.stage_id)?.probability || 0;
+                      const prob = d.probability !== undefined ? d.probability : stageProb;
+                      return sum + (d.value * (prob / 100));
+                    }, 0);
 
                 return (
                   <div key={month} className="bg-theme-card p-4 rounded-xl border border-theme-border shadow-2xs space-y-3">
@@ -857,21 +1099,15 @@ export default function PipelineModule() {
                         <span className="text-base font-bold text-theme-primary font-sans">${totalRawValue.toLocaleString()}</span>
                       </div>
                       <div>
-                        <span className="text-[10px] uppercase font-sans text-theme-secondary block font-bold">Expected Weighted Revenue</span>
+                        <span className="text-[10px] uppercase font-sans text-theme-secondary block font-bold">
+                          Expected Weighted Revenue
+                          {hasApiMonthData ? null : (
+                            <span className="text-warning font-normal ml-1" title="Computed from stage probabilities — API forecast is unavailable">(estimate)</span>
+                          )}
+                        </span>
                         <span className="text-base font-bold text-theme-accent font-sans">${totalWeightedValue.toLocaleString()}</span>
                       </div>
                     </div>
-                    {(() => {
-                      const mfc = forecastConfidence(monthDeals, insightContext);
-                      if (monthDeals.length === 0) return null;
-                      return (
-                        <p className="text-[10px] text-theme-secondary font-sans border-t border-theme-border pt-2">
-                          Confidence range{' '}
-                          <span className="font-semibold text-theme-primary tnum">${mfc.expectedLow.toLocaleString()} – ${mfc.expectedHigh.toLocaleString()}</span>{' '}
-                          (±{mfc.variancePct}%) · committed <span className="font-semibold tnum">${mfc.committed.toLocaleString()}</span>
-                        </p>
-                      );
-                    })()}
                   </div>
                 );
               })
@@ -1021,8 +1257,12 @@ export default function PipelineModule() {
             {/* Split panels: PRODUCTS & ATTACHMENTS */}
             <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-theme-base">
 
-              {/* Boutinly Intelligence: explainable deal score */}
-              {(() => {
+              {/* Boutinly Intelligence: explainable deal score (API-driven) */}
+              {scoresLoading && !scoreMap.has(activeDeal.id) ? (
+                <div className="bg-theme-card rounded-xl border border-theme-border p-4 space-y-3 shadow-2xs text-center">
+                  <p className="text-xs text-theme-secondary/70 font-sans">Loading Boutinly score…</p>
+                </div>
+              ) : (() => {
                 const score = scoreMap.get(activeDeal.id);
                 if (!score) return null;
                 const meta = GRADE_META[score.grade];
@@ -1044,9 +1284,19 @@ export default function PipelineModule() {
                       <h4 className="text-xs font-bold uppercase font-sans tracking-wider text-theme-secondary flex items-center gap-1.5">
                         <Sparkles className="w-4 h-4 text-theme-accent" /> Boutinly Score
                       </h4>
-                      <span className={`inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full border ${toneClasses}`}>
-                        {meta.label} · {score.score}/100
-                      </span>
+                      <div className="flex items-center gap-2">
+                        <span className={`inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full border ${toneClasses}`}>
+                          {meta.label} · {score.score}/100
+                        </span>
+                        <button
+                          onClick={handleRefreshScore}
+                          disabled={scoreRefreshing}
+                          className="text-[10px] font-semibold text-theme-accent hover:opacity-80 disabled:opacity-50 cursor-pointer bg-transparent border border-theme-border rounded px-1.5 py-0.5 hover:bg-theme-hover transition-colors"
+                          title="Re-fetch score from API"
+                        >
+                          {scoreRefreshing ? 'Refreshing…' : 'Refresh Score'}
+                        </button>
+                      </div>
                     </div>
 
                     <div>
@@ -1054,7 +1304,7 @@ export default function PipelineModule() {
                         <div className={`h-full rounded-full transition-all duration-500 ${barTone}`} style={{ width: `${score.score}%` }} />
                       </div>
                       <p className="text-[10px] text-theme-secondary mt-1.5 font-sans">
-                        Deterministic model · stage momentum, dwell time, engagement, next-step readiness, value, and record completeness.
+                        API-driven model · stage momentum, engagement, value, and record completeness. Confidence: {score.confidence}%.
                       </p>
                     </div>
 
@@ -1077,8 +1327,8 @@ export default function PipelineModule() {
                     </div>
 
                     <p className="text-[10px] text-theme-secondary/80 font-sans leading-relaxed">
-                      Scores are advisory and recomputed live from CRM data. Use them to prioritize follow-ups —
-                      they do not replace sales judgment.
+                      Scores are fetched from the Boutinly Intelligence API and recomputed server-side from CRM data.
+                      Use them to prioritize follow-ups — they do not replace sales judgment.
                     </p>
                   </div>
                 );
@@ -1186,50 +1436,67 @@ export default function PipelineModule() {
                     <FileText className="w-4 h-4 text-theme-secondary" /> S3 Vault Document Attachments
                   </h4>
                   {!isReadOnly && (
-                    <button
-                      onClick={() => setShowUploadSim(true)}
-                      className="text-[11px] text-theme-accent hover:opacity-80 font-semibold flex items-center gap-0.5 cursor-pointer bg-transparent border-none"
-                    >
-                      <Plus className="w-3 h-3" /> Upload PDF
-                    </button>
+                    <>
+                      <input
+                        ref={fileInputRef}
+                        type="file"
+                        accept=".pdf,.doc,.docx,.xls,.xlsx,.png,.jpg,.jpeg,.gif,.webp"
+                        onChange={handleFileUpload}
+                        className="hidden"
+                        aria-label="Upload attachment"
+                      />
+                      <button
+                        onClick={() => fileInputRef.current?.click()}
+                        disabled={uploading}
+                        className="text-[11px] text-theme-accent hover:opacity-80 font-semibold flex items-center gap-0.5 cursor-pointer bg-transparent border-none disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        {uploading ? (
+                          <span className="flex items-center gap-1">
+                            <Clock className="w-3 h-3 animate-spin" /> Uploading…
+                          </span>
+                        ) : (
+                          <>
+                            <Plus className="w-3 h-3" /> Upload File
+                          </>
+                        )}
+                      </button>
+                    </>
                   )}
                 </div>
 
-                <div className="space-y-2 text-xs">
-                  {uploadedFiles.map((file, idx) => (
-                    <div key={idx} className="p-2.5 bg-theme-base/30 rounded-lg border border-theme-border flex justify-between items-center">
-                      <div className="flex items-center gap-2 min-w-0">
-                        <Package className="w-4 h-4 text-theme-secondary" />
-                        <span className="font-semibold text-theme-primary truncate">{file.name}</span>
+                {filesLoading ? (
+                  <p className="text-center text-xs text-theme-secondary/70 py-3 font-sans">Loading attachments…</p>
+                ) : dealFiles.length === 0 ? (
+                  <p className="text-center text-xs text-theme-secondary/70 py-3 font-sans">No attachments yet. Upload a PDF, document, or image.</p>
+                ) : (
+                  <div className="space-y-2 text-xs">
+                    {dealFiles.map(file => (
+                      <div key={file.id} className="p-2.5 bg-theme-base/30 rounded-lg border border-theme-border flex justify-between items-center">
+                        <div className="flex items-center gap-2 min-w-0">
+                          <Package className="w-4 h-4 text-theme-secondary shrink-0" />
+                          <span className="font-semibold text-theme-primary truncate">{file.filename}</span>
+                        </div>
+                        <div className="flex items-center gap-1.5 shrink-0 ml-1">
+                          <span className="text-[10px] text-theme-secondary/80 font-sans font-medium">{formatFileSize(file.size_bytes)}</span>
+                          <button
+                            onClick={() => handleDownloadFile(file.id, file.filename)}
+                            className="p-0.5 text-theme-secondary hover:text-theme-accent rounded transition-colors cursor-pointer bg-transparent border-none"
+                            title="Download"
+                          >
+                            <Download className="w-3.5 h-3.5" />
+                          </button>
+                          {!isReadOnly && (
+                            <button
+                              onClick={() => handleDeleteFile(file.id)}
+                              className="p-0.5 text-theme-secondary hover:text-danger rounded transition-colors cursor-pointer bg-transparent border-none"
+                              title="Delete"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          )}
+                        </div>
                       </div>
-                      <span className="text-[10px] text-theme-secondary/80 font-sans shrink-0 ml-1 font-medium">{file.size}</span>
-                    </div>
-                  ))}
-                </div>
-
-                {/* S3 Pre-sign upload simulation */}
-                {showUploadSim && (
-                  <div className="p-3 bg-theme-base/50 border border-theme-border rounded-lg text-xs space-y-2">
-                    <p className="text-theme-secondary text-[11px] leading-normal font-sans">
-                      Click to simulate generating a secure **AWS S3 pre-signed PUT URL** to push proposal files into the Boutinly secure vault.
-                    </p>
-                    <div className="flex gap-2 justify-end">
-                      <button
-                        onClick={() => setShowUploadSim(false)}
-                        className="px-2.5 py-1 border border-theme-border rounded text-[10px] hover:bg-theme-card text-theme-secondary"
-                      >
-                        Dismiss
-                      </button>
-                      <button
-                        onClick={() => {
-                          toast.info('File upload', 'Use the Files tab to attach documents to this deal.');
-                          setShowUploadSim(false);
-                        }}
-                        className="bg-theme-accent text-white font-semibold px-3 py-1 rounded text-[10px]"
-                      >
-                        Simulate S3 upload
-                      </button>
-                    </div>
+                    ))}
                   </div>
                 )}
               </div>

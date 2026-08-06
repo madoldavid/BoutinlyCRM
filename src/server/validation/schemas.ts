@@ -169,6 +169,8 @@ export const sendSingleEmailSchema = z.object({
   contact_id: z.string().min(1),
   subject: z.string().min(1).max(500),
   body_html: z.string().min(1),
+  cc: z.string().optional(),
+  bcc: z.string().optional(),
 });
 
 // ─── Admin ─────────────────────────────────────────────────────

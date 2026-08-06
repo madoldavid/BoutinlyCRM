@@ -19,10 +19,13 @@ import {
   Briefcase,
   AlertCircle,
   Info,
-  Sparkles
+  Sparkles,
+  Loader2,
+  RefreshCw
 } from 'lucide-react';
 import { NEW_RECORD_EVENT, SELECT_ENTITY_EVENT, type SelectEntityDetail } from './GlobalShortcuts';
 import { relativeDueLabel, formatDateTime } from '../utils/time';
+import { toast } from './ui';
 
 export default function TasksModule() {
   const {
@@ -36,14 +39,33 @@ export default function TasksModule() {
     completeTask,
     deleteTask,
     addActivity,
+    getCalendarStatus,
+    connectCalendar,
+    disconnectCalendar,
+    syncCalendar,
   } = useCRM();
 
   const [activeSubView, setActiveSubView] = useState<'list' | 'calendar' | 'call-logger'>('list');
   const [taskFilter, setTaskFilter] = useState<'all' | 'open' | 'completed' | 'overdue'>('open');
 
   // Integrations Sync state
-  const [googleSync, setGoogleSync] = useState(true);
-  const [outlookSync, setOutlookSync] = useState(false);
+  const [calendarStatus, setCalendarStatus] = useState<{
+    google: boolean;
+    microsoft: boolean;
+    google_email?: string;
+    microsoft_email?: string;
+  }>({ google: false, microsoft: false });
+  const [calendarLoading, setCalendarLoading] = useState<string | null>(null); // provider name or 'sync' while loading
+  const [lastSyncLabel, setLastSyncLabel] = useState<string>('Never synced');
+
+  // Fetch calendar status on mount
+  useEffect(() => {
+    let cancelled = false;
+    getCalendarStatus().then(status => {
+      if (!cancelled) setCalendarStatus(status);
+    });
+    return () => { cancelled = true; };
+  }, [getCalendarStatus]);
 
   // Forms
   const [showCreateTask, setShowCreateTask] = useState(false);
@@ -86,6 +108,9 @@ export default function TasksModule() {
   });
 
   const [callSuccessMessage, setCallSuccessMessage] = useState('');
+
+  // Selected task for highlighting / detail
+  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
 
   const scopedTasks = getScopedTasks();
 
@@ -289,8 +314,11 @@ export default function TasksModule() {
                 return (
                   <div
                     key={task.id}
-                    className={`p-4 flex items-start gap-3 text-left transition-colors hover:bg-theme-base/40 ${
+                    onClick={() => setSelectedTaskId(selectedTaskId === task.id ? null : task.id)}
+                    className={`p-4 flex items-start gap-3 text-left transition-colors hover:bg-theme-base/40 cursor-pointer ${
                       task.completed_at ? 'bg-theme-base/30 opacity-60' : ''
+                    } ${
+                      selectedTaskId === task.id ? 'bg-theme-accent/5 ring-1 ring-theme-accent/30 border-l-2 border-l-theme-accent rounded-r-md' : ''
                     }`}
                   >
                     {/* Checkbox trigger completion */}
@@ -380,7 +408,7 @@ export default function TasksModule() {
               <span className="font-bold text-xs text-theme-primary flex items-center gap-1">
                 <CalendarIcon className="w-4 h-4 text-theme-accent" /> {monthNames[currentMonth]} {currentYear}
               </span>
-              <span className="text-[10px] text-theme-secondary font-sans">Month Agenda Overview</span>
+              <span className="text-[10px] text-theme-secondary font-sans">Click a day to create a task</span>
             </div>
 
             {/* Calendar Grid 7 Columns */}
@@ -391,23 +419,66 @@ export default function TasksModule() {
             <div className="grid grid-cols-7 gap-1.5 flex-1">
               {calendarDays.map(day => {
                 const dayTasks = getTasksForDay(day);
+                const hasTasks = dayTasks.length > 0;
+                const isToday = day === now.getDate() && currentMonth === now.getMonth() && currentYear === now.getFullYear();
+
+                const handleDayClick = () => {
+                  if (isReadOnly) return;
+                  // Pre-fill task form with this date at 9:00 AM
+                  const d = new Date(currentYear, currentMonth, day, 9, 0);
+                  const pad = (n: number) => String(n).padStart(2, '0');
+                  const dateStr = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+                  setTaskForm(prev => ({ ...prev, due_at: dateStr }));
+                  setShowCreateTask(true);
+                };
 
                 return (
-                  <div key={day} className="bg-theme-card p-2 border border-theme-border rounded-lg min-h-16 flex flex-col justify-between hover:border-theme-accent/30 transition-all select-none">
-                    <span className="text-[10px] font-bold text-theme-secondary font-sans text-left">{day}</span>
-                    
+                  <div
+                    key={day}
+                    onClick={handleDayClick}
+                    className={`bg-theme-card p-2 border rounded-lg min-h-16 flex flex-col justify-between transition-all cursor-pointer ${
+                      isToday
+                        ? 'border-theme-accent/60 ring-1 ring-theme-accent/30'
+                        : hasTasks
+                          ? 'border-theme-accent/40'
+                          : 'border-theme-border'
+                    } hover:border-theme-accent/50 hover:shadow-md`}
+                    title={hasTasks ? `${dayTasks.length} task(s) due` : `Create task for ${monthNames[currentMonth]} ${day}`}
+                  >
+                    <div className="flex items-center justify-between">
+                      <span className={`text-[10px] font-bold font-sans text-left ${
+                        isToday ? 'text-theme-accent' : 'text-theme-secondary'
+                      }`}>
+                        {day}
+                      </span>
+                      {hasTasks && (
+                        <span className="w-1.5 h-1.5 rounded-full bg-theme-accent" title={`${dayTasks.length} task(s)`} />
+                      )}
+                    </div>
+
                     <div className="mt-1 space-y-0.5">
-                      {dayTasks.map(t => (
-                        <div 
-                          key={t.id} 
-                          className={`text-[8px] font-semibold py-0.5 px-1 rounded truncate block text-left ${
+                      {dayTasks.slice(0, 3).map(t => (
+                        <div
+                          key={t.id}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setSelectedTaskId(t.id);
+                            setActiveSubView('list');
+                            setTaskFilter('all');
+                          }}
+                          className={`text-[8px] font-semibold py-0.5 px-1 rounded truncate block text-left cursor-pointer hover:opacity-80 transition-opacity ${
                             t.completed_at ? 'bg-theme-base/50 text-theme-secondary/50 line-through border-none' : t.priority === 'high' ? 'bg-theme-accent/15 text-theme-primary border-l-2 border-theme-accent' : 'bg-theme-secondary/15 text-theme-primary border-l-2 border-theme-secondary'
                           }`}
-                          title={t.title}
+                          title={`${t.title} — click to view details`}
                         >
                           {t.title}
                         </div>
                       ))}
+                      {dayTasks.length > 3 && (
+                        <div className="text-[7px] text-theme-secondary/60 font-semibold pl-1">
+                          +{dayTasks.length - 3} more
+                        </div>
+                      )}
                     </div>
                   </div>
                 );
@@ -521,26 +592,92 @@ export default function TasksModule() {
             Authorize CRM synchronization into external calendar apps. Bi-directional sync keeps meetings and due dates aligned with Outlook or Google.
           </p>
 
+          {/* Sync Now button */}
+          <button
+            onClick={async () => {
+              setCalendarLoading('sync');
+              try {
+                await syncCalendar();
+                setLastSyncLabel(`Last synced just now`);
+              } catch {
+                // toast handled in store
+              } finally {
+                setCalendarLoading(null);
+              }
+            }}
+            disabled={calendarLoading !== null}
+            className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-theme-accent/10 hover:bg-theme-accent/20 text-theme-accent border border-theme-accent/30 rounded-lg text-xs font-bold transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {calendarLoading === 'sync' ? (
+              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+            ) : (
+              <RefreshCw className="w-3.5 h-3.5" />
+            )}
+            {calendarLoading === 'sync' ? 'Syncing…' : 'Sync Now'}
+          </button>
+
+          <p className="text-[10px] text-theme-secondary/70 font-sans text-center -mt-2">{lastSyncLabel}</p>
+
           <div className="space-y-3.5 pt-2">
-            
+
             {/* Google Sync */}
             <div className="p-3.5 bg-theme-base/50 rounded-xl border border-theme-border flex items-center justify-between">
               <div className="flex items-center gap-3">
                 <div className="p-2 bg-theme-card rounded-lg border border-theme-border text-xs font-bold text-theme-accent shadow-2xs font-sans">G</div>
                 <div>
                   <h5 className="text-xs font-bold text-theme-primary">Google Calendar Sync</h5>
-                  <p className="text-[10px] text-theme-secondary mt-0.5 font-sans">Using OAuth 2.0 • Synchronized 1 minute ago</p>
+                  <p className="text-[10px] text-theme-secondary mt-0.5 font-sans">
+                    {calendarStatus.google && calendarStatus.google_email
+                      ? `Connected as ${calendarStatus.google_email}`
+                      : 'Using OAuth 2.0'}
+                  </p>
                 </div>
               </div>
 
               <div className="flex items-center gap-2">
-                <span className="bg-theme-accent/10 text-theme-accent border border-theme-accent/20 px-2 py-0.5 rounded-full text-[9px] font-bold uppercase tracking-wider font-sans">Active</span>
-                <button
-                  onClick={() => setGoogleSync(!googleSync)}
-                  className="text-xs text-theme-accent hover:opacity-85 font-semibold cursor-pointer bg-transparent border-none"
-                >
-                  {googleSync ? 'Disconnect' : 'Connect'}
-                </button>
+                {calendarLoading === 'google' ? (
+                  <Loader2 className="w-4 h-4 animate-spin text-theme-accent" />
+                ) : (
+                  <>
+                    <span className={`px-2 py-0.5 rounded-full text-[9px] font-bold uppercase tracking-wider font-sans ${
+                      calendarStatus.google
+                        ? 'bg-theme-accent/10 text-theme-accent border border-theme-accent/20'
+                        : 'bg-theme-base border border-theme-border text-theme-secondary'
+                    }`}>
+                      {calendarStatus.google ? 'Active' : 'Offline'}
+                    </span>
+                    <button
+                      onClick={async () => {
+                        if (calendarStatus.google) {
+                          setCalendarLoading('google');
+                          try { await disconnectCalendar('google'); }
+                          finally { setCalendarLoading(null); }
+                          setCalendarStatus(prev => ({ ...prev, google: false, google_email: undefined }));
+                        } else {
+                          setCalendarLoading('google');
+                          try {
+                            const result = await connectCalendar('google');
+                            // Open the OAuth consent screen in a new window
+                            if (result?.url) window.open(result.url, '_blank', 'width=600,height=700');
+                            toast.info('Google Calendar', 'Complete authorization in the popup window, then refresh status.');
+                            setTimeout(async () => {
+                              const status = await getCalendarStatus();
+                              setCalendarStatus(status);
+                            }, 3000);
+                          } catch {
+                            toast.error('Failed to connect Google Calendar');
+                          } finally {
+                            setCalendarLoading(null);
+                          }
+                        }
+                      }}
+                      disabled={calendarLoading !== null}
+                      className="text-xs text-theme-accent hover:opacity-85 font-semibold cursor-pointer bg-transparent border-none disabled:opacity-50"
+                    >
+                      {calendarStatus.google ? 'Disconnect' : 'Connect'}
+                    </button>
+                  </>
+                )}
               </div>
             </div>
 
@@ -550,18 +687,57 @@ export default function TasksModule() {
                 <div className="p-2 bg-theme-card rounded-lg border border-theme-border text-xs font-bold text-theme-secondary shadow-2xs font-sans">O</div>
                 <div>
                   <h5 className="text-xs font-bold text-theme-primary">Outlook / M365 Calendar</h5>
-                  <p className="text-[10px] text-theme-secondary mt-0.5 font-sans">Sync appointments, invites, and notes</p>
+                  <p className="text-[10px] text-theme-secondary mt-0.5 font-sans">
+                    {calendarStatus.microsoft && calendarStatus.microsoft_email
+                      ? `Connected as ${calendarStatus.microsoft_email}`
+                      : 'Sync appointments, invites, and notes'}
+                  </p>
                 </div>
               </div>
 
               <div className="flex items-center gap-2">
-                <span className="bg-theme-base border border-theme-border text-theme-secondary px-2 py-0.5 rounded-full text-[9px] font-bold uppercase tracking-wider font-sans">Offline</span>
-                <button
-                  onClick={() => setOutlookSync(!outlookSync)}
-                  className="text-xs text-theme-accent hover:opacity-85 font-semibold cursor-pointer bg-transparent border-none"
-                >
-                  {outlookSync ? 'Disconnect' : 'Connect'}
-                </button>
+                {calendarLoading === 'microsoft' ? (
+                  <Loader2 className="w-4 h-4 animate-spin text-theme-accent" />
+                ) : (
+                  <>
+                    <span className={`px-2 py-0.5 rounded-full text-[9px] font-bold uppercase tracking-wider font-sans ${
+                      calendarStatus.microsoft
+                        ? 'bg-theme-accent/10 text-theme-accent border border-theme-accent/20'
+                        : 'bg-theme-base border border-theme-border text-theme-secondary'
+                    }`}>
+                      {calendarStatus.microsoft ? 'Active' : 'Offline'}
+                    </span>
+                    <button
+                      onClick={async () => {
+                        if (calendarStatus.microsoft) {
+                          setCalendarLoading('microsoft');
+                          try { await disconnectCalendar('microsoft'); }
+                          finally { setCalendarLoading(null); }
+                          setCalendarStatus(prev => ({ ...prev, microsoft: false, microsoft_email: undefined }));
+                        } else {
+                          setCalendarLoading('microsoft');
+                          try {
+                            const result = await connectCalendar('microsoft');
+                            if (result?.url) window.open(result.url, '_blank', 'width=600,height=700');
+                            toast.info('Microsoft Calendar', 'Complete authorization in the popup window, then refresh status.');
+                            setTimeout(async () => {
+                              const status = await getCalendarStatus();
+                              setCalendarStatus(status);
+                            }, 3000);
+                          } catch {
+                            toast.error('Failed to connect Microsoft Calendar');
+                          } finally {
+                            setCalendarLoading(null);
+                          }
+                        }
+                      }}
+                      disabled={calendarLoading !== null}
+                      className="text-xs text-theme-accent hover:opacity-85 font-semibold cursor-pointer bg-transparent border-none disabled:opacity-50"
+                    >
+                      {calendarStatus.microsoft ? 'Disconnect' : 'Connect'}
+                    </button>
+                  </>
+                )}
               </div>
             </div>
 

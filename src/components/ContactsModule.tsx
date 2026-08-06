@@ -13,7 +13,7 @@ import { FieldRow } from './ui/RecordDetailPage';
 import type { RecordDetailPageProps } from './ui';
 import { NEW_RECORD_EVENT, SELECT_ENTITY_EVENT, type SelectEntityDetail } from './GlobalShortcuts';
 import { exportCsv } from '../utils/exportCsv';
-import { findDuplicateContacts } from '../ai/insights';
+
 import { timeAgo, formatDateTime } from '../utils/time';
 import { printRecord } from '../utils/print';
 import {
@@ -42,6 +42,11 @@ import {
   Pencil,
   DollarSign,
   Clock,
+  Paperclip,
+  X,
+  FileText,
+  Loader2,
+  Tag,
 } from 'lucide-react';
 
 export default function ContactsModule() {
@@ -61,6 +66,13 @@ export default function ContactsModule() {
     customFields,
     activities,
     addActivity,
+    importContacts,
+    uploadFile,
+    downloadFile,
+    listFiles,
+    deleteFile,
+    findDuplicates,
+    bulkUpdateContacts,
   } = useCRM();
 
   const [activeTab, setActiveTab] = useState<'contacts' | 'accounts'>('contacts');
@@ -133,10 +145,6 @@ export default function ContactsModule() {
     custom_values: {} as Record<string, any>
   });
 
-  // Import states
-  const [importCsvText, setImportCsvText] = useState('First Name,Last Name,Email,Phone,Title,Company\n');
-  const [importStatus, setImportStatus] = useState<'idle' | 'success'>('idle');
-
   // Merge states
   const [mergeSourceId, setMergeSourceId] = useState('');
   const [mergeTargetId, setMergeTargetId] = useState('');
@@ -146,7 +154,30 @@ export default function ContactsModule() {
   const [confirmBulkDelete, setConfirmBulkDelete] = useState(false);
   const [confirmDeleteContactId, setConfirmDeleteContactId] = useState<string | null>(null);
 
-  const duplicateGroups = useMemo(() => findDuplicateContacts(getScopedContacts()), [getScopedContacts]);
+  // ─── CSV Import (file-based) ───────────
+  const [importCsvFile, setImportCsvFile] = useState<File | null>(null);
+  const [importResults, setImportResults] = useState<{ imported: number; skipped: number; errors: string[] } | null>(null);
+  const [isImporting, setIsImporting] = useState(false);
+
+  // ─── File Attachments ───────────
+  const [contactFiles, setContactFiles] = useState<Array<{ id: string; filename: string; mime_type: string; size_bytes: number; created_at: string }>>([]);
+  const [accountFiles, setAccountFiles] = useState<Array<{ id: string; filename: string; mime_type: string; size_bytes: number; created_at: string }>>([]);
+  const [isUploadingFile, setIsUploadingFile] = useState(false);
+
+  // ─── Duplicate Detection (API) ───────────
+  const [showDuplicateModal, setShowDuplicateModal] = useState(false);
+  const [apiDuplicates, setApiDuplicates] = useState<Array<{ contact_a: Contact; contact_b: Contact; confidence: number; matching_fields: string[] }>>([]);
+  const [isFindingDuplicates, setIsFindingDuplicates] = useState(false);
+
+  // ─── Bulk Update ───────────
+  const [showBulkUpdateModal, setShowBulkUpdateModal] = useState(false);
+  const [bulkUpdateForm, setBulkUpdateForm] = useState({ addTags: '', removeTags: '', newOwnerId: '' });
+
+  // Proactive duplicate check on mount (respects API batching)
+  useEffect(() => {
+    findDuplicates().then(setApiDuplicates).catch(() => { /* silent — duplicates are non-critical */ });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab]);
 
   // "n" shortcut → open the create modal for the active tab
   useEffect(() => {
@@ -186,13 +217,6 @@ export default function ContactsModule() {
     toast.success('Contacts exported', `${rows.length} rows → CSV`);
   };
 
-  // Open merge modal pre-filled from a detected duplicate group
-  const openMergeForGroup = (group: ReturnType<typeof findDuplicateContacts>[number]) => {
-    setMergeSourceId(group.contacts[1]?.id ?? '');
-    setMergeTargetId(group.contacts[0]?.id ?? '');
-    setShowMergeModal(true);
-  };
-
   // Get Scoped lists
   const scopedContacts = getScopedContacts();
   const scopedAccounts = getScopedAccounts();
@@ -214,6 +238,36 @@ export default function ContactsModule() {
   // Active items
   const activeContact = scopedContacts.find(c => c.id === selectedContactId) || filteredContacts[0];
   const activeAccount = scopedAccounts.find(a => a.id === selectedAccountId) || filteredAccounts[0];
+
+  // ─── Load files for the selected contact ───────────
+  useEffect(() => {
+    if (!activeContact?.id || activeTab !== 'contacts') {
+      setContactFiles([]);
+      return;
+    }
+    let cancelled = false;
+    listFiles({ entity_type: 'contact', entity_id: activeContact.id }).then(files => {
+      if (!cancelled) setContactFiles(files);
+    }).catch(() => {
+      if (!cancelled) setContactFiles([]);
+    });
+    return () => { cancelled = true; };
+  }, [activeContact?.id, activeTab, listFiles]);
+
+  // ─── Load files for the selected account ───────────
+  useEffect(() => {
+    if (!activeAccount?.id || activeTab !== 'accounts') {
+      setAccountFiles([]);
+      return;
+    }
+    let cancelled = false;
+    listFiles({ entity_type: 'account', entity_id: activeAccount.id }).then(files => {
+      if (!cancelled) setAccountFiles(files);
+    }).catch(() => {
+      if (!cancelled) setAccountFiles([]);
+    });
+    return () => { cancelled = true; };
+  }, [activeAccount?.id, activeTab, listFiles]);
 
   // Activities linked to selected item
   const contactActivities = activities.filter(act => act.contact_id === activeContact?.id);
@@ -392,77 +446,114 @@ export default function ContactsModule() {
     });
   };
 
-  // Bulk CSV Import
-  const handleCsvImport = () => {
-    // CSV line parser that handles quoted fields (e.g., "Smith, John", email@example.com)
-    const parseCsvLine = (line: string): string[] => {
-      const result: string[] = [];
-      let current = '';
-      let inQuotes = false;
-      for (const ch of line) {
-        if (ch === '"') {
-          inQuotes = !inQuotes;
-        } else if (ch === ',' && !inQuotes) {
-          result.push(current.trim());
-          current = '';
-        } else {
-          current += ch;
-        }
+  // Bulk CSV Import (file-based via store)
+  const handleCsvImport = async () => {
+    if (!importCsvFile) {
+      toast.error('No file selected', 'Please select a CSV file to import.');
+      return;
+    }
+    setIsImporting(true);
+    setImportResults(null);
+    try {
+      await importContacts(importCsvFile);
+      // Results are shown via the store's own toast notification
+      setImportResults({ imported: 0, skipped: 0, errors: [] });
+      toast.success('Import submitted', 'Check the server response for detailed counts.');
+    } catch (err: any) {
+      toast.error('Import failed', err?.message || 'An unexpected error occurred');
+    } finally {
+      setIsImporting(false);
+    }
+  };
+
+  // Handle file upload for contact/account
+  const handleFileUpload = async (file: File, entityType: 'contact' | 'account', entityId: string) => {
+    setIsUploadingFile(true);
+    try {
+      await uploadFile(file, entityType, entityId);
+      // Refresh file list
+      const files = await listFiles({ entity_type: entityType, entity_id: entityId });
+      if (entityType === 'contact') setContactFiles(files);
+      else setAccountFiles(files);
+    } catch (err: any) {
+      toast.error('Upload failed', err?.message || 'Could not upload file');
+    } finally {
+      setIsUploadingFile(false);
+    }
+  };
+
+  // Handle file delete
+  const handleFileDelete = async (fileId: string, entityType: 'contact' | 'account', entityId: string) => {
+    try {
+      await deleteFile(fileId);
+      const files = await listFiles({ entity_type: entityType, entity_id: entityId });
+      if (entityType === 'contact') setContactFiles(files);
+      else setAccountFiles(files);
+      toast.success('File deleted');
+    } catch (err: any) {
+      toast.error('Delete failed', err?.message || 'Could not delete file');
+    }
+  };
+
+  // Find duplicates via API
+  const handleFindDuplicates = async () => {
+    setIsFindingDuplicates(true);
+    try {
+      const dupes = await findDuplicates();
+      setApiDuplicates(dupes);
+      setShowDuplicateModal(true);
+      if (dupes.length === 0) {
+        toast.info('No duplicates found', 'All contacts appear to be unique.');
       }
-      result.push(current.trim());
-      return result;
-    };
+    } catch (err: any) {
+      toast.error('Detection failed', err?.message || 'Could not check for duplicates');
+    } finally {
+      setIsFindingDuplicates(false);
+    }
+  };
 
-    setImportStatus('success');
-    setTimeout(() => {
-      const lines = importCsvText.split('\n');
-      if (lines.length > 1) {
-        const headers = parseCsvLine(lines[0]).map(h => h.trim().toLowerCase().replace(/^"|"$/g, ''));
+  // Bulk update selected contacts
+  const handleBulkUpdate = async () => {
+    const ids = Array.from(selectedRowKeys);
+    if (ids.length === 0) return;
 
-        for (let i = 1; i < lines.length; i++) {
-          const line = lines[i].trim();
-          if (!line) continue;
+    const changes: Record<string, unknown> = {};
 
-          const values = parseCsvLine(line).map(v => v.replace(/^"|"$/g, ''));
-          const contactData: any = {
-            first_name: '',
-            last_name: '',
-            email: '',
-            phone: '',
-            title: '',
-            account_id: '',
-            owner_id: currentUser?.id ?? '',
-            tags: ['CSV-Imported'],
-            custom_fields: {},
-            unsubscribed: false,
-          };
-          
-          headers.forEach((header, index) => {
-            const val = values[index] || '';
-            if (header === 'first name' || header === 'first_name') {
-              contactData.first_name = val;
-            } else if (header === 'last name' || header === 'last_name') {
-              contactData.last_name = val;
-            } else if (header === 'email') {
-              contactData.email = val;
-            } else if (header === 'phone') {
-              contactData.phone = val;
-            } else if (header === 'title') {
-              contactData.title = val;
-            } else if (header === 'company' || header === 'company_name') {
-              const matchAcc = scopedAccounts.find(a => a.name.toLowerCase() === val.toLowerCase());
-              contactData.account_id = matchAcc ? matchAcc.id : '';
-            }
-          });
+    if (bulkUpdateForm.newOwnerId) {
+      changes.owner_id = bulkUpdateForm.newOwnerId;
+    }
 
-          if (contactData.first_name || contactData.last_name || contactData.email) {
-            addContact(contactData);
-          }
-        }
-      }
-      setShowImportModal(false);
-      setImportStatus('idle');
-    }, 1000);
+    if (bulkUpdateForm.addTags.trim()) {
+      const tagsToAdd = bulkUpdateForm.addTags.split(',').map(t => t.trim()).filter(Boolean);
+      // We need to merge with existing tags — handled by store/API
+      changes.add_tags = tagsToAdd;
+    }
+
+    if (bulkUpdateForm.removeTags.trim()) {
+      const tagsToRemove = bulkUpdateForm.removeTags.split(',').map(t => t.trim()).filter(Boolean);
+      changes.remove_tags = tagsToRemove;
+    }
+
+    if (Object.keys(changes).length === 0) {
+      toast.info('No changes', 'Select at least one field to update.');
+      return;
+    }
+
+    try {
+      await bulkUpdateContacts(ids, changes);
+      setSelectedRowKeys(new Set());
+      setShowBulkUpdateModal(false);
+      setBulkUpdateForm({ addTags: '', removeTags: '', newOwnerId: '' });
+    } catch (err: any) {
+      toast.error('Bulk update failed', err?.message || 'Could not update contacts');
+    }
+  };
+
+  // Format file size for display
+  const formatFileSize = (bytes: number): string => {
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
   };
 
   // Merge Contacts Handler
@@ -670,6 +761,16 @@ export default function ContactsModule() {
                       <Shuffle className="w-4 h-4" />
                     </button>
                   )}
+                  {activeTab === 'contacts' && (
+                    <button
+                      onClick={handleFindDuplicates}
+                      disabled={isFindingDuplicates}
+                      className="p-1.5 rounded-lg border border-theme-border text-theme-secondary hover:bg-theme-hover transition-colors cursor-pointer disabled:opacity-40"
+                      title="Find Duplicates"
+                    >
+                      {isFindingDuplicates ? <Loader2 className="w-4 h-4 animate-spin" /> : <Users2 className="w-4 h-4" />}
+                    </button>
+                  )}
                   <button
                     onClick={() => activeTab === 'contacts' ? setShowCreateContact(true) : setShowCreateAccount(true)}
                     className="bg-theme-accent hover:bg-theme-accent-strong text-white p-1.5 rounded-lg flex items-center justify-center transition-colors shadow-card cursor-pointer"
@@ -684,14 +785,14 @@ export default function ContactsModule() {
 
           {/* Search bar, saved views & Tag segment filter */}
           <div className="flex gap-2 items-center">
-            <div className="relative flex-1 min-w-0">
+            <div className="relative flex-1 min-w-[180px]">
               <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-theme-secondary pointer-events-none" />
               <input
                 type="text"
                 placeholder={activeTab === 'contacts' ? 'Search contacts…' : 'Search accounts…'}
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                className="w-full bg-theme-base text-theme-primary border border-theme-border rounded-lg pl-9 pr-3 h-9 text-xs focus:ring-1 focus:ring-theme-accent focus:outline-none"
+                className="w-full h-9 bg-theme-card text-theme-primary border border-theme-border rounded-lg !pl-9 pr-3 text-sm focus:ring-2 focus:ring-theme-accent/10 focus:border-theme-accent focus:outline-none placeholder:text-theme-secondary/50"
               />
             </div>
             <ViewSwitcher
@@ -740,22 +841,27 @@ export default function ContactsModule() {
         <div className="flex-1 overflow-y-auto divide-y divide-theme-border">
 
           {/* Boutinly Intelligence: duplicate detection banner */}
-          {activeTab === 'contacts' && duplicateGroups.length > 0 && (
+          {activeTab === 'contacts' && apiDuplicates.length > 0 && (
             <div className="mx-4 mt-3 mb-1 p-3 rounded-lg border border-warning/30 bg-warning-soft/60 flex items-center gap-3 animate-fade-in">
               <AlertTriangle className="w-4 h-4 text-warning shrink-0" />
               <div className="min-w-0 flex-1">
                 <p className="text-[11px] font-semibold text-warning">
-                  {duplicateGroups.reduce((n, g) => n + g.contacts.length, 0)} contacts look like duplicates
+                  {apiDuplicates.length * 2} contacts look like duplicates
                 </p>
                 <p className="text-[10px] text-theme-secondary leading-relaxed">
-                  {duplicateGroups.length} group{duplicateGroups.length === 1 ? '' : 's'} match on email, phone, or name+domain. Merging keeps forecasts and timelines clean.
+                  {apiDuplicates.length} pair{apiDuplicates.length === 1 ? '' : 's'} match on {apiDuplicates[0]?.matching_fields?.join(', ') ?? 'email, phone, or name+domain'}. Merging keeps forecasts and timelines clean.
                 </p>
               </div>
               <button
-                onClick={() => openMergeForGroup(duplicateGroups[0])}
+                onClick={() => {
+                  const firstPair = apiDuplicates[0];
+                  setMergeSourceId(firstPair.contact_a.id);
+                  setMergeTargetId(firstPair.contact_b.id);
+                  setShowMergeModal(true);
+                }}
                 className="shrink-0 flex items-center gap-1 text-[11px] font-semibold text-warning hover:opacity-80 border border-warning/40 rounded-md px-2.5 py-1.5 cursor-pointer bg-theme-card/60 transition-colors"
               >
-                <Shuffle className="w-3 h-3" /> Review first group
+                <Shuffle className="w-3 h-3" /> Review first pair
               </button>
             </div>
           )}
@@ -767,6 +873,12 @@ export default function ContactsModule() {
                 {selectedRowKeys.size} selected
               </span>
               <div className="ml-auto flex items-center gap-2">
+                <button
+                  onClick={() => setShowBulkUpdateModal(true)}
+                  className="flex items-center gap-1 text-[11px] font-medium text-theme-primary border border-theme-border rounded-md px-2.5 py-1.5 hover:bg-theme-hover cursor-pointer bg-transparent transition-colors"
+                >
+                  <Tag className="w-3 h-3" /> Tag / Assign
+                </button>
                 <button
                   onClick={() => {
                     const selected = scopedContacts.filter(c => selectedRowKeys.has(c.id));
@@ -937,6 +1049,25 @@ export default function ContactsModule() {
                     >
                       <Printer className="w-4 h-4" />
                     </button>
+                    {!isReadOnly && (
+                      <label
+                        className="p-1.5 text-theme-secondary hover:text-theme-accent rounded-md hover:bg-theme-hover transition-all cursor-pointer"
+                        title="Attach file"
+                      >
+                        <Paperclip className="w-4 h-4" />
+                        <input
+                          type="file"
+                          className="hidden"
+                          onChange={(e) => {
+                            const file = e.target.files?.[0];
+                            if (file && activeContact) {
+                              handleFileUpload(file, 'contact', activeContact.id);
+                            }
+                            e.target.value = '';
+                          }}
+                        />
+                      </label>
+                    )}
                   </div>
                 </div>
 
@@ -980,6 +1111,46 @@ export default function ContactsModule() {
                   </div>
                 )}
               </div>
+
+              {/* File Attachments Section */}
+              {contactFiles.length > 0 && (
+                <div className="border-b border-theme-border bg-theme-base">
+                  <div className="p-4 border-b border-theme-border flex items-center justify-between">
+                    <span className="text-xs font-bold text-theme-primary flex items-center gap-1.5">
+                      <Paperclip className="w-4 h-4 text-theme-accent" /> Attachments ({contactFiles.length})
+                    </span>
+                  </div>
+                  <div className="p-3 space-y-1.5 max-h-40 overflow-y-auto">
+                    {contactFiles.map(file => (
+                      <div key={file.id} className="flex items-center justify-between gap-2 p-2 bg-theme-card rounded border border-theme-border text-xs">
+                        <div className="flex items-center gap-2 min-w-0">
+                          <FileText className="w-3.5 h-3.5 text-theme-accent shrink-0" />
+                          <span className="truncate text-theme-primary font-medium">{file.filename}</span>
+                          <span className="text-[10px] text-theme-secondary shrink-0">{formatFileSize(file.size_bytes)}</span>
+                        </div>
+                        <div className="flex items-center gap-1 shrink-0">
+                          <button
+                            onClick={() => downloadFile(file.id)}
+                            className="p-1 text-theme-accent hover:opacity-80 cursor-pointer bg-transparent border-none"
+                            title="Download"
+                          >
+                            <Download className="w-3 h-3" />
+                          </button>
+                          {!isReadOnly && (
+                            <button
+                              onClick={() => handleFileDelete(file.id, 'contact', activeContact.id)}
+                              className="p-1 text-theme-secondary hover:text-danger cursor-pointer bg-transparent border-none"
+                              title="Delete"
+                            >
+                              <X className="w-3 h-3" />
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
 
               {/* Activity Timeline Section */}
               <div className="flex-1 flex flex-col min-h-0 bg-theme-base">
@@ -1097,6 +1268,25 @@ export default function ContactsModule() {
                     >
                       <Maximize2 className="w-4 h-4" />
                     </button>
+                    {!isReadOnly && (
+                      <label
+                        className="p-1.5 text-theme-secondary hover:text-theme-accent rounded-md hover:bg-theme-hover transition-all cursor-pointer"
+                        title="Attach file"
+                      >
+                        <Paperclip className="w-4 h-4" />
+                        <input
+                          type="file"
+                          className="hidden"
+                          onChange={(e) => {
+                            const file = e.target.files?.[0];
+                            if (file && activeAccount) {
+                              handleFileUpload(file, 'account', activeAccount.id);
+                            }
+                            e.target.value = '';
+                          }}
+                        />
+                      </label>
+                    )}
                   </div>
                 </div>
 
@@ -1126,6 +1316,46 @@ export default function ContactsModule() {
                   </div>
                 )}
               </div>
+
+              {/* Account File Attachments */}
+              {accountFiles.length > 0 && (
+                <div className="border-b border-theme-border bg-theme-base">
+                  <div className="p-4 border-b border-theme-border flex items-center justify-between">
+                    <span className="text-xs font-bold text-theme-primary flex items-center gap-1.5">
+                      <Paperclip className="w-4 h-4 text-theme-accent" /> Attachments ({accountFiles.length})
+                    </span>
+                  </div>
+                  <div className="p-3 space-y-1.5 max-h-40 overflow-y-auto">
+                    {accountFiles.map(file => (
+                      <div key={file.id} className="flex items-center justify-between gap-2 p-2 bg-theme-card rounded border border-theme-border text-xs">
+                        <div className="flex items-center gap-2 min-w-0">
+                          <FileText className="w-3.5 h-3.5 text-theme-accent shrink-0" />
+                          <span className="truncate text-theme-primary font-medium">{file.filename}</span>
+                          <span className="text-[10px] text-theme-secondary shrink-0">{formatFileSize(file.size_bytes)}</span>
+                        </div>
+                        <div className="flex items-center gap-1 shrink-0">
+                          <button
+                            onClick={() => downloadFile(file.id)}
+                            className="p-1 text-theme-accent hover:opacity-80 cursor-pointer bg-transparent border-none"
+                            title="Download"
+                          >
+                            <Download className="w-3 h-3" />
+                          </button>
+                          {!isReadOnly && (
+                            <button
+                              onClick={() => handleFileDelete(file.id, 'account', activeAccount.id)}
+                              className="p-1 text-theme-secondary hover:text-danger cursor-pointer bg-transparent border-none"
+                              title="Delete"
+                            >
+                              <X className="w-3 h-3" />
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
 
               {/* Linked contacts list inside this Account */}
               <div className="flex-1 flex flex-col min-h-0 bg-theme-base">
@@ -1551,7 +1781,7 @@ export default function ContactsModule() {
         </Modal>
       )}
 
-      {/* MODAL: BULK CSV IMPORT */}
+      {/* MODAL: BULK CSV IMPORT (file-based) */}
       {showImportModal && (
         <div className="fixed inset-0 z-[90] flex items-center justify-center p-4 bg-theme-primary/60 backdrop-blur-[2px] animate-fade-in">
           <div className="bg-theme-card rounded-xl shadow-overlay border border-theme-border w-full max-w-lg overflow-hidden flex flex-col max-h-[85vh] animate-overlay-in">
@@ -1559,46 +1789,98 @@ export default function ContactsModule() {
               <h3 className="text-sm font-bold text-theme-primary flex items-center gap-1.5">
                 <FileSpreadsheet className="w-4 h-4 text-theme-accent" /> Bulk CSV Data Importer
               </h3>
-              <button onClick={() => setShowImportModal(false)} className="text-theme-secondary hover:text-theme-primary font-bold text-xs cursor-pointer bg-transparent border-none">✕</button>
+              <button onClick={() => { setShowImportModal(false); setImportCsvFile(null); setImportResults(null); }} className="text-theme-secondary hover:text-theme-primary font-bold text-xs cursor-pointer bg-transparent border-none">✕</button>
             </header>
             <div className="p-5 space-y-4 text-xs text-left overflow-y-auto">
               <p className="text-theme-secondary leading-normal">
-                Paste raw CSV values here. The importer automatically maps headers and flags probable duplicates using contact email rules.
+                Upload a CSV file to bulk import contacts. The file must include columns for First Name, Last Name, and Email. The server auto-maps headers and flags duplicates.
               </p>
-              
+
+              {/* File picker */}
               <div className="space-y-1">
-                <label className="block font-semibold text-theme-secondary font-sans">CSV Values Payload</label>
-                <textarea
-                  rows={5}
-                  value={importCsvText}
-                  onChange={(e) => setImportCsvText(e.target.value)}
-                  className="w-full rounded border border-theme-border p-2.5 font-sans text-[11px] focus:ring-1 focus:ring-theme-accent focus:outline-none bg-theme-base text-theme-primary"
-                />
+                <label className="block font-semibold text-theme-secondary font-sans">Select CSV File</label>
+                <label className="flex items-center justify-center gap-2 p-6 border-2 border-dashed border-theme-border rounded-lg cursor-pointer hover:border-theme-accent/50 transition-colors bg-theme-base/50">
+                  <Upload className="w-5 h-5 text-theme-secondary" />
+                  <span className="text-theme-secondary font-medium">
+                    {importCsvFile ? importCsvFile.name : 'Click to select a .csv file'}
+                  </span>
+                  <input
+                    type="file"
+                    accept=".csv,text/csv"
+                    className="hidden"
+                    onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      if (file) setImportCsvFile(file);
+                      setImportResults(null);
+                    }}
+                  />
+                </label>
+                {importCsvFile && (
+                  <p className="text-[10px] text-theme-secondary mt-1">
+                    {(importCsvFile.size / 1024).toFixed(1)} KB
+                  </p>
+                )}
               </div>
 
-              {/* Header column mapper preview */}
+              {/* Expected columns hint */}
               <div className="p-3 bg-theme-base rounded border border-theme-border space-y-2">
-                <h4 className="font-bold text-[10px] text-theme-secondary font-sans uppercase tracking-wider">Detected Field Mapping</h4>
+                <h4 className="font-bold text-[10px] text-theme-secondary font-sans uppercase tracking-wider">Expected CSV Columns</h4>
                 <div className="grid grid-cols-3 gap-2 text-[10px] text-theme-secondary font-semibold font-sans">
-                  <div className="p-1 bg-theme-card border border-theme-border rounded">First Name &rarr; first_name</div>
-                  <div className="p-1 bg-theme-card border border-theme-border rounded">Last Name &rarr; last_name</div>
-                  <div className="p-1 bg-theme-card border border-theme-border rounded">Email &rarr; email</div>
+                  <div className="p-1 bg-theme-card border border-theme-border rounded">First Name</div>
+                  <div className="p-1 bg-theme-card border border-theme-border rounded">Last Name</div>
+                  <div className="p-1 bg-theme-card border border-theme-border rounded">Email</div>
+                  <div className="p-1 bg-theme-card border border-theme-border rounded">Phone</div>
+                  <div className="p-1 bg-theme-card border border-theme-border rounded">Title</div>
+                  <div className="p-1 bg-theme-card border border-theme-border rounded">Company</div>
                 </div>
               </div>
 
+              {/* Import results */}
+              {importResults && (
+                <div className={`p-3 rounded border ${importResults.errors.length > 0 ? 'border-warning/40 bg-warning-soft/30' : 'border-emerald-500/30 bg-emerald-50/30'} space-y-2`}>
+                  <h4 className="font-bold text-[10px] text-theme-secondary font-sans uppercase tracking-wider">Import Results</h4>
+                  <div className="grid grid-cols-3 gap-2 text-[10px]">
+                    <div className="p-2 bg-theme-card border border-theme-border rounded text-center">
+                      <span className="block text-lg font-bold text-emerald-600">{importResults.imported}</span>
+                      <span className="text-theme-secondary">Imported</span>
+                    </div>
+                    <div className="p-2 bg-theme-card border border-theme-border rounded text-center">
+                      <span className="block text-lg font-bold text-amber-600">{importResults.skipped}</span>
+                      <span className="text-theme-secondary">Skipped</span>
+                    </div>
+                    <div className="p-2 bg-theme-card border border-theme-border rounded text-center">
+                      <span className="block text-lg font-bold text-danger">{importResults.errors.length}</span>
+                      <span className="text-theme-secondary">Errors</span>
+                    </div>
+                  </div>
+                  {importResults.errors.length > 0 && (
+                    <div className="space-y-1 max-h-32 overflow-y-auto">
+                      <p className="text-[10px] font-semibold text-warning">Error Details:</p>
+                      {importResults.errors.map((err, i) => (
+                        <p key={i} className="text-[10px] text-danger bg-danger-soft/20 rounded p-1.5">{err}</p>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+
               <div className="pt-4 border-t border-theme-border flex justify-end gap-2">
                 <button
-                  onClick={() => setShowImportModal(false)}
+                  onClick={() => { setShowImportModal(false); setImportCsvFile(null); setImportResults(null); }}
                   className="px-4 py-2 border border-theme-border hover:bg-theme-base text-theme-primary rounded-lg font-semibold cursor-pointer"
                 >
                   Cancel
                 </button>
                 <button
                   onClick={handleCsvImport}
-                  disabled={importStatus === 'success'}
-                  className="px-4 py-2 bg-theme-accent hover:opacity-90 text-white rounded-lg font-semibold flex items-center gap-1 cursor-pointer"
+                  disabled={!importCsvFile || isImporting}
+                  className="px-4 py-2 bg-theme-accent hover:opacity-90 text-white rounded-lg font-semibold flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
                 >
-                  {importStatus === 'success' ? 'Importing...' : 'Start Bulk Import'}
+                  {isImporting ? (
+                    <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Importing...</>
+                  ) : (
+                    'Start Bulk Import'
+                  )}
                 </button>
               </div>
             </div>
@@ -1665,6 +1947,153 @@ export default function ContactsModule() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: FIND DUPLICATES (API) */}
+      {showDuplicateModal && (
+        <div className="fixed inset-0 z-[90] flex items-center justify-center p-4 bg-theme-primary/60 backdrop-blur-[2px] animate-fade-in">
+          <div className="bg-theme-card rounded-xl shadow-overlay border border-theme-border w-full max-w-xl overflow-hidden flex flex-col max-h-[85vh] animate-overlay-in">
+            <header className="bg-theme-inset px-5 py-4 border-b border-theme-border flex justify-between items-center shrink-0">
+              <h3 className="text-sm font-bold text-theme-primary flex items-center gap-1.5">
+                <Users2 className="w-4 h-4 text-theme-accent" /> Duplicate Contact Detection
+              </h3>
+              <button onClick={() => setShowDuplicateModal(false)} className="text-theme-secondary hover:text-theme-primary font-bold text-xs cursor-pointer bg-transparent border-none">✕</button>
+            </header>
+            <div className="p-5 space-y-4 text-xs text-left overflow-y-auto">
+              {apiDuplicates.length === 0 ? (
+                <div className="text-center py-8">
+                  <Check className="w-8 h-8 text-emerald-500 mx-auto mb-2" />
+                  <p className="text-theme-primary font-semibold">No duplicates found</p>
+                  <p className="text-theme-secondary mt-1">All contacts appear to be unique.</p>
+                </div>
+              ) : (
+                <>
+                  <p className="text-theme-secondary leading-normal">
+                    Found <strong className="text-theme-primary">{apiDuplicates.length}</strong> potential duplicate pair{apiDuplicates.length === 1 ? '' : 's'}. Review each pair and merge if they represent the same person.
+                  </p>
+                  <div className="space-y-3 max-h-96 overflow-y-auto">
+                    {apiDuplicates.map((group, idx) => (
+                      <div key={idx} className="p-3 bg-theme-base rounded border border-theme-border space-y-2">
+                        <div className="flex items-center justify-between">
+                          <span className="font-semibold text-theme-primary text-[11px]">
+                            Match #{idx + 1} — Confidence: <span className="text-theme-accent">{Math.round(group.confidence * 100)}%</span>
+                          </span>
+                          <button
+                            onClick={() => {
+                              setMergeSourceId(group.contact_a.id);
+                              setMergeTargetId(group.contact_b.id);
+                              setShowDuplicateModal(false);
+                              setShowMergeModal(true);
+                            }}
+                            className="flex items-center gap-1 text-[10px] font-semibold text-theme-accent border border-theme-accent/30 rounded-md px-2 py-1 hover:bg-theme-accent-soft cursor-pointer bg-transparent transition-colors"
+                          >
+                            <Shuffle className="w-3 h-3" /> Merge
+                          </button>
+                        </div>
+                        <div className="grid grid-cols-2 gap-3 text-[10px]">
+                          <div className="p-2 bg-theme-card rounded border border-theme-border">
+                            <p className="font-semibold text-theme-primary">{group.contact_a.first_name} {group.contact_a.last_name}</p>
+                            <p className="text-theme-secondary">{group.contact_a.email}</p>
+                            <p className="text-theme-secondary">{group.contact_a.phone}</p>
+                            <p className="text-theme-secondary">{group.contact_a.title}</p>
+                          </div>
+                          <div className="p-2 bg-theme-card rounded border border-theme-border">
+                            <p className="font-semibold text-theme-primary">{group.contact_b.first_name} {group.contact_b.last_name}</p>
+                            <p className="text-theme-secondary">{group.contact_b.email}</p>
+                            <p className="text-theme-secondary">{group.contact_b.phone}</p>
+                            <p className="text-theme-secondary">{group.contact_b.title}</p>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-1 flex-wrap">
+                          <span className="text-[9px] text-theme-secondary">Matched on:</span>
+                          {group.matching_fields.map(field => (
+                            <span key={field} className="text-[9px] bg-theme-accent/10 text-theme-accent px-1.5 py-0.5 rounded font-medium">{field}</span>
+                          ))}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </>
+              )}
+              <div className="pt-4 border-t border-theme-border flex justify-end gap-2">
+                <button
+                  onClick={() => setShowDuplicateModal(false)}
+                  className="px-4 py-2 border border-theme-border hover:bg-theme-base text-theme-primary rounded-lg font-semibold cursor-pointer"
+                >
+                  Close
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: BULK UPDATE CONTACTS */}
+      {showBulkUpdateModal && (
+        <div className="fixed inset-0 z-[90] flex items-center justify-center p-4 bg-theme-primary/60 backdrop-blur-[2px] animate-fade-in">
+          <div className="bg-theme-card rounded-xl shadow-overlay border border-theme-border w-full max-w-md overflow-hidden flex flex-col max-h-[85vh] animate-overlay-in">
+            <header className="bg-theme-inset px-5 py-4 border-b border-theme-border flex justify-between items-center shrink-0">
+              <h3 className="text-sm font-bold text-theme-primary flex items-center gap-1.5">
+                <Tag className="w-4 h-4 text-theme-accent" /> Bulk Update {selectedRowKeys.size} Contact{selectedRowKeys.size === 1 ? '' : 's'}
+              </h3>
+              <button onClick={() => setShowBulkUpdateModal(false)} className="text-theme-secondary hover:text-theme-primary font-bold text-xs cursor-pointer bg-transparent border-none">✕</button>
+            </header>
+            <div className="p-5 space-y-4 text-xs text-left overflow-y-auto">
+              <p className="text-theme-secondary leading-normal">
+                Apply changes to all <strong className="text-theme-primary">{selectedRowKeys.size}</strong> selected contacts. Leave a field blank to skip it.
+              </p>
+
+              <div className="space-y-1">
+                <label className="block font-semibold text-theme-secondary">Add Tags (comma separated)</label>
+                <input
+                  type="text"
+                  placeholder="e.g. VIP, Enterprise, West-Coast"
+                  value={bulkUpdateForm.addTags}
+                  onChange={(e) => setBulkUpdateForm({ ...bulkUpdateForm, addTags: e.target.value })}
+                  className="w-full bg-theme-base text-theme-primary rounded border border-theme-border px-2.5 py-1.5 focus:ring-1 focus:ring-theme-accent focus:outline-none"
+                />
+              </div>
+
+              <div className="space-y-1">
+                <label className="block font-semibold text-theme-secondary">Remove Tags (comma separated)</label>
+                <input
+                  type="text"
+                  placeholder="e.g. Churned, Inactive"
+                  value={bulkUpdateForm.removeTags}
+                  onChange={(e) => setBulkUpdateForm({ ...bulkUpdateForm, removeTags: e.target.value })}
+                  className="w-full bg-theme-base text-theme-primary rounded border border-theme-border px-2.5 py-1.5 focus:ring-1 focus:ring-theme-accent focus:outline-none"
+                />
+              </div>
+
+              <div className="space-y-1">
+                <label className="block font-semibold text-theme-secondary">Reassign Owner</label>
+                <select
+                  value={bulkUpdateForm.newOwnerId}
+                  onChange={(e) => setBulkUpdateForm({ ...bulkUpdateForm, newOwnerId: e.target.value })}
+                  className="w-full bg-theme-base text-theme-primary rounded border border-theme-border px-2.5 py-1.5 focus:ring-1 focus:ring-theme-accent focus:outline-none"
+                >
+                  <option value="">-- No change --</option>
+                  {users.map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
+                </select>
+              </div>
+
+              <div className="pt-4 border-t border-theme-border flex justify-end gap-2">
+                <button
+                  onClick={() => setShowBulkUpdateModal(false)}
+                  className="px-4 py-2 border border-theme-border hover:bg-theme-base text-theme-primary rounded-lg font-semibold cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleBulkUpdate}
+                  className="px-4 py-2 bg-theme-accent hover:opacity-90 text-white rounded-lg font-semibold cursor-pointer"
+                >
+                  Apply Changes
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       )}

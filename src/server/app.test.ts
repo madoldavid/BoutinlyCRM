@@ -77,15 +77,17 @@ describe('Boutinly CRM API', () => {
 
   // ── Auth ──────────────────────────────────────────
 
-  it('signs up, blocks second signup, and logs in', async () => {
+  it('signs up, allows second signup in demo mode, and logs in', async () => {
     const sr = await request(h.app).post('/api/auth/signup')
       .send({ name: 'Admin', email: 'a@t.com', password: 'ChangeMe123!', company_name: 'TC' })
       .expect(201);
     expect(sr.body.token).toBeTruthy();
 
-    await request(h.app).post('/api/auth/signup')
+    // In demo mode, multiple signups are allowed (no user-count restriction)
+    const sr2 = await request(h.app).post('/api/auth/signup')
       .send({ name: 'B', email: 'b@t.com', password: 'ChangeMe123!', company_name: 'TC2' })
-      .expect(403);
+      .expect(201);
+    expect(sr2.body.token).toBeTruthy();
 
     const lr = await request(h.app).post('/api/auth/login')
       .send({ email: 'a@t.com', password: 'ChangeMe123!' }).expect(200);

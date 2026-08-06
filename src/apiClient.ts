@@ -267,6 +267,15 @@ export class ApiClient {
     return res;
   }
 
+  async getOidcProviders(): Promise<Array<{ id: string; name: string }>> {
+    const res = await this.request<{ providers: Array<{ id: string; name: string }> }>(
+      '/api/auth/oidc/providers',
+      {},
+      false,
+    );
+    return res.providers;
+  }
+
   async logout(): Promise<void> {
     await this.request<{ ok: boolean }>('/api/auth/logout', { method: 'POST' }).catch(() => {});
     this.setToken(null);
@@ -281,7 +290,51 @@ export class ApiClient {
   // ─── Bootstrap ─────────────────────────────────────
 
   async bootstrapCrm(): Promise<CrmBootstrapResponse> {
-    return this.request<CrmBootstrapResponse>('/api/crm/bootstrap');
+    const [
+      users,
+      accountsRes,
+      contactsRes,
+      pipelines,
+      stages,
+      dealsRes,
+      tasksRes,
+      activitiesRes,
+      notifications,
+      customFields,
+      emailTemplates,
+      emailCampaigns,
+      auditLogsRes,
+    ] = await Promise.all([
+      this.listUsers(),
+      this.listAccounts({ limit: 10000 }),
+      this.listContacts({ limit: 10000 }),
+      this.listPipelines(),
+      this.listStages(),
+      this.listDeals({ limit: 10000 }),
+      this.listTasks({ limit: 10000 }),
+      this.listActivities({ limit: 10000 }),
+      this.listNotifications(),
+      this.listCustomFields(),
+      this.listEmailTemplates(),
+      this.listEmailCampaigns(),
+      this.listAuditLogs({ limit: 10000 }),
+    ]);
+
+    return {
+      users,
+      accounts: accountsRes.data,
+      contacts: contactsRes.data,
+      pipelines,
+      stages,
+      deals: dealsRes.data,
+      tasks: tasksRes.data,
+      activities: activitiesRes.data,
+      notifications,
+      customFields,
+      emailTemplates,
+      emailCampaigns,
+      auditLogs: auditLogsRes.data,
+    };
   }
 
   // ─── Contacts ──────────────────────────────────────
@@ -318,6 +371,14 @@ export class ApiClient {
       body: JSON.stringify({ sourceId, targetId, finalValues }),
     });
     return res.contact;
+  }
+
+  async importContacts(file: File): Promise<{ imported: number; skipped: number; errors: string[] }> {
+    const csvText = await file.text();
+    return this.request<{ imported: number; skipped: number; errors: string[] }>('/api/contacts/import', {
+      method: 'POST',
+      body: JSON.stringify({ csv: csvText }),
+    });
   }
 
   // ─── Accounts ──────────────────────────────────────
@@ -390,6 +451,22 @@ export class ApiClient {
       body: JSON.stringify({ outcome, reason }),
     });
     return res.deal;
+  }
+
+  // ─── Bulk operations ────────────────────────────────
+
+  async bulkUpdateContacts(ids: string[], patch: Record<string, unknown>): Promise<{ updated: number }> {
+    return this.request<{ updated: number }>('/api/contacts/bulk', {
+      method: 'PATCH',
+      body: JSON.stringify({ ids, patch }),
+    });
+  }
+
+  async bulkUpdateDeals(ids: string[], patch: Record<string, unknown>): Promise<{ updated: number }> {
+    return this.request<{ updated: number }>('/api/deals/bulk', {
+      method: 'PATCH',
+      body: JSON.stringify({ ids, patch }),
+    });
   }
 
   // ─── Tasks ─────────────────────────────────────────
@@ -482,12 +559,16 @@ export class ApiClient {
     return res.campaign;
   }
 
+  async getCampaignMetrics(campaignId: string): Promise<{ campaign_id: string; campaign_name: string; status: string; total_recipients: number; delivered_count: number; unique_opens: number; unique_clicks: number; bounces: number; unsubscribes: number; complaints: number }> {
+    return this.request<{ campaign_id: string; campaign_name: string; status: string; total_recipients: number; delivered_count: number; unique_opens: number; unique_clicks: number; bounces: number; unsubscribes: number; complaints: number }>(`/api/email-campaigns/${campaignId}/metrics`);
+  }
+
   // ─── Send single email ─────────────────────────────
 
-  async sendSingleEmail(contactId: string, subject: string, bodyHtml: string): Promise<{ ok: boolean; message: string }> {
+  async sendSingleEmail(contactId: string, subject: string, bodyHtml: string, cc?: string, bcc?: string): Promise<{ ok: boolean; message: string }> {
     return this.request<{ ok: boolean; message: string }>('/api/emails/send', {
       method: 'POST',
-      body: JSON.stringify({ contact_id: contactId, subject, body_html: bodyHtml }),
+      body: JSON.stringify({ contact_id: contactId, subject, body_html: bodyHtml, cc, bcc }),
     });
   }
 
@@ -511,6 +592,21 @@ export class ApiClient {
   async toggleUserStatus(userId: string): Promise<User> {
     const res = await this.request<{ user: User }>(`/api/users/${userId}/toggle-status`, { method: 'POST' });
     return res.user;
+  }
+
+  async unlockAccount(email: string): Promise<User> {
+    const res = await this.request<{ user: User }>('/api/auth/admin/unlock', {
+      method: 'POST',
+      body: JSON.stringify({ email }),
+    });
+    return res.user;
+  }
+
+  async revokeUserTokens(userId: string): Promise<void> {
+    await this.request<void>('/api/auth/admin/revoke-tokens', {
+      method: 'POST',
+      body: JSON.stringify({ user_id: userId }),
+    });
   }
 
   // ─── Custom fields ─────────────────────────────────
@@ -550,6 +646,46 @@ export class ApiClient {
     return res.stages;
   }
 
+  async createPipeline(data: { name: string; is_default?: boolean }): Promise<Pipeline> {
+    const res = await this.request<{ pipeline: Pipeline }>('/api/pipelines', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+    return res.pipeline;
+  }
+
+  async updatePipeline(id: string, data: Partial<Pick<Pipeline, 'name' | 'is_default' | 'is_archived'>>): Promise<Pipeline> {
+    const res = await this.request<{ pipeline: Pipeline }>(`/api/pipelines/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    });
+    return res.pipeline;
+  }
+
+  async deletePipeline(id: string): Promise<void> {
+    await this.request<void>(`/api/pipelines/${id}`, { method: 'DELETE' });
+  }
+
+  async createStage(data: { pipeline_id: string; name: string; probability: number; stage_order: number; type?: string }): Promise<Stage> {
+    const res = await this.request<{ stage: Stage }>('/api/stages', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+    return res.stage;
+  }
+
+  async updateStage(id: string, data: Partial<Pick<Stage, 'name' | 'probability' | 'order' | 'type'>>): Promise<Stage> {
+    const res = await this.request<{ stage: Stage }>(`/api/stages/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    });
+    return res.stage;
+  }
+
+  async deleteStage(id: string): Promise<void> {
+    await this.request<void>(`/api/stages/${id}`, { method: 'DELETE' });
+  }
+
   // ─── GDPR ──────────────────────────────────────────
 
   async exportUserData(): Promise<Record<string, unknown>> {
@@ -568,6 +704,24 @@ export class ApiClient {
   async getFlags(): Promise<Array<{ key: string; description: string; defaultEnabled: boolean; enabled: boolean; source: string }>> {
     const res = await this.request<{ flags: Array<{ key: string; description: string; defaultEnabled: boolean; enabled: boolean; source: string }> }>('/api/flags');
     return res.flags;
+  }
+
+  // ─── Admin flags ────────────────────────────────────
+
+  async getAdminFlags(): Promise<Array<{ key: string; description: string; defaultEnabled: boolean; enabled: boolean; source: string; overridden: boolean }>> {
+    const res = await this.request<{ flags: Array<{ key: string; description: string; defaultEnabled: boolean; enabled: boolean; source: string; overridden: boolean }> }>('/api/admin/flags');
+    return res.flags;
+  }
+
+  async updateAdminFlag(key: string, enabled: boolean): Promise<{ key: string; enabled: boolean }> {
+    return this.request<{ key: string; enabled: boolean }>(`/api/admin/flags/${encodeURIComponent(key)}`, {
+      method: 'PUT',
+      body: JSON.stringify({ enabled }),
+    });
+  }
+
+  async deleteAdminFlagOverride(key: string): Promise<void> {
+    await this.request<void>(`/api/admin/flags/${encodeURIComponent(key)}/override`, { method: 'DELETE' });
   }
 
   // ─── Audit log export ──────────────────────────────
@@ -660,6 +814,14 @@ export class ApiClient {
     return res.approval;
   }
 
+  async createApproval(data: { entity_type: string; entity_id: string; title: string; reason: string; approver_id: string }): Promise<ApprovalRequest> {
+    const res = await this.request<{ approval: ApprovalRequest }>('/api/approvals', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+    return res.approval;
+  }
+
   // ─── Security policy ────────────────────────────────
 
   async getSecurityPolicy(): Promise<OrgSecurityPolicy> {
@@ -686,6 +848,183 @@ export class ApiClient {
 
   async deleteFieldPermission(id: string): Promise<void> {
     await this.request<void>(`/api/admin/field-permissions/${id}`, { method: 'DELETE' });
+  }
+
+  // ─── File operations ────────────────────────────────
+
+  async uploadFile(file: File, entityType: string, entityId: string): Promise<{ id: string; filename: string; size_bytes: number }> {
+    const buffer = await file.arrayBuffer();
+    const bytes = new Uint8Array(buffer);
+    let binary = '';
+    for (let i = 0; i < bytes.length; i++) {
+      binary += String.fromCharCode(bytes[i]);
+    }
+    const fileData = btoa(binary);
+
+    return this.request<{ id: string; filename: string; size_bytes: number }>('/api/files/upload', {
+      method: 'POST',
+      body: JSON.stringify({
+        file_data: fileData,
+        file_name: file.name,
+        file_type: file.type || 'application/octet-stream',
+        entity_type: entityType,
+        entity_id: entityId,
+      }),
+    });
+  }
+
+  async downloadFile(id: string): Promise<Blob> {
+    const headers: Record<string, string> = {};
+    if (this.token) headers['Authorization'] = `Bearer ${this.token}`;
+
+    let response = await fetch(`${this.baseUrl}/api/files/${id}`, { headers });
+
+    if (response.status === 401 && this.refreshToken) {
+      try {
+        await this.refresh();
+        headers['Authorization'] = `Bearer ${this.token}`;
+        response = await fetch(`${this.baseUrl}/api/files/${id}`, { headers });
+      } catch (e) {
+        if (e instanceof ApiError && e.status === 401) {
+          this.setToken(null);
+          this.setRefreshToken(null);
+          setStoredUser(null);
+        }
+        throw e;
+      }
+    }
+
+    if (!response.ok) {
+      const payload = await response.json().catch(() => null);
+      throw new ApiError(response.status, payload?.error?.message || 'Download failed', payload?.error?.code);
+    }
+
+    return response.blob();
+  }
+
+  async listFiles(params?: { entity_type?: string; entity_id?: string }): Promise<Array<{ id: string; filename: string; mime_type: string; size_bytes: number; created_at: string }>> {
+    const res = await this.request<{ files: Array<{ id: string; filename: string; mime_type: string; size_bytes: number; created_at: string }> }>(
+      '/api/files' + this.toQuery(params),
+    );
+    return res.files;
+  }
+
+  async deleteFile(id: string): Promise<void> {
+    await this.request<void>(`/api/files/${id}`, { method: 'DELETE' });
+  }
+
+  // ─── Calendar operations ────────────────────────────
+
+  async connectCalendar(provider: 'google' | 'microsoft'): Promise<{ url: string }> {
+    return this.request<{ url: string }>(`/api/calendar/connect/${provider}`, {
+      method: 'POST',
+    });
+  }
+
+  async getCalendarStatus(): Promise<{ google: boolean; microsoft: boolean; google_email?: string; microsoft_email?: string }> {
+    return this.request<{ google: boolean; microsoft: boolean; google_email?: string; microsoft_email?: string }>('/api/calendar/status');
+  }
+
+  async disconnectCalendar(provider: 'google' | 'microsoft'): Promise<void> {
+    await this.request<void>(`/api/calendar/disconnect/${provider}`, { method: 'POST' });
+  }
+
+  async syncCalendar(): Promise<{ events_synced: number; tasks_created: number }> {
+    return this.request<{ events_synced: number; tasks_created: number }>('/api/calendar/sync', { method: 'POST' });
+  }
+
+  // ─── Insights / AI ──────────────────────────────────
+
+  async getDealScore(dealId: string): Promise<{ score: number; factors: Array<{ name: string; impact: number; explanation: string }>; confidence: number }> {
+    const res = await this.request<{ score: number | null; factors: Array<{ name: string; impact: number; explanation: string }>; confidence: number; deal_name?: string }>(`/api/insights/deals/${dealId}/score`);
+    if (res.score === null) {
+      return { score: 0, factors: [], confidence: 0 };
+    }
+    return { score: res.score, factors: res.factors ?? [], confidence: res.confidence ?? 0 };
+  }
+
+  async getNextBestActions(): Promise<Array<{ action: string; deal_id: string; contact_id?: string; priority: 'high' | 'medium' | 'low'; rationale: string }>> {
+    const res = await this.request<{ actions: Array<{ action: string; deal_id: string; contact_id?: string; priority: 'high' | 'medium' | 'low'; rationale: string }> }>('/api/insights/next-best-actions');
+    return res.actions;
+  }
+
+  async findDuplicates(): Promise<Array<{ contact_a: Contact; contact_b: Contact; confidence: number; matching_fields: string[] }>> {
+    const res = await this.request<{ groups: Array<{ contact_a: Contact; contact_b: Contact; confidence: number; matching_fields: string[] }> }>('/api/insights/duplicates');
+    return res.groups;
+  }
+
+  async getForecast(): Promise<{ confidence: number; expected_revenue: number; best_case: number; worst_case: number; by_month: Record<string, number> }> {
+    const res = await this.request<{ forecast: { committed: number; weighted: number; expectedLow: number; expectedHigh: number; variancePct: number; by_month?: Record<string, number> } | null }>('/api/insights/forecast');
+    const f = res.forecast;
+    if (!f) {
+      return { confidence: 0, expected_revenue: 0, best_case: 0, worst_case: 0, by_month: {} };
+    }
+    // Map the AI engine's output to the shape the dashboard expects.
+    // Confidence is derived from variance: lower variance → higher confidence.
+    const confidencePct = f.variancePct > 0 ? Math.max(0, Math.round((1 - f.variancePct / 100) * 100)) : 100;
+    return {
+      confidence: confidencePct,
+      expected_revenue: f.weighted,
+      best_case: f.expectedHigh,
+      worst_case: f.expectedLow,
+      by_month: f.by_month ?? {},
+    };
+  }
+
+  // ─── Reports ────────────────────────────────────────
+
+  async getLeaderboard(params?: { period?: string; limit?: number }): Promise<Array<{ user_id: string; user_name: string; revenue: number; deals_closed: number; win_rate: number }>> {
+    const res = await this.request<{ leaderboard: Array<{ user_id: string; name: string; email: string; role: string; won_revenue: number; won_count: number; win_rate: number }> }>(
+      '/api/reports/leaderboard' + this.toQuery(params),
+    );
+    return res.leaderboard.map(e => ({
+      user_id: e.user_id,
+      user_name: e.name,
+      revenue: e.won_revenue,
+      deals_closed: e.won_count,
+      win_rate: e.win_rate,
+    }));
+  }
+
+  async getCustomReport(config: { entity: string; grouping?: string; metric?: string; filters?: Record<string, unknown> }): Promise<{ rows: Array<Record<string, unknown>>; summary: Record<string, unknown> }> {
+    const qs: Record<string, string> = { entity: config.entity };
+    if (config.grouping) qs.group_by = config.grouping;
+    if (config.metric) qs.aggregate = config.metric.startsWith('sum') ? 'sum' : config.metric;
+    const query = Object.entries(qs).map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`).join('&');
+    const res = await this.request<{ data: Array<Record<string, unknown>>; total_rows: number; aggregate: string }>(`/api/reports/custom?${query}`);
+    return { rows: res.data, summary: { total_rows: res.total_rows, aggregate: res.aggregate } };
+  }
+
+  async getPipelineHealth(): Promise<{ total_value: number; weighted_value: number; avg_probability: number; stage_breakdown: Array<{ stage_name: string; count: number; value: number }> }> {
+    const res = await this.request<{
+      funnel: Array<{ stage_id: string; stage_name: string; count: number; value: number; probability: number }>;
+      total_pipeline_value: number;
+      weighted_pipeline_value: number;
+    }>('/api/reports/pipeline-health');
+    const stages = res.funnel ?? [];
+    const avgPct = stages.length > 0
+      ? Math.round(stages.reduce((s, st) => s + (st.probability ?? 0), 0) / stages.length)
+      : 0;
+    return {
+      total_value: res.total_pipeline_value,
+      weighted_value: res.weighted_pipeline_value,
+      avg_probability: avgPct,
+      stage_breakdown: stages.map(s => ({
+        stage_name: s.stage_name,
+        count: s.count,
+        value: s.value,
+      })),
+    };
+  }
+
+  // ─── SES ────────────────────────────────────────────
+
+  async getSesStatus(): Promise<{ provider: string; region: string; domain: string; from_address: string; verification_status: string; dkim_tokens: string[]; is_configured: boolean }> {
+    return this.request<{ provider: string; region: string; domain: string; from_address: string; verification_status: string; dkim_tokens: string[]; is_configured: boolean }>('/api/admin/ses/status');
+  }
+
+  async verifySesDomain(): Promise<{ verified: boolean; message: string }> {
+    return this.request<{ verified: boolean; message: string }>('/api/admin/ses/verify-domain', { method: 'POST' });
   }
 
   // ─── Helpers ───────────────────────────────────────

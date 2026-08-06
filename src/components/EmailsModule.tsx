@@ -31,6 +31,7 @@ export default function EmailsModule() {
     sendEmailCampaign,
     sendSingleEmail,
     getScopedDeals,
+    refreshCampaignMetrics,
   } = useCRM();
 
   const [activeSubView, setActiveSubView] = useState<'compose' | 'templates' | 'campaigns'>('compose');
@@ -40,8 +41,90 @@ export default function EmailsModule() {
     contact_id: '',
     subject: '',
     body_html: '',
-    template_id: ''
+    template_id: '',
+    cc: '',
+    bcc: ''
   });
+  const bodyTextareaRef = React.useRef<HTMLTextAreaElement>(null);
+
+  // Rich text toolbar: insert markdown syntax at cursor position
+  const insertMarkdown = (wrapper: string, placeholder: string) => {
+    const el = bodyTextareaRef.current;
+    if (!el) return;
+    const start = el.selectionStart;
+    const end = el.selectionEnd;
+    const selected = composeForm.body_html.substring(start, end);
+    const before = composeForm.body_html.substring(0, start);
+    const after = composeForm.body_html.substring(end);
+    const insert = selected ? wrapper + selected + wrapper : wrapper + placeholder + wrapper;
+    const newBody = before + insert + after;
+    setComposeForm({ ...composeForm, body_html: newBody });
+    setTimeout(() => {
+      el.focus();
+      const newCursor = selected
+        ? before.length + insert.length
+        : before.length + wrapper.length + placeholder.length;
+      el.setSelectionRange(newCursor, newCursor);
+    }, 0);
+  };
+
+  const insertLinePrefix = (prefix: string) => {
+    const el = bodyTextareaRef.current;
+    if (!el) return;
+    const start = el.selectionStart;
+    const end = el.selectionEnd;
+    const selected = composeForm.body_html.substring(start, end) || 'List item';
+    const lines = selected.split('\n');
+    const prefixed = lines.map(line => prefix + line).join('\n');
+    const before = composeForm.body_html.substring(0, start);
+    const after = composeForm.body_html.substring(end);
+    const newBody = before + prefixed + after;
+    setComposeForm({ ...composeForm, body_html: newBody });
+    setTimeout(() => {
+      el.focus();
+      el.setSelectionRange(before.length + prefixed.length, before.length + prefixed.length);
+    }, 0);
+  };
+
+  // Simple markdown-to-HTML converter for live preview
+  const renderMarkdownToHtml = (md: string): string => {
+    let html = md
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;');
+    // Bold: **text**
+    html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+    // Underline: __text__
+    html = html.replace(/__(.+?)__/g, '<u>$1</u>');
+    // Italic: *text* (but not **)
+    html = html.replace(/(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)/g, '<em>$1</em>');
+    // Process lists: lines starting with "- " or "1. "
+    const lines = html.split('\n');
+    const result: string[] = [];
+    let inUl = false;
+    let inOl = false;
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      const ulMatch = line.match(/^- (.+)$/);
+      const olMatch = line.match(/^\d+\. (.+)$/);
+      if (ulMatch) {
+        if (inOl) { result.push('</ol>'); inOl = false; }
+        if (!inUl) { result.push('<ul>'); inUl = true; }
+        result.push('<li>' + ulMatch[1] + '</li>');
+      } else if (olMatch) {
+        if (inUl) { result.push('</ul>'); inUl = false; }
+        if (!inOl) { result.push('<ol>'); inOl = true; }
+        result.push('<li>' + olMatch[1] + '</li>');
+      } else {
+        if (inUl) { result.push('</ul>'); inUl = false; }
+        if (inOl) { result.push('</ol>'); inOl = false; }
+        result.push(line || '<br/>');
+      }
+    }
+    if (inUl) result.push('</ul>');
+    if (inOl) result.push('</ol>');
+    return result.join('\n');
+  };
 
   // Template Create State
   const [showCreateTemplate, setShowCreateTemplate] = useState(false);
@@ -122,14 +205,18 @@ export default function EmailsModule() {
     sendSingleEmail(
       composeForm.contact_id,
       composeForm.subject,
-      `<div>${composeForm.body_html.replace(/\n/g, '<br/>')}</div>`
+      `<div>${composeForm.body_html.replace(/\n/g, '<br/>')}</div>`,
+      composeForm.cc || undefined,
+      composeForm.bcc || undefined
     );
 
     setComposeForm({
       contact_id: '',
       subject: '',
       body_html: '',
-      template_id: ''
+      template_id: '',
+      cc: '',
+      bcc: ''
     });
 
     setSuccessMessage('Email successfully dispatched via connected Mailbox!');
@@ -159,21 +246,33 @@ export default function EmailsModule() {
   };
 
   // Launch Campaign outreach
-  const handleLaunchCampaign = (e: React.FormEvent) => {
+  const handleLaunchCampaign = async (e: React.FormEvent) => {
     e.preventDefault();
     setCampaignProgress(true);
 
-    // Filter contacts based on "segment" (for simulation, use all unsubscribed=false)
-    const targets = contacts.filter(c => !c.unsubscribed);
+    // Filter contacts based on selected segment
+    const targets = contacts.filter(c => {
+      if (c.unsubscribed) return false;
+      if (campaignForm.target_segment === 'Boutinly') {
+        return c.tags.some(t => t.toLowerCase() === 'boutinly');
+      }
+      if (campaignForm.target_segment === 'Strategic') {
+        return c.tags.some(t => t.toLowerCase() === 'strategic');
+      }
+      return true; // "All" — all unsubscribed contacts
+    });
     const targetIds = targets.map(c => c.id);
 
-    setTimeout(() => {
-      sendEmailCampaign(campaignForm.name, campaignForm.template_id, targetIds);
-      setCampaignProgress(false);
+    try {
+      await sendEmailCampaign(campaignForm.name, campaignForm.template_id, targetIds);
       setShowCreateCampaign(false);
       setSuccessMessage('Bulk Campaign successfully dispatched!');
       setTimeout(() => setSuccessMessage(null), 4000);
-    }, 1500);
+    } catch (err: any) {
+      // error handling is delegated to the store, which surfaces toast notifications
+    } finally {
+      setCampaignProgress(false);
+    }
   };
 
   const isReadOnly = currentUser.role === UserRole.VIEWER;
@@ -282,14 +381,58 @@ export default function EmailsModule() {
                   />
                 </div>
 
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1">
+                    <label className="block font-semibold text-theme-secondary">CC</label>
+                    <input
+                      type="text"
+                      placeholder="cc@example.com"
+                      value={composeForm.cc}
+                      onChange={(e) => setComposeForm({ ...composeForm, cc: e.target.value })}
+                      className="w-full bg-theme-base text-theme-primary border border-theme-border rounded px-2.5 py-2 focus:outline-none focus:ring-1 focus:ring-theme-accent"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="block font-semibold text-theme-secondary">BCC</label>
+                    <input
+                      type="text"
+                      placeholder="bcc@example.com"
+                      value={composeForm.bcc}
+                      onChange={(e) => setComposeForm({ ...composeForm, bcc: e.target.value })}
+                      className="w-full bg-theme-base text-theme-primary border border-theme-border rounded px-2.5 py-2 focus:outline-none focus:ring-1 focus:ring-theme-accent"
+                    />
+                  </div>
+                </div>
+
                 <div className="space-y-1">
-                  <label className="block font-semibold text-theme-secondary">Message Body (Rich Text Plain Simulation) *</label>
+                  <label className="block font-semibold text-theme-secondary">Message Body *</label>
+                  {/* Formatting Toolbar */}
+                  <div className="flex items-center gap-0.5 p-1 bg-theme-base border border-theme-border rounded-t-lg border-b-0">
+                    <button type="button" onClick={() => insertMarkdown('**', 'bold')} title="Bold" className="px-2 py-1 text-[10px] font-bold text-theme-secondary hover:text-theme-primary hover:bg-theme-card rounded cursor-pointer transition-colors">B</button>
+                    <button type="button" onClick={() => insertMarkdown('*', 'italic')} title="Italic" className="px-2 py-1 text-[10px] italic text-theme-secondary hover:text-theme-primary hover:bg-theme-card rounded cursor-pointer transition-colors">I</button>
+                    <button type="button" onClick={() => insertMarkdown('__', 'underline')} title="Underline" className="px-2 py-1 text-[10px] underline text-theme-secondary hover:text-theme-primary hover:bg-theme-card rounded cursor-pointer transition-colors">U</button>
+                    <span className="w-px h-4 bg-theme-border mx-0.5" />
+                    <button type="button" onClick={() => insertLinePrefix('- ')} title="Bullet List" className="px-2 py-1 text-[10px] font-semibold text-theme-secondary hover:text-theme-primary hover:bg-theme-card rounded cursor-pointer transition-colors">&bull; List</button>
+                    <button type="button" onClick={() => insertLinePrefix('1. ')} title="Numbered List" className="px-2 py-1 text-[10px] font-semibold text-theme-secondary hover:text-theme-primary hover:bg-theme-card rounded cursor-pointer transition-colors">1. List</button>
+                  </div>
                   <textarea
+                    ref={bodyTextareaRef}
                     rows={8} required
                     value={composeForm.body_html}
                     onChange={(e) => setComposeForm({ ...composeForm, body_html: e.target.value })}
-                    className="w-full bg-theme-base text-theme-primary border border-theme-border rounded p-2.5 font-sans leading-relaxed focus:ring-1 focus:ring-theme-accent focus:outline-none"
+                    placeholder="Write your message... Use **bold**, *italic*, __underline__, - bullet items, 1. numbered items"
+                    className="w-full bg-theme-base text-theme-primary border border-theme-border rounded-b-lg rounded-t-none p-2.5 font-sans leading-relaxed focus:ring-1 focus:ring-theme-accent focus:outline-none"
                   />
+                  {/* Live HTML Preview */}
+                  {composeForm.body_html && (
+                    <div className="mt-2 p-3 bg-theme-base/60 border border-theme-border/60 rounded-lg text-[11px] leading-relaxed text-theme-secondary">
+                      <span className="text-[9px] uppercase font-bold tracking-wider text-theme-secondary/60 block mb-1.5">Live Preview</span>
+                      <div
+                        className="text-theme-primary"
+                        dangerouslySetInnerHTML={{ __html: renderMarkdownToHtml(composeForm.body_html) }}
+                      />
+                    </div>
+                  )}
                 </div>
 
                 <div className="pt-3 border-t border-theme-border flex justify-between items-center text-[10px] text-theme-secondary font-sans">
@@ -388,7 +531,7 @@ export default function EmailsModule() {
                   </div>
 
                   {/* Visual progress stats row */}
-                  <div className="grid grid-cols-4 gap-4 mt-4 pt-3 border-t border-theme-border text-center text-xs">
+                  <div className="grid grid-cols-5 gap-3 mt-4 pt-3 border-t border-theme-border text-center text-xs">
                     <div>
                       <span className="text-[10px] uppercase font-sans text-theme-secondary block font-semibold">Recipients</span>
                       <span className="font-bold text-theme-primary font-sans">{camp.total_recipients}</span>
@@ -398,13 +541,26 @@ export default function EmailsModule() {
                       <span className="font-bold text-theme-primary font-sans">{camp.delivered_count}</span>
                     </div>
                     <div>
-                      <span className="text-[10px] uppercase font-sans text-theme-secondary block font-semibold">Unique Opens</span>
-                      <span className="font-bold text-theme-accent font-sans">{camp.opened_count} <span className="text-[9px] font-normal font-sans">({openRate.toFixed(0)}%)</span></span>
+                      <span className="text-[10px] uppercase font-sans text-theme-secondary block font-semibold">Open Rate</span>
+                      <span className="font-bold text-theme-accent font-sans">{openRate.toFixed(0)}% <span className="text-[9px] font-normal font-sans">({camp.opened_count})</span></span>
                     </div>
                     <div>
-                      <span className="text-[10px] uppercase font-sans text-theme-secondary block font-semibold">Unique Clicks</span>
-                      <span className="font-bold text-theme-primary font-sans">{camp.clicked_count} <span className="text-[9px] font-normal font-sans">({clickRate.toFixed(0)}%)</span></span>
+                      <span className="text-[10px] uppercase font-sans text-theme-secondary block font-semibold">Click Rate</span>
+                      <span className="font-bold text-theme-primary font-sans">{clickRate.toFixed(0)}% <span className="text-[9px] font-normal font-sans">({camp.clicked_count})</span></span>
                     </div>
+                    <div>
+                      <span className="text-[10px] uppercase font-sans text-theme-secondary block font-semibold">Bounced</span>
+                      <span className="font-bold text-theme-secondary font-sans">{camp.bounced_count}</span>
+                    </div>
+                  </div>
+                  <div className="mt-2 pt-2 border-t border-theme-border/50 flex justify-end">
+                    <button
+                      type="button"
+                      onClick={() => refreshCampaignMetrics(camp.id)}
+                      className="text-[10px] font-semibold text-theme-accent hover:opacity-80 cursor-pointer bg-transparent border-none flex items-center gap-1"
+                    >
+                      <RefreshCw className="w-3 h-3" /> Refresh Metrics
+                    </button>
                   </div>
                 </div>
               );
@@ -600,7 +756,7 @@ export default function EmailsModule() {
                   className="w-full bg-theme-base text-theme-primary border border-theme-border rounded px-2.5 py-1.5 focus:outline-none focus:ring-1 focus:ring-theme-accent font-semibold"
                 >
                   <option value="All" className="bg-theme-card text-theme-primary">All Scoped (excluding unsubscribed)</option>
-                  <option value="Enterprise" className="bg-theme-card text-theme-primary">Boutinly Tagged</option>
+                  <option value="Boutinly" className="bg-theme-card text-theme-primary">Boutinly Tagged</option>
                   <option value="Strategic" className="bg-theme-card text-theme-primary">Strategic Tagged</option>
                 </select>
               </div>

@@ -468,6 +468,8 @@ export interface ForecastConfidence {
   expectedLow: number;
   expectedHigh: number;
   variancePct: number;
+  /** Per-month weighted revenue (YYYY-MM key → weighted value) derived from deal close dates */
+  by_month: Record<string, number>;
 }
 
 /**
@@ -481,13 +483,31 @@ export function forecastConfidence(deals: Deal[], ctx: InsightContext): Forecast
   let weighted = 0;
   let varianceSum = 0;
 
+  // Per-month weighted revenue keyed by YYYY-MM of deal close_date
+  const byMonth: Record<string, number> = {};
+
   for (const deal of deals) {
     const p = stageProb(deal.stage_id) / 100;
     const value = deal.value;
     committed += p >= 0.75 ? value * p : 0;
     weighted += value * p;
     varianceSum += value * p * (1 - p);
+
+    // Aggregate weighted value into the deal's close month bucket
+    try {
+      const d = new Date(deal.close_date);
+      if (!isNaN(d.getTime())) {
+        const month = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+        byMonth[month] = (byMonth[month] ?? 0) + Math.round(value * p);
+      }
+    } catch { /* skip deals with unparseable close dates */ }
   }
+
+  // Sort months chronologically so the consumer receives ordered data
+  const sortedByMonth: Record<string, number> = {};
+  Object.keys(byMonth)
+    .sort()
+    .forEach(k => { sortedByMonth[k] = byMonth[k]; });
 
   const stdDev = Math.sqrt(varianceSum);
   return {
@@ -496,5 +516,6 @@ export function forecastConfidence(deals: Deal[], ctx: InsightContext): Forecast
     expectedLow: Math.round(Math.max(0, weighted - stdDev)),
     expectedHigh: Math.round(weighted + stdDev),
     variancePct: weighted > 0 ? Math.round((stdDev / weighted) * 100) : 0,
+    by_month: sortedByMonth,
   };
 }

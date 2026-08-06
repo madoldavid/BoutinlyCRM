@@ -5,9 +5,11 @@
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useCRM } from '../store';
+import { useFeatureFlag } from '../utils/featureFlags';
 import { UserRole } from '../types';
 import type { Pipeline, Stage, ApiKey, Webhook, WebhookDelivery, Quota, ApprovalRequest, OrgSecurityPolicy, FieldPermission } from '../types';
 import { apiClient } from '../apiClient';
+import { NEW_RECORD_EVENT } from './GlobalShortcuts';
 import {
   Users,
   SlidersHorizontal,
@@ -39,6 +41,7 @@ import {
   ChevronDown,
   ChevronRight,
   X,
+  RotateCcw,
 } from 'lucide-react';
 
 export default function AdminModule() {
@@ -54,9 +57,23 @@ export default function AdminModule() {
     auditLogs,
     pipelines,
     stages,
+    createPipeline,
+    updatePipeline,
+    deletePipeline,
+    createStage,
+    updateStage,
+    deleteStage,
+    getSesStatus,
+    verifySesDomain,
+    getAdminFlags,
+    updateAdminFlag,
+    deleteAdminFlagOverride,
+    adminFlags,
   } = useCRM();
 
-  const [activeSubView, setActiveSubView] = useState<'users' | 'fields' | 'domain' | 'audit' | 'pipelines' | 'integrations' | 'quotas' | 'approvals' | 'governance'>('users');
+  const enterpriseFeaturesEnabled = useFeatureFlag('enterprise_features');
+
+  const [activeSubView, setActiveSubView] = useState<'users' | 'fields' | 'domain' | 'audit' | 'pipelines' | 'integrations' | 'quotas' | 'approvals' | 'governance' | 'flags'>('users');
   const [showInviteModal, setShowInviteModal] = useState(false);
   const [inviteForm, setInviteForm] = useState({
     name: '',
@@ -76,8 +93,15 @@ export default function AdminModule() {
   // Audit search
   const [auditSearch, setAuditSearch] = useState('');
 
-  // Domain state
-  const [domainVerified, setDomainVerified] = useState(false);
+  // Domain / SES state
+  const [sesStatus, setSesStatus] = useState<{ verified: boolean; domain: string; dns_records: Array<{ type: string; name: string; value: string; verified: boolean }> } | null>(null);
+  const [sesLoading, setSesLoading] = useState(false);
+  const [sesVerifyResult, setSesVerifyResult] = useState<{ verified: boolean; message: string } | null>(null);
+
+  // Feature flags state
+  const [featureFlags, setFeatureFlags] = useState<Array<{ key: string; description: string; defaultEnabled: boolean; enabled: boolean; source: string; overridden: boolean }>>([]);
+  const [flagsLoaded, setFlagsLoaded] = useState(false);
+  const [flagBusy, setFlagBusy] = useState<string | null>(null);
 
   // MFA state
   const [mfaSetupData, setMfaSetupData] = useState<{ secret: string; uri: string } | null>(null);
@@ -146,6 +170,7 @@ export default function AdminModule() {
     enforce_mfa: false, enforce_sso: false, password_min_length: 8,
   });
   const [securityPolicySaving, setSecurityPolicySaving] = useState(false);
+  const [securityPolicyResult, setSecurityPolicyResult] = useState<{ success: boolean; message: string } | null>(null);
   const [fieldPermissions, setFieldPermissions] = useState<FieldPermission[]>([]);
   const [governanceLoaded, setGovernanceLoaded] = useState(false);
   const [showFieldPermModal, setShowFieldPermModal] = useState(false);
@@ -156,6 +181,20 @@ export default function AdminModule() {
 
   // ─── Audit export ───────────────────────────────────
   const [auditExporting, setAuditExporting] = useState(false);
+
+  // "+" New button → open invite user modal
+  useEffect(() => {
+    const onNew = () => { setActiveSubView('users'); setShowInviteModal(true); };
+    window.addEventListener(NEW_RECORD_EVENT, onNew);
+    return () => window.removeEventListener(NEW_RECORD_EVENT, onNew);
+  }, []);
+
+  // Load governance data on mount for the right-column security status cards
+  useEffect(() => {
+    if (enterpriseFeaturesEnabled && !governanceLoaded) {
+      loadGovernance();
+    }
+  }, [enterpriseFeaturesEnabled]);
 
   // Render QR code when MFA setup data changes
   useEffect(() => {
@@ -458,6 +497,7 @@ export default function AdminModule() {
   const handleSaveSecurityPolicy = async (e: React.FormEvent) => {
     e.preventDefault();
     setSecurityPolicySaving(true);
+    setSecurityPolicyResult(null);
     try {
       const policy = await apiClient.updateSecurityPolicy({
         ip_allowlist: securityPolicyForm.ip_allowlist.split('\n').map(s => s.trim()).filter(Boolean),
@@ -468,9 +508,9 @@ export default function AdminModule() {
         password_min_length: securityPolicyForm.password_min_length,
       });
       setSecurityPolicy(policy);
-      alert('Security policy updated.');
+      setSecurityPolicyResult({ success: true, message: 'Security policy updated.' });
     } catch (err: any) {
-      alert(err.message || 'Failed to save security policy');
+      setSecurityPolicyResult({ success: false, message: err.message || 'Failed to save security policy' });
     } finally {
       setSecurityPolicySaving(false);
     }
@@ -519,27 +559,177 @@ export default function AdminModule() {
     }
   };
 
+  // ─── SES handlers ───────────────────────────────────
+  const handleLoadSesStatus = async () => {
+    setSesLoading(true);
+    setSesVerifyResult(null);
+    try {
+      const status = await getSesStatus();
+      setSesStatus(status);
+    } catch (err: any) {
+      alert(err.message || 'Failed to load SES status');
+    } finally {
+      setSesLoading(false);
+    }
+  };
+
+  const handleVerifySesDomain = async () => {
+    setSesLoading(true);
+    setSesVerifyResult(null);
+    try {
+      await verifySesDomain();
+      // Reload status after verification
+      const status = await getSesStatus();
+      setSesStatus(status);
+      setSesVerifyResult({ verified: status.verified, message: status.verified ? 'Domain verified successfully.' : 'DNS records not yet propagated.' });
+    } catch (err: any) {
+      setSesVerifyResult({ verified: false, message: err.message || 'Verification failed.' });
+    } finally {
+      setSesLoading(false);
+    }
+  };
+
+  // ─── Feature flag handlers ──────────────────────────
+  const loadFeatureFlags = async () => {
+    setFlagsLoaded(false);
+    try {
+      const flags = await getAdminFlags();
+      setFeatureFlags(flags);
+    } catch (err: any) {
+      alert(err.message || 'Failed to load feature flags');
+    } finally {
+      setFlagsLoaded(true);
+    }
+  };
+
+  const handleToggleFlag = async (key: string, enabled: boolean) => {
+    setFlagBusy(key);
+    try {
+      await updateAdminFlag(key, enabled);
+      setFeatureFlags(prev => prev.map(f => f.key === key ? { ...f, enabled, overridden: true } : f));
+    } catch (err: any) {
+      alert(err.message || 'Failed to update flag');
+    } finally {
+      setFlagBusy(null);
+    }
+  };
+
+  const handleResetFlag = async (key: string) => {
+    setFlagBusy(key);
+    try {
+      await deleteAdminFlagOverride(key);
+      setFeatureFlags(prev => prev.map(f => f.key === key ? { ...f, enabled: f.defaultEnabled, overridden: false } : f));
+    } catch (err: any) {
+      alert(err.message || 'Failed to reset flag');
+    } finally {
+      setFlagBusy(null);
+    }
+  };
+
+  // ─── Pipeline handlers ──────────────────────────────
+  const handleCreatePipeline = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!pipelineForm.name.trim()) return;
+    try {
+      await createPipeline({ name: pipelineForm.name.trim(), is_default: pipelineForm.is_default });
+      setShowPipelineModal(false);
+      setPipelineForm({ name: '', is_default: false });
+    } catch (err: any) {
+      alert(err.message || 'Failed to create pipeline');
+    }
+  };
+
+  const handleUpdatePipeline = async (id: string, data: Partial<Pick<import('../types').Pipeline, 'name' | 'is_default' | 'is_archived'>>) => {
+    try {
+      await updatePipeline(id, data);
+    } catch (err: any) {
+      alert(err.message || 'Failed to update pipeline');
+    }
+  };
+
+  const handleDeletePipeline = async (id: string) => {
+    if (!confirm('Delete this pipeline? All stages and deals within it will also be removed.')) return;
+    try {
+      await deletePipeline(id);
+    } catch (err: any) {
+      alert(err.message || 'Failed to delete pipeline');
+    }
+  };
+
+  // ─── Stage handlers ─────────────────────────────────
+  const [editingStage, setEditingStage] = useState<string | null>(null);
+  const [editStageForm, setEditStageForm] = useState({ name: '', probability: 50, type: 'open' as 'open' | 'won' | 'lost' });
+
+  const handleCreateStage = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!stageForm.name.trim() || !stageForm.pipeline_id) return;
+    try {
+      await createStage({
+        pipeline_id: stageForm.pipeline_id,
+        name: stageForm.name.trim(),
+        probability: stageForm.probability,
+        stage_order: stageForm.order,
+        type: stageForm.type,
+      });
+      setShowStageModal(false);
+      setStageForm({ pipeline_id: '', name: '', probability: 50, order: 1, type: 'open' });
+    } catch (err: any) {
+      alert(err.message || 'Failed to create stage');
+    }
+  };
+
+  const handleUpdateStage = async (id: string) => {
+    if (!editStageForm.name.trim()) return;
+    try {
+      await updateStage(id, {
+        name: editStageForm.name.trim(),
+        probability: editStageForm.probability,
+        type: editStageForm.type,
+      });
+      setEditingStage(null);
+    } catch (err: any) {
+      alert(err.message || 'Failed to update stage');
+    }
+  };
+
+  const handleDeleteStage = async (id: string) => {
+    if (!confirm('Delete this stage? Deals in this stage will need to be reassigned.')) return;
+    try {
+      await deleteStage(id);
+    } catch (err: any) {
+      alert(err.message || 'Failed to delete stage');
+    }
+  };
+
+  // ─── Pipeline inline edit state ─────────────────────
+  const [editingPipeline, setEditingPipeline] = useState<string | null>(null);
+  const [editPipelineName, setEditPipelineName] = useState('');
+
   // Lazy-load each enterprise tab's data the first time it's opened
   useEffect(() => {
-    if (activeSubView === 'integrations') {
+    if (enterpriseFeaturesEnabled && activeSubView === 'integrations') {
       if (!apiKeysLoaded) loadApiKeys();
       if (!webhooksLoaded) loadWebhooks();
-    } else if (activeSubView === 'quotas' && !quotasLoaded) {
+    } else if (enterpriseFeaturesEnabled && activeSubView === 'quotas' && !quotasLoaded) {
       loadQuotas();
-    } else if (activeSubView === 'approvals') {
+    } else if (enterpriseFeaturesEnabled && activeSubView === 'approvals') {
       loadApprovals(approvalStatusFilter);
-    } else if (activeSubView === 'governance' && !governanceLoaded) {
+    } else if (enterpriseFeaturesEnabled && activeSubView === 'governance' && !governanceLoaded) {
       loadGovernance();
+    } else if (activeSubView === 'domain') {
+      handleLoadSesStatus();
+    } else if (activeSubView === 'flags' && !flagsLoaded) {
+      loadFeatureFlags();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeSubView, approvalStatusFilter]);
+  }, [activeSubView, approvalStatusFilter, enterpriseFeaturesEnabled]);
 
   // Invite handler
-  const handleInviteSubmit = (e: React.FormEvent) => {
+  const handleInviteSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!inviteForm.name || !inviteForm.email) return;
 
-    inviteUser(inviteForm.name, inviteForm.email, inviteForm.role);
+    await inviteUser(inviteForm.name, inviteForm.email, inviteForm.role);
     setShowInviteModal(false);
     setInviteForm({
       name: '',
@@ -617,6 +807,7 @@ export default function AdminModule() {
               >
                 <Layers className="w-3.5 h-3.5 text-theme-accent" /> Pipelines
               </button>
+              {enterpriseFeaturesEnabled && (
               <button
                 onClick={() => setActiveSubView('quotas')}
                 className={`px-3 py-1.5 rounded-md cursor-pointer transition-all flex items-center gap-1.5 ${
@@ -625,6 +816,8 @@ export default function AdminModule() {
               >
                 <Target className="w-3.5 h-3.5 text-theme-accent" /> Quotas
               </button>
+              )}
+              {enterpriseFeaturesEnabled && (
               <button
                 onClick={() => setActiveSubView('approvals')}
                 className={`px-3 py-1.5 rounded-md cursor-pointer transition-all flex items-center gap-1.5 ${
@@ -633,6 +826,8 @@ export default function AdminModule() {
               >
                 <ClipboardCheck className="w-3.5 h-3.5 text-theme-accent" /> Approvals
               </button>
+              )}
+              {enterpriseFeaturesEnabled && (
               <button
                 onClick={() => setActiveSubView('integrations')}
                 className={`px-3 py-1.5 rounded-md cursor-pointer transition-all flex items-center gap-1.5 ${
@@ -641,6 +836,8 @@ export default function AdminModule() {
               >
                 <WebhookIcon className="w-3.5 h-3.5 text-theme-accent" /> Integrations
               </button>
+              )}
+              {enterpriseFeaturesEnabled && (
               <button
                 onClick={() => setActiveSubView('governance')}
                 className={`px-3 py-1.5 rounded-md cursor-pointer transition-all flex items-center gap-1.5 ${
@@ -648,6 +845,15 @@ export default function AdminModule() {
                 }`}
               >
                 <Lock className="w-3.5 h-3.5 text-theme-accent" /> Governance
+              </button>
+              )}
+              <button
+                onClick={() => setActiveSubView('flags')}
+                className={`px-3 py-1.5 rounded-md cursor-pointer transition-all flex items-center gap-1.5 ${
+                  activeSubView === 'flags' ? 'bg-theme-card text-theme-primary shadow-xs border border-theme-border/50' : 'text-theme-secondary hover:text-theme-primary'
+                }`}
+              >
+                <ShieldCheck className="w-3.5 h-3.5 text-theme-accent" /> Flags
               </button>
               <button
                 onClick={() => setActiveSubView('domain')}
@@ -685,7 +891,15 @@ export default function AdminModule() {
                   <Plus className="w-3.5 h-3.5" /> Attribute
                 </button>
               )}
-              {activeSubView === 'quotas' && (
+              {activeSubView === 'pipelines' && (
+                <button
+                  onClick={() => { setPipelineForm({ name: '', is_default: false }); setShowPipelineModal(true); }}
+                  className="bg-theme-accent hover:opacity-90 text-white px-3 py-1.5 rounded-lg flex items-center gap-1 text-xs font-semibold shadow-xs cursor-pointer"
+                >
+                  <Plus className="w-3.5 h-3.5" /> Pipeline
+                </button>
+              )}
+              {enterpriseFeaturesEnabled && activeSubView === 'quotas' && (
                 <button
                   onClick={() => setShowQuotaModal(true)}
                   className="bg-theme-accent hover:opacity-90 text-white px-3 py-1.5 rounded-lg flex items-center gap-1 text-xs font-semibold shadow-xs cursor-pointer"
@@ -693,7 +907,7 @@ export default function AdminModule() {
                   <Plus className="w-3.5 h-3.5" /> Assign Quota
                 </button>
               )}
-              {activeSubView === 'governance' && (
+              {enterpriseFeaturesEnabled && activeSubView === 'governance' && (
                 <button
                   onClick={() => setShowFieldPermModal(true)}
                   className="bg-theme-accent hover:opacity-90 text-white px-3 py-1.5 rounded-lg flex items-center gap-1 text-xs font-semibold shadow-xs cursor-pointer"
@@ -836,40 +1050,89 @@ export default function AdminModule() {
                 To dispatch bulk campaigns securely without spoof filters, map DKIM and SPF TXT settings into your DNS provider.
               </p>
 
-              <div className="p-3 bg-theme-base border border-theme-border rounded-lg space-y-3 text-[11px] font-sans text-theme-primary">
-                <div>
-                  <span className="text-theme-secondary block uppercase text-[9px] font-bold">Domain Name</span>
-                  <span className="font-bold">{currentUser?.email?.split('@')[1] || 'your-company-domain.com'}</span>
+              {sesLoading && !sesStatus ? (
+                <div className="p-4 text-center text-xs text-theme-secondary">
+                  <p>Checking DNS configuration…</p>
                 </div>
-                <div className="grid grid-cols-2 gap-4 border-t border-theme-border pt-2">
-                  <div>
-                    <span className="text-theme-secondary block uppercase text-[9px] font-bold">SPF Record Type</span>
-                    <span className="font-bold">TXT &rarr; "v=spf1 include:amazonses.com ~all"</span>
+              ) : sesStatus ? (
+                <>
+                  <div className="p-3 bg-theme-base border border-theme-border rounded-lg space-y-3 text-[11px] font-sans text-theme-primary">
+                    <div>
+                      <span className="text-theme-secondary block uppercase text-[9px] font-bold">Domain Name</span>
+                      <span className="font-bold">{sesStatus.domain || currentUser?.email?.split('@')[1] || 'your-company-domain.com'}</span>
+                    </div>
+                    {sesStatus.dns_records.length > 0 ? (
+                      <div className="border-t border-theme-border pt-2 space-y-2">
+                        <span className="text-theme-secondary block uppercase text-[9px] font-bold">DNS Records to Configure</span>
+                        {sesStatus.dns_records.map((rec, idx) => (
+                          <div key={idx} className={`p-2 rounded border text-[10px] font-mono ${rec.verified ? 'bg-success-soft border-success/20 text-success' : 'bg-theme-inset border-theme-border text-theme-secondary'}`}>
+                            <div className="flex items-center justify-between">
+                              <span className="font-bold uppercase text-[9px]">{rec.type}</span>
+                              {rec.verified ? (
+                                <span className="flex items-center gap-0.5 text-success text-[9px] font-bold"><Check className="w-3 h-3" /> Verified</span>
+                              ) : (
+                                <span className="text-theme-secondary text-[9px]">Pending</span>
+                              )}
+                            </div>
+                            <div className="mt-1 break-all">
+                              <span className="text-theme-secondary block">Name: {rec.name}</span>
+                              <span className="text-theme-secondary block">Value: {rec.value}</span>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="border-t border-theme-border pt-2 grid grid-cols-2 gap-4">
+                        <div>
+                          <span className="text-theme-secondary block uppercase text-[9px] font-bold">SPF Record Type</span>
+                          <span className="font-bold">TXT &rarr; &quot;v=spf1 include:amazonses.com ~all&quot;</span>
+                        </div>
+                        <div>
+                          <span className="text-theme-secondary block uppercase text-[9px] font-bold">DKIM Status</span>
+                          <span className="font-bold">3 CNAME keys mapped</span>
+                        </div>
+                      </div>
+                    )}
                   </div>
-                  <div>
-                    <span className="text-theme-secondary block uppercase text-[9px] font-bold">DKIM Status</span>
-                    <span className="font-bold">3 CNAME keys mapped</span>
-                  </div>
-                </div>
-              </div>
 
-              <div className="flex items-center justify-between border-t border-theme-border pt-3">
-                <span className="text-xs font-bold text-theme-secondary flex items-center gap-1">
-                  Status: 
-                  {domainVerified ? (
-                    <span className="text-theme-accent flex items-center gap-0.5"><Check className="w-3.5 h-3.5 text-theme-accent font-bold" /> Fully Verified</span>
-                  ) : (
-                    <span className="text-theme-secondary flex items-center gap-0.5"><Info className="w-3.5 h-3.5" /> Pending DNS Propagation</span>
+                  {sesVerifyResult && (
+                    <div className={`p-3 rounded-lg border text-xs flex items-center gap-2 ${
+                      sesVerifyResult.verified
+                        ? 'bg-success-soft border-success/20 text-success'
+                        : 'bg-danger-soft border-danger/20 text-danger'
+                    }`}>
+                      {sesVerifyResult.verified ? <Check className="w-4 h-4 shrink-0" /> : <AlertTriangle className="w-4 h-4 shrink-0" />}
+                      <span className="font-semibold">{sesVerifyResult.message}</span>
+                    </div>
                   )}
-                </span>
-                <button
-                  type="button"
-                  onClick={() => setDomainVerified(!domainVerified)}
-                  className="bg-theme-accent hover:opacity-90 text-white font-semibold text-xs px-4 py-2 rounded-lg cursor-pointer"
-                >
-                  Verify Now
-                </button>
-              </div>
+
+                  <div className="flex items-center justify-between border-t border-theme-border pt-3">
+                    <span className="text-xs font-bold text-theme-secondary flex items-center gap-1">
+                      Status:
+                      {sesStatus.verified ? (
+                        <span className="text-theme-accent flex items-center gap-0.5"><Check className="w-3.5 h-3.5 text-theme-accent font-bold" /> Fully Verified</span>
+                      ) : (
+                        <span className="text-theme-secondary flex items-center gap-0.5"><Info className="w-3.5 h-3.5" /> Pending DNS Propagation</span>
+                      )}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={handleVerifySesDomain}
+                      disabled={sesLoading}
+                      className="bg-theme-accent hover:opacity-90 text-white font-semibold text-xs px-4 py-2 rounded-lg cursor-pointer disabled:opacity-50"
+                    >
+                      {sesLoading ? 'Verifying…' : 'Verify Now'}
+                    </button>
+                  </div>
+                </>
+              ) : (
+                <div className="p-4 text-center text-xs text-theme-secondary">
+                  <p>Unable to load domain status. The SES backend may not be configured.</p>
+                  <button onClick={handleLoadSesStatus} className="mt-2 text-theme-accent hover:opacity-80 font-semibold cursor-pointer bg-transparent border-none">
+                    Retry
+                  </button>
+                </div>
+              )}
             </div>
           </div>
         )}
@@ -885,7 +1148,7 @@ export default function AdminModule() {
                   placeholder="Filter logs by rep, action, or entity..."
                   value={auditSearch}
                   onChange={(e) => setAuditSearch(e.target.value)}
-                  className="w-full bg-theme-card text-theme-primary border border-theme-border rounded-lg pl-9 pr-4 py-1.5 text-xs focus:ring-1 focus:ring-theme-accent focus:outline-none font-medium"
+                  className="w-full bg-theme-card text-theme-primary border border-theme-border rounded-lg !pl-9 pr-4 py-1.5 text-xs focus:ring-1 focus:ring-theme-accent focus:outline-none font-medium"
                 />
               </div>
             </div>
@@ -931,42 +1194,166 @@ export default function AdminModule() {
               <div className="text-center py-8 text-xs text-theme-secondary">
                 <Layers className="w-8 h-8 mx-auto mb-2 text-theme-secondary/40" />
                 <p>No pipelines configured</p>
+                <button
+                  onClick={() => { setPipelineForm({ name: '', is_default: false }); setShowPipelineModal(true); }}
+                  className="mt-3 bg-theme-accent hover:opacity-90 text-white px-3 py-1.5 rounded-lg flex items-center gap-1 text-xs font-semibold shadow-xs cursor-pointer mx-auto"
+                >
+                  <Plus className="w-3.5 h-3.5" /> Create First Pipeline
+                </button>
               </div>
             ) : (
-              pipelines.map(p => (
+              pipelines.map(p => {
+                const pipelineStages = stages.filter(s => s.pipeline_id === p.id).sort((a, b) => a.order - b.order);
+                return (
                 <div key={p.id} className="bg-theme-card border border-theme-border rounded-xl overflow-hidden">
-                  <div className="p-3 flex items-center justify-between cursor-pointer"
-                    onClick={() => setExpandedPipeline(expandedPipeline === p.id ? null : p.id)}>
-                    <div className="flex items-center gap-2">
-                      <span className="text-xs font-semibold text-theme-primary">{p.name}</span>
-                      {p.is_default && <span className="text-[9px] bg-theme-accent/10 text-theme-accent px-1.5 py-0.5 rounded font-bold">DEFAULT</span>}
-                      {p.is_archived && <span className="text-[9px] bg-theme-inset text-theme-secondary px-1.5 py-0.5 rounded">ARCHIVED</span>}
+                  <div className="p-3 flex items-center justify-between">
+                    <div className="flex items-center gap-2 cursor-pointer flex-1 min-w-0"
+                      onClick={() => setExpandedPipeline(expandedPipeline === p.id ? null : p.id)}>
+                      {expandedPipeline === p.id ? <ChevronDown className="w-3.5 h-3.5 text-theme-secondary shrink-0" /> : <ChevronRight className="w-3.5 h-3.5 text-theme-secondary shrink-0" />}
+                      {editingPipeline === p.id ? (
+                        <input
+                          type="text"
+                          value={editPipelineName}
+                          onChange={e => setEditPipelineName(e.target.value)}
+                          onBlur={async () => {
+                            if (editPipelineName.trim() && editPipelineName.trim() !== p.name) {
+                              await handleUpdatePipeline(p.id, { name: editPipelineName.trim() });
+                            }
+                            setEditingPipeline(null);
+                          }}
+                          onKeyDown={async e => {
+                            if (e.key === 'Enter') {
+                              if (editPipelineName.trim() && editPipelineName.trim() !== p.name) {
+                                await handleUpdatePipeline(p.id, { name: editPipelineName.trim() });
+                              }
+                              setEditingPipeline(null);
+                            } else if (e.key === 'Escape') {
+                              setEditingPipeline(null);
+                            }
+                          }}
+                          onClick={e => e.stopPropagation()}
+                          autoFocus
+                          className="bg-theme-base border border-theme-border rounded px-1.5 py-0.5 text-xs font-semibold text-theme-primary focus:outline-none focus:ring-1 focus:ring-theme-accent min-w-0"
+                        />
+                      ) : (
+                        <span className="text-xs font-semibold text-theme-primary truncate">{p.name}</span>
+                      )}
+                      {p.is_default && <span className="text-[9px] bg-theme-accent/10 text-theme-accent px-1.5 py-0.5 rounded font-bold shrink-0">DEFAULT</span>}
+                      {p.is_archived && <span className="text-[9px] bg-theme-inset text-theme-secondary px-1.5 py-0.5 rounded shrink-0">ARCHIVED</span>}
                     </div>
-                    <span className="text-2xs text-theme-secondary">{stages.filter(s => s.pipeline_id === p.id).length} stages</span>
+                    <div className="flex items-center gap-1 shrink-0">
+                      <span className="text-2xs text-theme-secondary mr-1">{pipelineStages.length} stages</span>
+                      <button
+                        onClick={() => { setEditingPipeline(p.id); setEditPipelineName(p.name); }}
+                        className="p-1 text-theme-secondary/50 hover:text-theme-accent rounded cursor-pointer bg-transparent border-none"
+                        title="Rename pipeline"
+                      >
+                        <SlidersHorizontal className="w-3.5 h-3.5" />
+                      </button>
+                      {!p.is_default && (
+                        <button
+                          onClick={async () => await handleUpdatePipeline(p.id, { is_default: true })}
+                          className="p-1 text-theme-secondary/50 hover:text-theme-accent rounded cursor-pointer bg-transparent border-none"
+                          title="Set as default"
+                        >
+                          <Check className="w-3.5 h-3.5" />
+                        </button>
+                      )}
+                      <button
+                        onClick={async () => await handleUpdatePipeline(p.id, { is_archived: !p.is_archived })}
+                        className="p-1 text-theme-secondary/50 hover:text-theme-accent rounded cursor-pointer bg-transparent border-none"
+                        title={p.is_archived ? 'Unarchive' : 'Archive'}
+                      >
+                        {p.is_archived ? <PlayCircle className="w-3.5 h-3.5" /> : <PauseCircle className="w-3.5 h-3.5" />}
+                      </button>
+                      <button
+                        onClick={() => handleDeletePipeline(p.id)}
+                        className="p-1 text-theme-secondary/40 hover:text-danger rounded cursor-pointer bg-transparent border-none"
+                        title="Delete pipeline"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
                   </div>
                   {expandedPipeline === p.id && (
                     <div className="border-t border-theme-border bg-theme-base/50 p-3 space-y-2">
                       <div className="flex items-center justify-between">
                         <span className="text-[10px] font-semibold uppercase tracking-wider text-theme-secondary">Stages</span>
-                        <button onClick={() => { setStageForm({ pipeline_id: p.id, name: '', probability: 50, order: stages.filter(s => s.pipeline_id === p.id).length + 1, type: 'open' }); setShowStageModal(true); }}
+                        <button onClick={() => { setStageForm({ pipeline_id: p.id, name: '', probability: 50, order: pipelineStages.length + 1, type: 'open' }); setShowStageModal(true); }}
                           className="text-[10px] text-theme-accent hover:opacity-80 font-semibold cursor-pointer bg-transparent border-none flex items-center gap-1"><Plus className="w-3 h-3" /> Add Stage</button>
                       </div>
-                      {stages.filter(s => s.pipeline_id === p.id).sort((a, b) => a.order - b.order).map(s => (
-                        <div key={s.id} className="flex items-center gap-2 bg-theme-card border border-theme-border rounded-lg p-2">
-                          <span className="text-xs text-theme-primary font-medium flex-1">{s.name}</span>
-                          <span className="text-2xs text-theme-secondary">{s.probability}% · {s.type}</span>
-                        </div>
-                      ))}
+                      {pipelineStages.length === 0 ? (
+                        <p className="text-[10px] text-theme-secondary/70 py-2 text-center">No stages yet. Click &quot;Add Stage&quot; to define your pipeline stages.</p>
+                      ) : (
+                        pipelineStages.map(s => (
+                          <div key={s.id} className="flex items-center gap-2 bg-theme-card border border-theme-border rounded-lg p-2">
+                            {editingStage === s.id ? (
+                              <>
+                                <input
+                                  type="text"
+                                  value={editStageForm.name}
+                                  onChange={e => setEditStageForm({ ...editStageForm, name: e.target.value })}
+                                  className="flex-1 bg-theme-base border border-theme-border rounded px-1.5 py-0.5 text-xs text-theme-primary focus:outline-none focus:ring-1 focus:ring-theme-accent"
+                                  placeholder="Stage name"
+                                  autoFocus
+                                />
+                                <input
+                                  type="number"
+                                  value={editStageForm.probability}
+                                  onChange={e => setEditStageForm({ ...editStageForm, probability: Number(e.target.value) })}
+                                  className="w-14 bg-theme-base border border-theme-border rounded px-1 py-0.5 text-[10px] text-theme-primary focus:outline-none focus:ring-1 focus:ring-theme-accent"
+                                  min={0} max={100}
+                                />
+                                <select
+                                  value={editStageForm.type}
+                                  onChange={e => setEditStageForm({ ...editStageForm, type: e.target.value as 'open' | 'won' | 'lost' })}
+                                  className="bg-theme-base border border-theme-border rounded px-1 py-0.5 text-[10px] text-theme-primary focus:outline-none"
+                                >
+                                  <option value="open">Open</option>
+                                  <option value="won">Won</option>
+                                  <option value="lost">Lost</option>
+                                </select>
+                                <button onClick={() => handleUpdateStage(s.id)} className="p-1 text-success hover:opacity-80 cursor-pointer bg-transparent border-none" title="Save">
+                                  <Check className="w-3.5 h-3.5" />
+                                </button>
+                                <button onClick={() => setEditingStage(null)} className="p-1 text-theme-secondary hover:text-theme-primary cursor-pointer bg-transparent border-none" title="Cancel">
+                                  <X className="w-3.5 h-3.5" />
+                                </button>
+                              </>
+                            ) : (
+                              <>
+                                <span className="text-xs text-theme-primary font-medium flex-1">{s.name}</span>
+                                <span className="text-2xs text-theme-secondary">{s.probability}% · {s.type}</span>
+                                <button
+                                  onClick={() => { setEditingStage(s.id); setEditStageForm({ name: s.name, probability: s.probability, type: s.type }); }}
+                                  className="p-0.5 text-theme-secondary/40 hover:text-theme-accent cursor-pointer bg-transparent border-none"
+                                  title="Edit stage"
+                                >
+                                  <SlidersHorizontal className="w-3 h-3" />
+                                </button>
+                                <button
+                                  onClick={() => handleDeleteStage(s.id)}
+                                  className="p-0.5 text-theme-secondary/40 hover:text-danger cursor-pointer bg-transparent border-none"
+                                  title="Delete stage"
+                                >
+                                  <Trash2 className="w-3 h-3" />
+                                </button>
+                              </>
+                            )}
+                          </div>
+                        ))
+                      )}
                     </div>
                   )}
                 </div>
-              ))
+              );
+            })
             )}
           </div>
         )}
 
         {/* WORKSPACE VIEW: INTEGRATIONS (API KEYS & WEBHOOKS) */}
-        {activeSubView === 'integrations' && (
+        {enterpriseFeaturesEnabled && activeSubView === 'integrations' && (
           <div className="flex-1 overflow-y-auto p-4 space-y-6 text-left bg-theme-base">
             {/* API Keys */}
             <div className="space-y-3">
@@ -1097,7 +1484,7 @@ export default function AdminModule() {
         )}
 
         {/* WORKSPACE VIEW: QUOTAS */}
-        {activeSubView === 'quotas' && (
+        {enterpriseFeaturesEnabled && activeSubView === 'quotas' && (
           <div className="flex-1 overflow-y-auto p-4 space-y-2 text-left bg-theme-base">
             <h4 className="text-xs font-bold uppercase tracking-wider text-theme-secondary flex items-center gap-1.5 mb-1">
               <Target className="w-3.5 h-3.5 text-theme-accent" /> Sales Quotas
@@ -1133,7 +1520,7 @@ export default function AdminModule() {
         )}
 
         {/* WORKSPACE VIEW: APPROVALS */}
-        {activeSubView === 'approvals' && (
+        {enterpriseFeaturesEnabled && activeSubView === 'approvals' && (
           <div className="flex-1 flex flex-col overflow-hidden text-left h-full bg-theme-card">
             <div className="p-3 border-b border-theme-border bg-theme-base shrink-0 flex items-center gap-1.5 flex-wrap">
               {(['pending', 'approved', 'rejected', 'cancelled', 'all'] as const).map(s => (
@@ -1198,7 +1585,7 @@ export default function AdminModule() {
         )}
 
         {/* WORKSPACE VIEW: GOVERNANCE (SECURITY POLICY & FIELD PERMISSIONS) */}
-        {activeSubView === 'governance' && (
+        {enterpriseFeaturesEnabled && activeSubView === 'governance' && (
           <div className="flex-1 overflow-y-auto p-4 space-y-6 text-left bg-theme-base">
             {!governanceLoaded ? (
               <p className="text-xs text-theme-secondary">Loading…</p>
@@ -1256,6 +1643,16 @@ export default function AdminModule() {
                       {securityPolicySaving ? 'Saving…' : 'Save Policy'}
                     </button>
                   </div>
+                  {securityPolicyResult && (
+                    <div className={`mt-2 p-2 rounded-lg border text-xs flex items-center gap-2 ${
+                      securityPolicyResult.success
+                        ? 'bg-success-soft border-success/20 text-success'
+                        : 'bg-danger-soft border-danger/20 text-danger'
+                    }`}>
+                      {securityPolicyResult.success ? <Check className="w-3.5 h-3.5 shrink-0" /> : <AlertTriangle className="w-3.5 h-3.5 shrink-0" />}
+                      <span className="font-semibold">{securityPolicyResult.message}</span>
+                    </div>
+                  )}
                 </form>
 
                 <div className="space-y-3">
@@ -1295,6 +1692,71 @@ export default function AdminModule() {
           </div>
         )}
 
+        {/* WORKSPACE VIEW: FEATURE FLAGS MANAGEMENT */}
+        {activeSubView === 'flags' && (
+          <div className="flex-1 overflow-y-auto p-4 space-y-4 text-left bg-theme-base">
+            <h4 className="text-xs font-bold uppercase tracking-wider text-theme-secondary flex items-center gap-1.5">
+              <ShieldCheck className="w-3.5 h-3.5 text-theme-accent" /> Feature Flags
+            </h4>
+            <p className="text-[10px] text-theme-secondary">
+              Toggle platform features on or off across the organization. Overrides persist until reset.
+            </p>
+            {!flagsLoaded ? (
+              <div className="text-center py-8 text-xs text-theme-secondary">
+                <p>Loading feature flags…</p>
+              </div>
+            ) : featureFlags.length === 0 ? (
+              <div className="text-center py-8 text-xs text-theme-secondary bg-theme-card border border-theme-border rounded-xl">
+                <ShieldCheck className="w-8 h-8 mx-auto mb-2 text-theme-secondary/40" />
+                <p className="font-semibold text-theme-secondary">No feature flags available</p>
+                <p className="mt-1">Feature flags will appear here when configured on the server.</p>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {featureFlags.map(f => (
+                  <div key={f.key} className="bg-theme-card border border-theme-border rounded-lg p-3 flex items-center justify-between gap-3">
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs font-bold text-theme-primary font-mono">{f.key}</span>
+                        {f.overridden ? (
+                          <span className="text-[8px] font-bold uppercase px-1.5 py-0.5 rounded bg-theme-accent/10 text-theme-accent">OVERRIDDEN</span>
+                        ) : (
+                          <span className="text-[8px] font-bold uppercase px-1.5 py-0.5 rounded bg-theme-inset text-theme-secondary">{f.source}</span>
+                        )}
+                      </div>
+                      <p className="text-[10px] text-theme-secondary mt-0.5">{f.description || 'No description'}</p>
+                      <p className="text-[9px] text-theme-secondary/70 mt-0.5">Default: {f.defaultEnabled ? 'Enabled' : 'Disabled'}</p>
+                    </div>
+                    <div className="flex items-center gap-2 shrink-0">
+                      <button
+                        onClick={() => handleToggleFlag(f.key, !f.enabled)}
+                        disabled={flagBusy === f.key}
+                        className={`px-2.5 py-1 rounded text-[10px] font-bold cursor-pointer transition-colors disabled:opacity-50 ${
+                          f.enabled
+                            ? 'bg-success-soft border border-success/20 text-success hover:bg-success/10'
+                            : 'bg-theme-inset border border-theme-border text-theme-secondary hover:bg-theme-hover'
+                        }`}
+                      >
+                        {flagBusy === f.key ? '…' : f.enabled ? 'ON' : 'OFF'}
+                      </button>
+                      {f.overridden && (
+                        <button
+                          onClick={() => handleResetFlag(f.key)}
+                          disabled={flagBusy === f.key}
+                          className="p-1 text-theme-secondary/50 hover:text-theme-accent rounded cursor-pointer bg-transparent border-none disabled:opacity-40"
+                          title="Reset to default"
+                        >
+                          <RotateCcw className="w-3.5 h-3.5" />
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
       </div>
 
       {/* RIGHT COLUMN: SECURITY, MFA & GDPR */}
@@ -1306,15 +1768,15 @@ export default function AdminModule() {
           <div className="space-y-3 font-sans text-[11px] text-theme-secondary">
             <div className="p-3 bg-theme-base rounded-lg border border-theme-border flex justify-between items-center">
               <span>Tenant Security Status</span>
-              <span className="text-theme-accent font-bold uppercase">Fully Active</span>
+              <span className="text-theme-accent font-bold uppercase">{securityPolicy ? (securityPolicy.enforce_mfa ? 'Enhanced Security' : 'Active') : 'Not Configured'}</span>
             </div>
             <div className="p-3 bg-theme-base rounded-lg border border-theme-border flex justify-between items-center">
               <span>Data Isolation Policy</span>
-              <span className="text-theme-accent font-bold uppercase">Active Role Isolation</span>
+              <span className="text-theme-accent font-bold uppercase">{securityPolicy ? (securityPolicy.enforce_mfa ? 'Multi-Factor Required' : 'Active Role Isolation') : 'Platform Default'}</span>
             </div>
             <div className="p-3 bg-theme-base rounded-lg border border-theme-border flex justify-between items-center">
               <span>Compliance Framework</span>
-              <span className="text-theme-accent font-bold uppercase">OWASP Compliant</span>
+              <span className="text-theme-accent font-bold uppercase">{securityPolicy ? (securityPolicy.password_min_length >= 12 ? 'Enhanced' : 'NIST Baseline') : 'OWASP Compliant'}</span>
             </div>
           </div>
         </div>
@@ -1850,6 +2312,106 @@ export default function AdminModule() {
               <div className="pt-4 border-t border-theme-border flex justify-end gap-2">
                 <button type="button" onClick={() => setShowFieldPermModal(false)} className="px-4 py-2 border border-theme-border hover:bg-theme-base text-theme-primary rounded-lg font-semibold cursor-pointer">Cancel</button>
                 <button type="submit" disabled={!fieldPermForm.field_key.trim()} className="px-4 py-2 bg-theme-accent hover:opacity-90 text-white rounded-lg font-semibold cursor-pointer disabled:opacity-50">Save Rule</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: CREATE PIPELINE */}
+      {showPipelineModal && (
+        <div className="fixed inset-0 z-[90] flex items-center justify-center p-4 bg-theme-primary/60 backdrop-blur-[2px] animate-fade-in">
+          <div className="bg-theme-card rounded-xl shadow-overlay border border-theme-border w-full max-w-sm overflow-hidden flex flex-col max-h-[85vh] animate-overlay-in">
+            <header className="bg-theme-inset px-5 py-4 border-b border-theme-border flex justify-between items-center shrink-0">
+              <h3 className="text-sm font-bold text-theme-primary">Create Pipeline</h3>
+              <button onClick={() => setShowPipelineModal(false)} className="text-theme-secondary hover:text-theme-primary font-bold text-xs cursor-pointer bg-transparent border-none">
+                <X className="w-4 h-4" />
+              </button>
+            </header>
+            <form onSubmit={handleCreatePipeline} className="p-5 space-y-4 text-xs text-left overflow-y-auto">
+              <div className="space-y-1">
+                <label className="block font-semibold text-theme-secondary">Pipeline Name *</label>
+                <input
+                  type="text" required placeholder="e.g. Enterprise Sales"
+                  value={pipelineForm.name}
+                  onChange={(e) => setPipelineForm({ ...pipelineForm, name: e.target.value })}
+                  className="w-full bg-theme-base text-theme-primary rounded border border-theme-border px-2.5 py-1.5 focus:ring-1 focus:ring-theme-accent focus:outline-none"
+                />
+              </div>
+              <div className="flex items-center gap-2">
+                <label className="flex items-center gap-1.5 cursor-pointer font-semibold text-theme-secondary">
+                  <input
+                    type="checkbox"
+                    checked={pipelineForm.is_default}
+                    onChange={(e) => setPipelineForm({ ...pipelineForm, is_default: e.target.checked })}
+                  />
+                  Set as default pipeline
+                </label>
+              </div>
+              <div className="pt-4 border-t border-theme-border flex justify-end gap-2">
+                <button type="button" onClick={() => setShowPipelineModal(false)} className="px-4 py-2 border border-theme-border hover:bg-theme-base text-theme-primary rounded-lg font-semibold cursor-pointer">Cancel</button>
+                <button type="submit" disabled={!pipelineForm.name.trim()} className="px-4 py-2 bg-theme-accent hover:opacity-90 text-white rounded-lg font-semibold cursor-pointer disabled:opacity-50">Create Pipeline</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: ADD STAGE TO PIPELINE */}
+      {showStageModal && (
+        <div className="fixed inset-0 z-[90] flex items-center justify-center p-4 bg-theme-primary/60 backdrop-blur-[2px] animate-fade-in">
+          <div className="bg-theme-card rounded-xl shadow-overlay border border-theme-border w-full max-w-sm overflow-hidden flex flex-col max-h-[85vh] animate-overlay-in">
+            <header className="bg-theme-inset px-5 py-4 border-b border-theme-border flex justify-between items-center shrink-0">
+              <h3 className="text-sm font-bold text-theme-primary">Add Stage</h3>
+              <button onClick={() => setShowStageModal(false)} className="text-theme-secondary hover:text-theme-primary font-bold text-xs cursor-pointer bg-transparent border-none">
+                <X className="w-4 h-4" />
+              </button>
+            </header>
+            <form onSubmit={handleCreateStage} className="p-5 space-y-4 text-xs text-left overflow-y-auto">
+              <div className="space-y-1">
+                <label className="block font-semibold text-theme-secondary">Stage Name *</label>
+                <input
+                  type="text" required placeholder="e.g. Qualification"
+                  value={stageForm.name}
+                  onChange={(e) => setStageForm({ ...stageForm, name: e.target.value })}
+                  className="w-full bg-theme-base text-theme-primary rounded border border-theme-border px-2.5 py-1.5 focus:ring-1 focus:ring-theme-accent focus:outline-none"
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <label className="block font-semibold text-theme-secondary">Probability (%)</label>
+                  <input
+                    type="number" min={0} max={100}
+                    value={stageForm.probability}
+                    onChange={(e) => setStageForm({ ...stageForm, probability: Number(e.target.value) })}
+                    className="w-full bg-theme-base text-theme-primary rounded border border-theme-border px-2.5 py-1.5 focus:ring-1 focus:ring-theme-accent focus:outline-none"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="block font-semibold text-theme-secondary">Display Order</label>
+                  <input
+                    type="number" min={1}
+                    value={stageForm.order}
+                    onChange={(e) => setStageForm({ ...stageForm, order: Number(e.target.value) })}
+                    className="w-full bg-theme-base text-theme-primary rounded border border-theme-border px-2.5 py-1.5 focus:ring-1 focus:ring-theme-accent focus:outline-none"
+                  />
+                </div>
+              </div>
+              <div className="space-y-1">
+                <label className="block font-semibold text-theme-secondary">Stage Type</label>
+                <select
+                  value={stageForm.type}
+                  onChange={(e) => setStageForm({ ...stageForm, type: e.target.value as 'open' | 'won' | 'lost' })}
+                  className="w-full bg-theme-base text-theme-primary border border-theme-border rounded px-2.5 py-1.5 focus:outline-none focus:ring-1 focus:ring-theme-accent"
+                >
+                  <option value="open" className="bg-theme-card text-theme-primary">Open (active pipeline)</option>
+                  <option value="won" className="bg-theme-card text-theme-primary">Won (closed-won indicator)</option>
+                  <option value="lost" className="bg-theme-card text-theme-primary">Lost (closed-lost indicator)</option>
+                </select>
+              </div>
+              <div className="pt-4 border-t border-theme-border flex justify-end gap-2">
+                <button type="button" onClick={() => setShowStageModal(false)} className="px-4 py-2 border border-theme-border hover:bg-theme-base text-theme-primary rounded-lg font-semibold cursor-pointer">Cancel</button>
+                <button type="submit" disabled={!stageForm.name.trim() || !stageForm.pipeline_id} className="px-4 py-2 bg-theme-accent hover:opacity-90 text-white rounded-lg font-semibold cursor-pointer disabled:opacity-50">Add Stage</button>
               </div>
             </form>
           </div>

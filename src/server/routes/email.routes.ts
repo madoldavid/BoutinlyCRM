@@ -182,6 +182,8 @@ export function registerEmailRoutes(
     try {
       const result = await emailService.send({
         to: contact.email,
+        cc: body.cc,
+        bcc: body.bcc,
         subject: renderedSubject,
         html: renderedHtml,
         text: htmlToText(renderedHtml),

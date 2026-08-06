@@ -4,7 +4,7 @@
  */
 
 import React, { createContext, useContext, useState, useEffect, useCallback, useRef, useMemo } from 'react';
-import type { User, UserRole, Account, Contact, Pipeline, Stage, Deal, Task, Activity, Notification, CustomFieldDefinition, EmailTemplate, EmailCampaign, AuditLog } from './types';
+import type { User, UserRole, Account, Contact, Pipeline, Stage, Deal, Task, Activity, Notification, CustomFieldDefinition, EmailTemplate, EmailCampaign, AuditLog, FileRecord, ApprovalRequest } from './types';
 import { runtimeConfig } from './runtimeConfig';
 import { toast } from './components/ui/toast';
 import {
@@ -41,6 +41,9 @@ interface CRMContextType {
   emailTemplates: EmailTemplate[];
   emailCampaigns: EmailCampaign[];
   auditLogs: AuditLog[];
+  files: FileRecord[];
+  approvals: ApprovalRequest[];
+  adminFlags: Array<{ key: string; description: string; defaultEnabled: boolean; enabled: boolean; source: string; overridden: boolean }>;
   activeModule: string;
   activePipelineId: string;
   activeTheme: string;
@@ -51,6 +54,65 @@ interface CRMContextType {
   apiError: string | null;
   featureFlags: Array<{ key: string; enabled: boolean }>;
   login: (email: string, password: string) => Promise<MfaRequiredResponse | void>;
+
+  // File operations
+  uploadFile: (file: File, entityType: string, entityId: string) => Promise<FileRecord>;
+  downloadFile: (id: string) => Promise<void>;
+  listFiles: (params?: { entity_type?: string; entity_id?: string }) => Promise<Array<{ id: string; filename: string; mime_type: string; size_bytes: number; created_at: string }>>;
+  deleteFile: (id: string) => Promise<void>;
+
+  // Calendar operations
+  connectCalendar: (provider: 'google' | 'microsoft') => Promise<{ url: string } | undefined>;
+  getCalendarStatus: () => Promise<{ google: boolean; microsoft: boolean; google_email?: string; microsoft_email?: string }>;
+  disconnectCalendar: (provider: 'google' | 'microsoft') => Promise<void>;
+  syncCalendar: () => Promise<void>;
+
+  // Insights / AI
+  getDealScore: (dealId: string) => Promise<{ score: number; factors: Array<{ name: string; impact: number; explanation: string }>; confidence: number }>;
+  getNextBestActions: () => Promise<Array<{ action: string; deal_id: string; contact_id?: string; priority: 'high' | 'medium' | 'low'; rationale: string }>>;
+  findDuplicates: () => Promise<Array<{ contact_a: Contact; contact_b: Contact; confidence: number; matching_fields: string[] }>>;
+  getForecast: () => Promise<{ confidence: number; expected_revenue: number; best_case: number; worst_case: number; by_month: Record<string, number> }>;
+
+  // Reports
+  getLeaderboard: (params?: { period?: string; limit?: number }) => Promise<Array<{ user_id: string; user_name: string; revenue: number; deals_closed: number; win_rate: number }>>;
+  getCustomReport: (config: { entity: string; grouping?: string; metric?: string; filters?: Record<string, unknown> }) => Promise<{ rows: Array<Record<string, unknown>>; summary: Record<string, unknown> }>;
+  getPipelineHealth: () => Promise<{ total_value: number; weighted_value: number; avg_probability: number; stage_breakdown: Array<{ stage_name: string; count: number; value: number }> }>;
+
+  // Pipeline & Stage CRUD
+  createPipeline: (data: { name: string; is_default?: boolean }) => Promise<void>;
+  updatePipeline: (id: string, data: Partial<Pick<Pipeline, 'name' | 'is_default' | 'is_archived'>>) => Promise<void>;
+  deletePipeline: (id: string) => Promise<void>;
+  createStage: (data: { pipeline_id: string; name: string; probability: number; stage_order: number; type?: string }) => Promise<void>;
+  updateStage: (id: string, data: Partial<Pick<Stage, 'name' | 'probability' | 'order' | 'type'>>) => Promise<void>;
+  deleteStage: (id: string) => Promise<void>;
+
+  // Bulk operations
+  bulkUpdateContacts: (ids: string[], changes: Record<string, unknown>) => Promise<void>;
+  bulkUpdateDeals: (ids: string[], changes: Record<string, unknown>) => Promise<void>;
+
+  // Import
+  importContacts: (file: File) => Promise<void>;
+
+  // Campaign metrics
+  getCampaignMetrics: (campaignId: string) => Promise<{ campaign_id: string; campaign_name: string; status: string; total_recipients: number; delivered_count: number; unique_opens: number; unique_clicks: number; bounces: number; unsubscribes: number; complaints: number }>;
+  refreshCampaignMetrics: (campaignId: string) => Promise<void>;
+
+  // Account admin
+  unlockAccount: (userId: string) => Promise<void>;
+  revokeUserTokens: (userId: string) => Promise<void>;
+
+  // Approvals
+  createApproval: (data: { entity_type: string; entity_id: string; title: string; reason: string; approver_id: string }) => Promise<void>;
+
+  // SES
+  getSesStatus: () => Promise<{ verified: boolean; domain: string; dns_records: Array<{ type: string; name: string; value: string; verified: boolean }> }>;
+  verifySesDomain: () => Promise<void>;
+
+  // Admin flags
+  getAdminFlags: () => Promise<Array<{ key: string; description: string; defaultEnabled: boolean; enabled: boolean; source: string; overridden: boolean }>>;
+  updateAdminFlag: (key: string, enabled: boolean) => Promise<void>;
+  deleteAdminFlagOverride: (key: string) => Promise<void>;
+  getOidcProviders: () => Promise<Array<{ id: string; name: string }>>;
   refreshAuthFromClient: () => void;
   logout: () => void;
 
@@ -64,7 +126,7 @@ interface CRMContextType {
   addContact: (contact: Omit<Contact, 'id' | 'created_at'>) => Promise<void>;
   updateContact: (id: string, contact: Partial<Contact>) => Promise<void>;
   deleteContact: (id: string) => Promise<void>;
-  mergeContacts: (sourceId: string, targetId: string, finalValues: Partial<Contact>) => void;
+  mergeContacts: (sourceId: string, targetId: string, finalValues: Partial<Contact>) => Promise<void>;
 
   // Account CRUD
   addAccount: (account: Omit<Account, 'id' | 'created_at'>) => Promise<void>;
@@ -75,8 +137,8 @@ interface CRMContextType {
   addDeal: (deal: Omit<Deal, 'id' | 'created_at' | 'stage_entered_at'>) => Promise<void>;
   updateDeal: (id: string, deal: Partial<Deal>) => Promise<void>;
   deleteDeal: (id: string) => Promise<void>;
-  moveDealStage: (id: string, targetStageId: string) => Promise<void>;
-  closeDeal: (id: string, outcome: 'won' | 'lost', reason?: string) => Promise<void>;
+  moveDealStage: (id: string, targetStageId: string) => Promise<boolean>;
+  closeDeal: (id: string, outcome: 'won' | 'lost', reason?: string) => Promise<boolean>;
 
   // Task CRUD
   addTask: (task: Omit<Task, 'id' | 'created_by_id'>) => Promise<void>;
@@ -103,7 +165,7 @@ interface CRMContextType {
   // Communication Module
   addEmailTemplate: (template: Omit<EmailTemplate, 'id'>) => Promise<void>;
   sendEmailCampaign: (name: string, templateId: string, recipientIds: string[]) => Promise<void>;
-  sendSingleEmail: (contactId: string, subject: string, bodyHtml: string) => Promise<void>;
+  sendSingleEmail: (contactId: string, subject: string, bodyHtml: string, cc?: string, bcc?: string) => Promise<void>;
 
   // Data helpers based on active User Role
   getScopedContacts: () => Contact[];
@@ -189,6 +251,9 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [emailTemplates, setEmailTemplates] = useState<EmailTemplate[]>(() => loadFromStorage('email_templates', INITIAL_TEMPLATES));
   const [emailCampaigns, setEmailCampaigns] = useState<EmailCampaign[]>(() => loadFromStorage('email_campaigns', INITIAL_CAMPAIGNS));
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>(() => loadFromStorage('audit_logs', INITIAL_AUDIT_LOGS));
+  const [files, setFiles] = useState<FileRecord[]>([]);
+  const [approvals, setApprovals] = useState<ApprovalRequest[]>([]);
+  const [adminFlags, setAdminFlags] = useState<Array<{ key: string; description: string; defaultEnabled: boolean; enabled: boolean; source: string; overridden: boolean }>>([]);
   const [featureFlags, setFeatureFlags] = useState<Array<{ key: string; enabled: boolean }>>([]);
 
   // ─── Bootstrap from API ────────────────────────────
@@ -241,10 +306,28 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           if (!cancelled) setFeatureFlags(flags.map(f => ({ key: f.key, enabled: f.enabled })));
         } catch { /* flags optional — keep defaults */ }
 
+        // Fetch admin flags at startup
+        try {
+          const af = await apiClient.getAdminFlags();
+          if (!cancelled) setAdminFlags(af);
+        } catch { /* admin flags optional */ }
+
+        // Fetch file list so shared context is populated
+        try {
+          const fl = await apiClient.listFiles();
+          if (!cancelled) setFiles(fl as FileRecord[]);
+        } catch { /* files optional */ }
+
         // Update localStorage as cache
         persistToLocalStorage(snapshot);
       } catch (err) {
         if (cancelled) return;
+        // Auth error — user no longer exists (e.g. server restarted in dev mode)
+        // Force logout so the user can re-authenticate cleanly
+        if (err instanceof ApiError && (err.code === 'user_not_found' || err.status === 404)) {
+          logout();
+          return;
+        }
         console.error('Bootstrap failed, using localStorage fallback:', err);
         // Keep localStorage/initial data as fallback
         if (err instanceof ApiError) {
@@ -296,15 +379,26 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   // ─── Auth helpers ──────────────────────────────────
 
   const login = useCallback(async (email: string, password: string) => {
-    const result = await apiClient.login(email, password);
-    if ('mfa_required' in result && result.mfa_required) {
-      // MFA required — caller must handle the challenge
-      return result;
+    try {
+      const result = await apiClient.login(email, password);
+      if ('mfa_required' in result && result.mfa_required) {
+        // MFA required — caller must handle the challenge
+        return result;
+      }
+      const user = JSON.parse(userStoreGet() || 'null');
+      setCurrentUserState(user);
+      setIsAuthenticated(true);
+      setApiError(null);
+    } catch (err: unknown) {
+      if (err instanceof ApiError) {
+        setApiError(err.message);
+        toast.error(err.message || 'Login failed');
+      } else {
+        setApiError('Failed to connect to API server. Please try again.');
+        toast.error('Failed to connect to API server. Please try again.');
+      }
+      throw err;
     }
-    const user = JSON.parse(userStoreGet() || 'null');
-    setCurrentUserState(user);
-    setIsAuthenticated(true);
-    setApiError(null);
   }, []);
 
   /** Call this after external apiClient login (e.g., MFA challenge) to sync store state */
@@ -318,6 +412,8 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   }, []);
 
   const logout = useCallback(() => {
+    // Invalidate refresh token server-side (fire-and-forget — clear local state either way)
+    apiClient.logout().catch(() => {});
     apiClient.setToken(null);
     userStoreSet(null);
     // Clear persisted data on logout
@@ -338,7 +434,21 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setEmailTemplates([]);
     setEmailCampaigns([]);
     setAuditLogs([]);
+    setFiles([]);
+    setApprovals([]);
+    setAdminFlags([]);
+    setFeatureFlags([]);
     setIsAuthenticated(false);
+  }, []);
+
+  // ─── OIDC Providers ─────────────────────────────────
+
+  const getOidcProviders = useCallback(async (): Promise<Array<{ id: string; name: string }>> => {
+    try {
+      return await apiClient.getOidcProviders();
+    } catch {
+      return [];
+    }
   }, []);
 
   // ─── setCurrentUser ────────────────────────────────
@@ -410,13 +520,7 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       setContacts(prev => [created, ...prev]);
       toast.success('Contact created', `${contactData.first_name} ${contactData.last_name}`);
     } catch {
-      // Fallback: local-only
-      const newContact: Contact = {
-        ...contactData,
-        id: 'con-' + crypto.randomUUID(),
-        created_at: new Date().toISOString(),
-      };
-      setContacts(prev => [newContact, ...prev]);
+      toast.error('Failed to create contact', 'Please try again.');
     }
   }, []);
 
@@ -426,26 +530,33 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       setContacts(prev => prev.map(c => c.id === id ? updated : c));
       toast.success('Contact updated');
     } catch {
-      setContacts(prev => prev.map(c => c.id === id ? { ...c, ...updatedData } : c));
+      toast.error('Failed to update contact', 'Please try again.');
     }
   }, []);
 
   const deleteContact = useCallback(async (id: string) => {
     try {
       await apiClient.deleteContact(id);
+      setContacts(prev => prev.filter(c => c.id !== id));
       toast.success('Contact deleted');
-    } catch { toast.error('Failed to delete contact'); /* proceed with local deletion */ }
-    setContacts(prev => prev.filter(c => c.id !== id));
+    } catch {
+      toast.error('Failed to delete contact', 'Please try again.');
+    }
   }, []);
 
-  const mergeContacts = useCallback((sourceId: string, targetId: string, finalValues: Partial<Contact>) => {
-    apiClient.mergeContacts(sourceId, targetId, finalValues as Record<string, unknown>).catch(() => {});
-    // Optimistic local merge
-    setActivities(prev => prev.map(a => a.contact_id === sourceId ? { ...a, contact_id: targetId } : a));
-    setTasks(prev => prev.map(t => t.contact_id === sourceId ? { ...t, contact_id: targetId } : t));
-    setContacts(prev =>
-      prev.filter(c => c.id !== sourceId).map(c => c.id === targetId ? { ...c, ...finalValues } : c),
-    );
+  const mergeContacts = useCallback(async (sourceId: string, targetId: string, finalValues: Partial<Contact>) => {
+    try {
+      await apiClient.mergeContacts(sourceId, targetId, finalValues as Record<string, unknown>);
+      // Optimistic local merge only after successful API call
+      setActivities(prev => prev.map(a => a.contact_id === sourceId ? { ...a, contact_id: targetId } : a));
+      setTasks(prev => prev.map(t => t.contact_id === sourceId ? { ...t, contact_id: targetId } : t));
+      setContacts(prev =>
+        prev.filter(c => c.id !== sourceId).map(c => c.id === targetId ? { ...c, ...finalValues } : c),
+      );
+      toast.success('Contacts merged');
+    } catch {
+      toast.error('Failed to merge contacts', 'Please try again.');
+    }
   }, []);
 
   // ─── Account CRUD ──────────────────────────────────
@@ -456,12 +567,7 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       setAccounts(prev => [created, ...prev]);
       toast.success('Account created', accountData.name);
     } catch {
-      const newAccount: Account = {
-        ...accountData,
-        id: 'acc-' + crypto.randomUUID(),
-        created_at: new Date().toISOString(),
-      };
-      setAccounts(prev => [newAccount, ...prev]);
+      toast.error('Failed to create account', 'Please try again.');
     }
   }, []);
 
@@ -469,14 +575,20 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     try {
       const updated = await apiClient.updateAccount(id, updatedData as Record<string, unknown>);
       setAccounts(prev => prev.map(a => a.id === id ? updated : a));
+      toast.success('Account updated');
     } catch {
-      setAccounts(prev => prev.map(a => a.id === id ? { ...a, ...updatedData } : a));
+      toast.error('Failed to update account', 'Please try again.');
     }
   }, []);
 
   const deleteAccount = useCallback(async (id: string) => {
-    try { await apiClient.deleteAccount(id); } catch { /* local fallback */ }
-    setAccounts(prev => prev.filter(a => a.id !== id));
+    try {
+      await apiClient.deleteAccount(id);
+      setAccounts(prev => prev.filter(a => a.id !== id));
+      toast.success('Account deleted');
+    } catch {
+      toast.error('Failed to delete account', 'Please try again.');
+    }
   }, []);
 
   // ─── Deal CRUD ─────────────────────────────────────
@@ -487,13 +599,7 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       setDeals(prev => [created, ...prev]);
       toast.success('Deal created', `${dealData.name} — $${dealData.value.toLocaleString()}`);
     } catch {
-      const newDeal: Deal = {
-        ...dealData,
-        id: 'deal-' + crypto.randomUUID(),
-        created_at: new Date().toISOString(),
-        stage_entered_at: new Date().toISOString(),
-      };
-      setDeals(prev => [newDeal, ...prev]);
+      toast.error('Failed to create deal', 'The deal was not saved. Please try again.');
     }
   }, []);
 
@@ -502,87 +608,43 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       const updated = await apiClient.updateDeal(id, updatedData as Record<string, unknown>);
       setDeals(prev => prev.map(d => d.id === id ? updated : d));
     } catch {
-      setDeals(prev => prev.map(d => d.id === id ? { ...d, ...updatedData } : d));
+      toast.error('Failed to update deal', 'Your changes were not saved. Please try again.');
     }
   }, []);
 
   const deleteDeal = useCallback(async (id: string) => {
-    try { await apiClient.deleteDeal(id); } catch { /* local fallback */ }
-    setDeals(prev => prev.filter(d => d.id !== id));
+    try {
+      await apiClient.deleteDeal(id);
+      setDeals(prev => prev.filter(d => d.id !== id));
+      toast.success('Deal deleted');
+    } catch {
+      toast.error('Failed to delete deal', 'Please try again.');
+    }
   }, []);
 
   const moveDealStage = useCallback(async (id: string, targetStageId: string) => {
     try {
       const moved = await apiClient.moveDealStage(id, targetStageId);
       setDeals(prev => prev.map(d => d.id === id ? moved : d));
-      return;
-    } catch { /* local fallback below */ }
-
-    const deal = deals.find(d => d.id === id);
-    if (!deal) return;
-    const nextStage = stages.find(s => s.id === targetStageId);
-    if (!nextStage) return;
-
-    const prevStage = stages.find(s => s.id === deal.stage_id);
-    const updates: Partial<Deal> = {
-      stage_id: targetStageId,
-      stage_entered_at: new Date().toISOString(),
-      probability: nextStage.probability,
-    };
-    if (nextStage.type === 'won') {
-      updates.won_at = new Date().toISOString();
-      updates.probability = 100;
-    } else if (nextStage.type === 'lost') {
-      updates.lost_at = new Date().toISOString();
-      updates.probability = 0;
+      toast.success('Deal moved', 'Stage updated successfully.');
+      return true;
+    } catch {
+      toast.error('Failed to move deal', 'The stage change was not saved. Please try again.');
+      return false;
     }
-    setDeals(prev => prev.map(d => d.id === id ? { ...d, ...updates } : d));
-
-    // Log activity for stage movement (inline to avoid useCallback ordering issues)
-    const newActivity: Activity = {
-      id: 'act-' + crypto.randomUUID(),
-      type: 'stage_change',
-      title: `Deal moved: ${deal.name}`,
-      body: prevStage
-        ? `Stage changed from "${prevStage.name}" to "${nextStage.name}".`
-        : `Deal entered stage "${nextStage.name}".`,
-      user_id: currentUser?.id || '',
-      deal_id: id,
-      created_at: new Date().toISOString(),
-    };
-    setActivities(prev => [newActivity, ...prev]);
-  }, [deals, stages, currentUser]);
+  }, []);
 
   const closeDeal = useCallback(async (id: string, outcome: 'won' | 'lost', reason?: string) => {
     try {
       const closed = await apiClient.closeDeal(id, outcome, reason);
       setDeals(prev => prev.map(d => d.id === id ? closed : d));
-      return;
-    } catch { /* local fallback */ }
-
-    const deal = deals.find(d => d.id === id);
-    const targetStageId = stages.find(s => s.pipeline_id === activePipelineId && s.type === outcome)?.id;
-    if (targetStageId) {
-      updateDeal(id, { lost_reason: reason });
-      await moveDealStage(id, targetStageId);
+      toast.success(`Deal ${outcome === 'won' ? 'won' : 'lost'}`, `Deal has been closed as ${outcome}.`);
+      return true;
+    } catch {
+      toast.error('Failed to close deal', 'The deal status was not updated. Please try again.');
+      return false;
     }
-
-    // Log activity for deal closure (inline to avoid useCallback ordering issues)
-    if (deal) {
-      const newActivity: Activity = {
-        id: 'act-' + crypto.randomUUID(),
-        type: 'deal_closed',
-        title: `Deal ${outcome === 'won' ? 'Won' : 'Lost'}: ${deal.name}`,
-        body: reason
-          ? `Deal closed as ${outcome}. Reason: ${reason}`
-          : `Deal closed as ${outcome}.`,
-        user_id: currentUser?.id || '',
-        deal_id: id,
-        created_at: new Date().toISOString(),
-      };
-      setActivities(prev => [newActivity, ...prev]);
-    }
-  }, [stages, activePipelineId, updateDeal, moveDealStage, deals, currentUser]);
+  }, []);
 
   // ─── Task CRUD ─────────────────────────────────────
 
@@ -593,13 +655,9 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         created_by_id: currentUser?.id,
       } as Record<string, unknown>);
       setTasks(prev => [created, ...prev]);
+      toast.success('Task created', taskData.title);
     } catch {
-      const newTask: Task = {
-        ...taskData,
-        id: 'task-' + crypto.randomUUID(),
-        created_by_id: currentUser?.id || '',
-      };
-      setTasks(prev => [newTask, ...prev]);
+      toast.error('Failed to create task', 'Please try again.');
     }
   }, [currentUser]);
 
@@ -608,7 +666,7 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       const updated = await apiClient.updateTask(id, updatedData as Record<string, unknown>);
       setTasks(prev => prev.map(t => t.id === id ? updated : t));
     } catch {
-      setTasks(prev => prev.map(t => t.id === id ? { ...t, ...updatedData } : t));
+      toast.error('Failed to update task', 'Please try again.');
     }
   }, []);
 
@@ -617,13 +675,18 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       const completed = await apiClient.completeTask(id, note);
       setTasks(prev => prev.map(t => t.id === id ? completed : t));
     } catch {
-      setTasks(prev => prev.map(t => t.id === id ? { ...t, completed_at: new Date().toISOString() } : t));
+      toast.error('Failed to complete task', 'Please try again.');
     }
   }, []);
 
   const deleteTask = useCallback(async (id: string) => {
-    try { await apiClient.deleteTask(id); } catch { /* local fallback */ }
-    setTasks(prev => prev.filter(t => t.id !== id));
+    try {
+      await apiClient.deleteTask(id);
+      setTasks(prev => prev.filter(t => t.id !== id));
+      toast.success('Task deleted');
+    } catch {
+      toast.error('Failed to delete task', 'Please try again.');
+    }
   }, []);
 
   // ─── Activity log ──────────────────────────────────
@@ -633,12 +696,7 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       const created = await apiClient.createActivity(activityData as Record<string, unknown>);
       setActivities(prev => [created, ...prev]);
     } catch {
-      const newActivity: Activity = {
-        ...activityData,
-        id: 'act-' + crypto.randomUUID(),
-        created_at: new Date().toISOString(),
-      };
-      setActivities(prev => [newActivity, ...prev]);
+      toast.error('Failed to log activity');
     }
   }, []);
 
@@ -648,32 +706,42 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     try {
       const created = await apiClient.createCustomField(cfdData as Record<string, unknown>);
       setCustomFields(prev => [...prev, created]);
+      toast.success('Custom field created', cfdData.label);
     } catch {
-      const newCfd: CustomFieldDefinition = {
-        ...cfdData,
-        id: 'cfd-' + crypto.randomUUID(),
-      };
-      setCustomFields(prev => [...prev, newCfd]);
+      toast.error('Failed to create custom field', 'Please try again.');
     }
   }, []);
 
   const deleteCustomFieldDefinition = useCallback(async (id: string) => {
-    try { await apiClient.deleteCustomField(id); } catch { /* local fallback */ }
-    setCustomFields(prev => prev.filter(c => c.id !== id));
+    try {
+      await apiClient.deleteCustomField(id);
+      setCustomFields(prev => prev.filter(c => c.id !== id));
+      toast.success('Custom field deleted');
+    } catch {
+      toast.error('Failed to delete custom field', 'Please try again.');
+    }
   }, []);
 
   // ─── Notifications ─────────────────────────────────
 
   const markNotificationRead = useCallback(async (id: string) => {
-    try { await apiClient.markNotificationRead(id); } catch { /* local fallback */ }
-    setNotifications(prev => prev.map(n => n.id === id ? { ...n, read_at: new Date().toISOString() } : n));
+    try {
+      await apiClient.markNotificationRead(id);
+      setNotifications(prev => prev.map(n => n.id === id ? { ...n, read_at: new Date().toISOString() } : n));
+    } catch {
+      toast.error('Failed to mark notification as read');
+    }
   }, []);
 
   const clearAllNotifications = useCallback(async () => {
-    try { await apiClient.markAllNotificationsRead(); } catch { /* local fallback */ }
-    setNotifications(prev =>
-      prev.map(n => n.user_id === currentUser?.id && !n.read_at ? { ...n, read_at: new Date().toISOString() } : n),
-    );
+    try {
+      await apiClient.markAllNotificationsRead();
+      setNotifications(prev =>
+        prev.map(n => n.user_id === currentUser?.id && !n.read_at ? { ...n, read_at: new Date().toISOString() } : n),
+      );
+    } catch {
+      toast.error('Failed to clear notifications');
+    }
   }, [currentUser]);
 
   // ─── Users Admin ───────────────────────────────────
@@ -682,30 +750,28 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     try {
       const created = await apiClient.inviteUser({ name, email, role });
       setUsers(prev => [...prev, created]);
+      toast.success('User invited', name);
     } catch {
-      const newUser: User = {
-        id: 'usr-' + crypto.randomUUID(),
-        organization_id: currentUser?.organization_id || '',
-        email,
-        name,
-        avatar_url: '',
-        role,
-        mfa_enabled: false,
-        is_active: true,
-        timezone: 'America/New_York',
-      };
-      setUsers(prev => [...prev, newUser]);
+      toast.error('Failed to invite user', 'Please try again.');
     }
   }, []);
 
   const toggleUserStatus = useCallback(async (userId: string) => {
-    try { await apiClient.toggleUserStatus(userId); } catch { /* local fallback */ }
-    setUsers(prev => prev.map(u => u.id === userId ? { ...u, is_active: !u.is_active } : u));
+    try {
+      const updated = await apiClient.toggleUserStatus(userId);
+      setUsers(prev => prev.map(u => u.id === userId ? updated : u));
+    } catch {
+      toast.error('Failed to update user status', 'Please try again.');
+    }
   }, []);
 
   const updateUserRole = useCallback(async (userId: string, role: UserRole) => {
-    try { await apiClient.updateUserRole(userId, role); } catch { /* local fallback */ }
-    setUsers(prev => prev.map(u => u.id === userId ? { ...u, role } : u));
+    try {
+      const updated = await apiClient.updateUserRole(userId, role);
+      setUsers(prev => prev.map(u => u.id === userId ? updated : u));
+    } catch {
+      toast.error('Failed to update user role', 'Please try again.');
+    }
   }, []);
 
   // ─── Communication / Email ─────────────────────────
@@ -714,12 +780,9 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     try {
       const created = await apiClient.createEmailTemplate(templateData as Record<string, unknown>);
       setEmailTemplates(prev => [...prev, created]);
+      toast.success('Template created', templateData.name);
     } catch {
-      const newTemplate: EmailTemplate = {
-        ...templateData,
-        id: 'tmp-' + crypto.randomUUID(),
-      };
-      setEmailTemplates(prev => [...prev, newTemplate]);
+      toast.error('Failed to create template', 'Please try again.');
     }
   }, []);
 
@@ -727,40 +790,412 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     try {
       const created = await apiClient.createEmailCampaign({ name, template_id: templateId, recipient_ids: recipientIds });
       setEmailCampaigns(prev => [created, ...prev]);
+      toast.success('Campaign sent', name);
     } catch {
-      // Fallback: create a local-only campaign entry
-      const campaignId = 'camp-' + crypto.randomUUID();
-      const newCampaign: EmailCampaign = {
-        id: campaignId,
-        name,
-        template_id: templateId,
-        status: 'draft',
-        sent_at: new Date().toISOString(),
-        total_recipients: recipientIds.length,
-        delivered_count: 0,
-        opened_count: 0,
-        clicked_count: 0,
-        bounced_count: 0,
-        unsubscribed_count: 0,
-        created_by_id: currentUser?.id || '',
-      };
-      setEmailCampaigns(prev => [newCampaign, ...prev]);
+      toast.error('Failed to send campaign', 'Please try again.');
     }
+  }, []);
+
+  const sendSingleEmail = useCallback(async (contactId: string, subject: string, bodyHtml: string, cc?: string, bcc?: string) => {
+    try {
+      await apiClient.sendSingleEmail(contactId, subject, bodyHtml, cc, bcc);
+      toast.success('Email sent', subject);
+      // Log the email as activity only on success
+      addActivity({
+        type: 'email_sent',
+        title: `Email Sent: ${subject}`,
+        body: bodyHtml.replace(/<[^>]*>/g, ''),
+        user_id: currentUser?.id || '',
+        contact_id: contactId,
+      });
+    } catch {
+      toast.error('Failed to send email', 'Please try again.');
+    }
+  }, [currentUser, addActivity]);
+
+  // ─── File operations ───────────────────────────────
+
+  const uploadFile = useCallback(async (file: File, entityType: string, entityId: string): Promise<FileRecord> => {
+    const result = await apiClient.uploadFile(file, entityType, entityId);
+    const newFile: FileRecord = {
+      id: result.id,
+      user_id: currentUser?.id || '',
+      entity_type: entityType as FileRecord['entity_type'],
+      entity_id: entityId,
+      filename: result.filename,
+      original_name: file.name,
+      mime_type: file.type || 'application/octet-stream',
+      size_bytes: result.size_bytes,
+      storage_provider: 's3',
+      storage_path: '',
+      created_at: new Date().toISOString(),
+    };
+    setFiles(prev => [newFile, ...prev]);
+    toast.success('File uploaded', result.filename);
+    return newFile;
   }, [currentUser]);
 
-  const sendSingleEmail = useCallback(async (contactId: string, subject: string, bodyHtml: string) => {
+  const downloadFile = useCallback(async (id: string) => {
     try {
-      await apiClient.sendSingleEmail(contactId, subject, bodyHtml);
-    } catch { /* local fallback */ }
-    // Log the email as activity
-    addActivity({
-      type: 'email_sent',
-      title: `Email Sent: ${subject}`,
-      body: bodyHtml.replace(/<[^>]*>/g, ''),
-      user_id: currentUser?.id || '',
-      contact_id: contactId,
-    });
-  }, [currentUser, addActivity]);
+      const blob = await apiClient.downloadFile(id);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = '';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch {
+      toast.error('Download failed');
+    }
+  }, []);
+
+  const listFiles = useCallback(async (params?: { entity_type?: string; entity_id?: string }) => {
+    try {
+      const result = await apiClient.listFiles(params);
+      if (!params) setFiles(result as FileRecord[]);
+      return result;
+    } catch {
+      return [];
+    }
+  }, []);
+
+  const deleteFile = useCallback(async (id: string) => {
+    try {
+      await apiClient.deleteFile(id);
+      setFiles(prev => prev.filter(f => f.id !== id));
+      toast.success('File deleted');
+    } catch {
+      toast.error('Failed to delete file', 'Please try again.');
+    }
+  }, []);
+
+  // ─── Calendar operations ───────────────────────────
+
+  const connectCalendar = useCallback(async (provider: 'google' | 'microsoft') => {
+    try {
+      const result = await apiClient.connectCalendar(provider);
+      toast.success(`${provider === 'google' ? 'Google' : 'Microsoft'} calendar`, 'Connection initiated — complete authorization in your browser.');
+      return result;
+    } catch {
+      toast.error('Failed to connect calendar', 'Please try again.');
+    }
+  }, []);
+
+  const getCalendarStatus = useCallback(async () => {
+    try {
+      return await apiClient.getCalendarStatus();
+    } catch {
+      return { google: false, microsoft: false };
+    }
+  }, []);
+
+  const disconnectCalendar = useCallback(async (provider: 'google' | 'microsoft') => {
+    try {
+      await apiClient.disconnectCalendar(provider);
+      toast.success(`${provider === 'google' ? 'Google' : 'Microsoft'} calendar disconnected`);
+    } catch {
+      toast.error('Failed to disconnect calendar', 'Please try again.');
+    }
+  }, []);
+
+  const syncCalendar = useCallback(async () => {
+    try {
+      const result = await apiClient.syncCalendar();
+      toast.success('Calendar synced', `Synced ${result.events_synced} events, created ${result.tasks_created} tasks`);
+    } catch {
+      toast.error('Calendar sync failed', 'Please try again.');
+    }
+  }, []);
+
+  // ─── Insights / AI ─────────────────────────────────
+
+  const getDealScore = useCallback(async (dealId: string) => {
+    try {
+      return await apiClient.getDealScore(dealId);
+    } catch {
+      toast.error('Failed to load deal score', 'Scoring is temporarily unavailable.');
+      return { score: 0, factors: [], confidence: 0 };
+    }
+  }, []);
+
+  const getNextBestActions = useCallback(async () => {
+    try {
+      return await apiClient.getNextBestActions();
+    } catch {
+      return [];
+    }
+  }, []);
+
+  const findDuplicates = useCallback(async () => {
+    try {
+      return await apiClient.findDuplicates();
+    } catch {
+      return [];
+    }
+  }, []);
+
+  const getForecast = useCallback(async () => {
+    try {
+      return await apiClient.getForecast();
+    } catch {
+      return { confidence: 0, expected_revenue: 0, best_case: 0, worst_case: 0, by_month: {} };
+    }
+  }, []);
+
+  // ─── Reports ───────────────────────────────────────
+
+  const getLeaderboard = useCallback(async (params?: { period?: string; limit?: number }) => {
+    try {
+      return await apiClient.getLeaderboard(params);
+    } catch {
+      return [];
+    }
+  }, []);
+
+  const getCustomReport = useCallback(async (config: { entity: string; grouping?: string; metric?: string; filters?: Record<string, unknown> }) => {
+    try {
+      return await apiClient.getCustomReport(config);
+    } catch {
+      return { rows: [], summary: {} };
+    }
+  }, []);
+
+  const getPipelineHealth = useCallback(async () => {
+    try {
+      return await apiClient.getPipelineHealth();
+    } catch {
+      return { total_value: 0, weighted_value: 0, avg_probability: 0, stage_breakdown: [] };
+    }
+  }, []);
+
+  // ─── Pipeline & Stage CRUD ─────────────────────────
+
+  const createPipeline = useCallback(async (data: { name: string; is_default?: boolean }) => {
+    try {
+      const created = await apiClient.createPipeline(data);
+      setPipelines(prev => [...prev, created]);
+      toast.success('Pipeline created', data.name);
+      // If default, auto-select it
+      if (created.is_default) setActivePipelineId(created.id);
+    } catch {
+      toast.error('Failed to create pipeline', 'Please try again.');
+    }
+  }, []);
+
+  const updatePipeline = useCallback(async (id: string, data: Partial<Pick<Pipeline, 'name' | 'is_default' | 'is_archived'>>) => {
+    try {
+      const updated = await apiClient.updatePipeline(id, data);
+      setPipelines(prev => prev.map(p => p.id === id ? updated : p));
+      if (updated.is_default) setActivePipelineId(updated.id);
+    } catch {
+      toast.error('Failed to update pipeline', 'Please try again.');
+    }
+  }, []);
+
+  const deletePipeline = useCallback(async (id: string) => {
+    try {
+      await apiClient.deletePipeline(id);
+      setPipelines(prev => prev.filter(p => p.id !== id));
+      toast.success('Pipeline deleted');
+    } catch {
+      toast.error('Failed to delete pipeline', 'Please try again.');
+    }
+  }, []);
+
+  const createStage = useCallback(async (data: { pipeline_id: string; name: string; probability: number; stage_order: number; type?: string }) => {
+    try {
+      const created = await apiClient.createStage(data);
+      setStages(prev => [...prev, created]);
+      toast.success('Stage created', data.name);
+    } catch {
+      toast.error('Failed to create stage', 'Please try again.');
+    }
+  }, []);
+
+  const updateStage = useCallback(async (id: string, data: Partial<Pick<Stage, 'name' | 'probability' | 'order' | 'type'>>) => {
+    try {
+      const updated = await apiClient.updateStage(id, data);
+      setStages(prev => prev.map(s => s.id === id ? updated : s));
+    } catch {
+      toast.error('Failed to update stage', 'Please try again.');
+    }
+  }, []);
+
+  const deleteStage = useCallback(async (id: string) => {
+    try {
+      await apiClient.deleteStage(id);
+      setStages(prev => prev.filter(s => s.id !== id));
+      toast.success('Stage deleted');
+    } catch {
+      toast.error('Failed to delete stage', 'Please try again.');
+    }
+  }, []);
+
+  // ─── Bulk operations ───────────────────────────────
+
+  const bulkUpdateContacts = useCallback(async (ids: string[], changes: Record<string, unknown>) => {
+    try {
+      await apiClient.bulkUpdateContacts(ids, changes);
+      toast.success(`${ids.length} contacts updated`);
+      // Refresh contacts from API
+      const result = await apiClient.listContacts();
+      setContacts(result.data);
+    } catch {
+      toast.error('Failed to update contacts', 'Please try again.');
+    }
+  }, []);
+
+  const bulkUpdateDeals = useCallback(async (ids: string[], changes: Record<string, unknown>) => {
+    try {
+      await apiClient.bulkUpdateDeals(ids, changes);
+      toast.success(`${ids.length} deals updated`);
+      const result = await apiClient.listDeals();
+      setDeals(result.data);
+    } catch {
+      toast.error('Failed to update deals', 'Please try again.');
+    }
+  }, []);
+
+  // ─── Import ────────────────────────────────────────
+
+  const importContacts = useCallback(async (file: File) => {
+    try {
+      const result = await apiClient.importContacts(file);
+      toast.success('Import complete', `Imported ${result.imported}, skipped ${result.skipped}`);
+      const refreshed = await apiClient.listContacts();
+      setContacts(refreshed.data);
+    } catch {
+      toast.error('Failed to import contacts', 'Please try again.');
+    }
+  }, []);
+
+  // ─── Campaign metrics ──────────────────────────────
+
+  const getCampaignMetrics = useCallback(async (campaignId: string) => {
+    try {
+      return await apiClient.getCampaignMetrics(campaignId);
+    } catch {
+      return { campaign_id: campaignId, campaign_name: '', status: 'unknown', total_recipients: 0, delivered_count: 0, unique_opens: 0, unique_clicks: 0, bounces: 0, unsubscribes: 0, complaints: 0 };
+    }
+  }, []);
+
+  const refreshCampaignMetrics = useCallback(async (campaignId: string) => {
+    try {
+      const metrics = await apiClient.getCampaignMetrics(campaignId);
+      setEmailCampaigns(prev => prev.map(c => {
+        if (c.id === campaignId) {
+          return {
+            ...c,
+            total_recipients: metrics.total_recipients,
+            delivered_count: metrics.delivered_count,
+            opened_count: metrics.unique_opens,
+            clicked_count: metrics.unique_clicks,
+            bounced_count: metrics.bounces,
+            unsubscribed_count: metrics.unsubscribes,
+          };
+        }
+        return c;
+      }));
+    } catch { /* keep existing metrics on failure */ }
+  }, []);
+
+  // ─── Account admin ─────────────────────────────────
+
+  const unlockAccount = useCallback(async (userId: string) => {
+    try {
+      const user = await apiClient.unlockAccount(userId);
+      setUsers(prev => prev.map(u => u.id === userId ? user : u));
+      toast.success('Account unlocked', user.name);
+    } catch {
+      toast.error('Failed to unlock account', 'Please try again.');
+    }
+  }, []);
+
+  const revokeUserTokens = useCallback(async (userId: string) => {
+    try {
+      await apiClient.revokeUserTokens(userId);
+      toast.success('Tokens revoked');
+    } catch {
+      toast.error('Failed to revoke tokens', 'Please try again.');
+    }
+  }, []);
+
+  // ─── Approvals ─────────────────────────────────────
+
+  const createApproval = useCallback(async (data: { entity_type: string; entity_id: string; title: string; reason: string; approver_id: string }) => {
+    try {
+      const created = await apiClient.createApproval(data);
+      setApprovals(prev => [...prev, created]);
+      toast.success('Approval requested', data.title);
+    } catch {
+      toast.error('Failed to create approval', 'Please try again.');
+    }
+  }, []);
+
+  // ─── SES ───────────────────────────────────────────
+
+  const getSesStatus = useCallback(async () => {
+    try {
+      const raw = await apiClient.getSesStatus();
+      return {
+        verified: raw.verification_status === 'verified',
+        domain: raw.domain,
+        dns_records: raw.dkim_tokens.map(t => ({
+          type: 'CNAME' as const,
+          name: raw.domain,
+          value: t,
+          verified: raw.verification_status === 'verified',
+        })),
+      };
+    } catch {
+      toast.error('Failed to load domain verification status', 'Could not reach the SES backend.');
+      throw new Error('SES backend unavailable');
+    }
+  }, []);
+
+  const verifySesDomain = useCallback(async () => {
+    try {
+      const result = await apiClient.verifySesDomain();
+      toast.success(result.verified ? 'Domain verified' : 'Verification pending', result.message);
+    } catch {
+      toast.error('Domain verification failed', 'Please try again.');
+    }
+  }, []);
+
+  // ─── Admin flags ───────────────────────────────────
+
+  const getAdminFlags = useCallback(async () => {
+    try {
+      const flags = await apiClient.getAdminFlags();
+      setAdminFlags(flags);
+      return flags;
+    } catch {
+      toast.error('Failed to load admin flags');
+      return [];
+    }
+  }, []);
+
+  const updateAdminFlag = useCallback(async (key: string, enabled: boolean) => {
+    try {
+      await apiClient.updateAdminFlag(key, enabled);
+      setAdminFlags(prev => prev.map(f => f.key === key ? { ...f, enabled } : f));
+    } catch {
+      toast.error('Failed to update setting', 'Please try again.');
+    }
+  }, []);
+
+  const deleteAdminFlagOverride = useCallback(async (key: string) => {
+    try {
+      await apiClient.deleteAdminFlagOverride(key);
+      setAdminFlags(prev =>
+        prev.map(f => f.key === key ? { ...f, enabled: f.defaultEnabled, overridden: false } : f),
+      );
+    } catch {
+      toast.error('Failed to reset setting', 'Please try again.');
+    }
+  }, []);
 
   // ─── Context value ─────────────────────────────────
 
@@ -779,6 +1214,9 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     emailTemplates,
     emailCampaigns,
     auditLogs,
+    files,
+    approvals,
+    adminFlags,
     activeModule,
     activePipelineId,
     activeTheme,
@@ -787,6 +1225,7 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     apiError,
     featureFlags,
     login,
+    getOidcProviders,
     refreshAuthFromClient,
     logout,
     setCurrentUser,
@@ -820,6 +1259,40 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     addEmailTemplate,
     sendEmailCampaign,
     sendSingleEmail,
+    uploadFile,
+    downloadFile,
+    listFiles,
+    deleteFile,
+    connectCalendar,
+    getCalendarStatus,
+    disconnectCalendar,
+    syncCalendar,
+    getDealScore,
+    getNextBestActions,
+    findDuplicates,
+    getForecast,
+    getLeaderboard,
+    getCustomReport,
+    getPipelineHealth,
+    createPipeline,
+    updatePipeline,
+    deletePipeline,
+    createStage,
+    updateStage,
+    deleteStage,
+    bulkUpdateContacts,
+    bulkUpdateDeals,
+    importContacts,
+    getCampaignMetrics,
+    refreshCampaignMetrics,
+    unlockAccount,
+    revokeUserTokens,
+    createApproval,
+    getSesStatus,
+    verifySesDomain,
+    getAdminFlags,
+    updateAdminFlag,
+    deleteAdminFlagOverride,
     getScopedContacts,
     getScopedAccounts,
     getScopedDeals,

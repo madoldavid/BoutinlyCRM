@@ -5,6 +5,7 @@
 
 import React, { useState } from 'react';
 import { useCRM } from '../store';
+import { useFeatureFlag } from '../utils/featureFlags';
 import { runtimeConfig } from '../runtimeConfig';
 import { UserRole } from '../types';
 import NotificationsCenter from './NotificationsCenter';
@@ -57,23 +58,28 @@ export default function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
   };
 
   // Get unread notifications for current user
-  const unreadNotifications = notifications.filter(
-    n => n.user_id === currentUser.id && !n.read_at
-  );
+  const unreadNotifications = currentUser
+    ? notifications.filter(n => n.user_id === currentUser.id && !n.read_at)
+    : [];
 
   // Compute overdue task count for sidebar badge (computed once, not twice inline)
   const overdueCount = tasks.filter(
     t => t.assigned_to_id === currentUser?.id && !t.completed_at && new Date(t.due_at) < new Date()
   ).length;
 
+  const emailModuleEnabled = useFeatureFlag('email_module');
+
   const navigationItems = [
     { id: 'dashboard', label: 'Dashboards', icon: LayoutDashboard },
     { id: 'contacts', label: 'Contacts', icon: Users },
     { id: 'deals', label: 'Pipeline', icon: Briefcase },
     { id: 'tasks', label: 'Tasks', icon: CheckSquare },
-    { id: 'emails', label: 'Email', icon: Mail },
+    { id: 'emails', label: 'Email', icon: Mail, featureFlag: 'email_module' as const },
     { id: 'admin', label: 'Administration', icon: Sliders, roles: [UserRole.SUPER_ADMIN, UserRole.ADMIN] },
-  ];
+  ].filter(item => {
+    if (item.featureFlag === 'email_module' && !emailModuleEnabled) return false;
+    return true;
+  });
 
   const handleModuleClick = (moduleId: string) => {
     setActiveModule(moduleId);
@@ -315,7 +321,7 @@ export default function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
             <div className="absolute bottom-full left-0 right-0 mb-2 bg-theme-card rounded-xl shadow-overlay border border-theme-border text-theme-primary z-50 py-1.5 max-h-80 overflow-y-auto animate-overlay-in">
               <div className="px-3 pt-1.5 pb-2 border-b border-theme-border mb-1">
                 <p className="text-[10px] text-theme-secondary font-semibold uppercase tracking-[0.12em]">
-                  {runtimeConfig.allowImpersonation ? 'Impersonate Role' : 'Switch View (demo)'}
+                  {runtimeConfig.allowImpersonation ? 'Impersonate Role' : 'Your Account'}
                 </p>
                 <p className="text-[10px] text-theme-secondary/80 mt-1 leading-relaxed font-sans">
                   {roleDescriptions[currentUser.role]}

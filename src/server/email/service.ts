@@ -27,6 +27,8 @@ export interface SendEmailInput {
   subject: string;
   html: string;
   text?: string;
+  cc?: string;
+  bcc?: string;
 }
 
 export class EmailService {
@@ -92,6 +94,8 @@ export class EmailService {
       const result = await this.transporter.sendMail({
         from,
         to: input.to,
+        cc: input.cc,
+        bcc: input.bcc,
         subject: input.subject,
         html: input.html,
         text: input.text,

@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { Suspense } from 'react';
+import React, { Suspense, useState, useRef, useEffect } from 'react';
 import { CRMProvider, useCRM } from './store';
 import Sidebar from './components/Sidebar';
 import LoginPage from './components/LoginPage';
@@ -14,8 +14,10 @@ import { ToastViewport, Skeleton, AppLauncher, getDefaultApps } from './componen
 import {
   ShieldAlert, Loader2, WifiOff, Search, Menu, Plus, HelpCircle,
   LayoutDashboard, Users, Briefcase, CheckSquare, Mail, Sliders,
+  ChevronDown, LogOut, Settings,
 } from 'lucide-react';
 import { UserRole } from './types';
+import { useFeatureFlag } from './utils/featureFlags';
 
 const ReportsModule = React.lazy(() => import('./components/ReportsModule'));
 const ContactsModule = React.lazy(() => import('./components/ContactsModule'));
@@ -61,9 +63,83 @@ function OfflineBanner({ error }: { error: string }) {
   );
 }
 
+function UserMenu({ currentUser, logout, setActiveModule }: {
+  currentUser: { name?: string; email?: string; role?: string } | null;
+  logout: () => void;
+  setActiveModule: (id: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  const initial = (currentUser?.name || '?').charAt(0).toUpperCase();
+
+  useEffect(() => {
+    if (!open) return;
+    const close = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    const esc = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false); };
+    document.addEventListener('mousedown', close);
+    document.addEventListener('keydown', esc);
+    return () => { document.removeEventListener('mousedown', close); document.removeEventListener('keydown', esc); };
+  }, [open]);
+
+  const roleLabel = currentUser?.role?.replace(/_/g, ' ') ?? 'User';
+  const isAdmin = currentUser?.role === 'super_admin' || currentUser?.role === 'admin';
+
+  return (
+    <div className="relative" ref={ref}>
+      <button
+        onClick={() => setOpen(!open)}
+        className="w-8 h-8 rounded-full bg-theme-accent-soft text-theme-accent flex items-center justify-center text-xs font-semibold ring-1 ring-inset ring-theme-accent/15 hover:ring-theme-accent/40 transition-all cursor-pointer border-none"
+        title={currentUser?.name}
+        aria-label={`Signed in as ${currentUser?.name}. Click for account menu.`}
+        aria-expanded={open}
+        aria-haspopup="true"
+      >
+        {initial}
+      </button>
+
+      {open && (
+        <div className="absolute right-0 top-full mt-2 w-64 bg-theme-card border border-theme-border rounded-xl shadow-overlay z-[90] animate-overlay-in overflow-hidden">
+          {/* User info */}
+          <div className="px-4 py-3 border-b border-theme-border">
+            <p className="text-sm font-semibold text-theme-primary font-sans truncate">{currentUser?.name || 'Unknown'}</p>
+            <p className="text-xs text-theme-secondary mt-0.5 font-sans truncate">{currentUser?.email || ''}</p>
+            <span className="inline-block mt-2 text-[10px] font-semibold uppercase tracking-wider px-2 py-0.5 rounded-full bg-theme-accent-soft text-theme-accent font-sans">
+              {roleLabel}
+            </span>
+          </div>
+
+          {/* Actions */}
+          <div className="py-1">
+            {isAdmin && (
+              <button
+                onClick={() => { setActiveModule('admin'); setOpen(false); }}
+                className="w-full flex items-center gap-2.5 px-4 py-2 text-xs text-theme-primary hover:bg-theme-hover transition-colors cursor-pointer border-none bg-transparent text-left font-sans"
+              >
+                <Settings className="w-3.5 h-3.5 text-theme-secondary" />
+                Administration
+              </button>
+            )}
+            <button
+              onClick={() => { setOpen(false); logout(); }}
+              className="w-full flex items-center gap-2.5 px-4 py-2 text-xs text-danger hover:bg-danger-soft/20 transition-colors cursor-pointer border-none bg-transparent text-left font-sans"
+            >
+              <LogOut className="w-3.5 h-3.5" />
+              Sign Out
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function DashboardLayout() {
   const { activeModule, setActiveModule, currentUser, logout, apiError } = useCRM();
   const [mobileSidebarOpen, setMobileSidebarOpen] = React.useState(false);
+  const [moduleSwitcherOpen, setModuleSwitcherOpen] = useState(false);
+  const emailModuleEnabled = useFeatureFlag('email_module');
 
   // FR-AUTH-008: Immediate session lock upon user deactivation
   if (!currentUser?.is_active) {
@@ -135,7 +211,7 @@ function DashboardLayout() {
     { id: 'contacts', label: 'Contacts', icon: Users },
     { id: 'deals', label: 'Pipeline', icon: Briefcase },
     { id: 'tasks', label: 'Tasks', icon: CheckSquare },
-    { id: 'emails', label: 'Email', icon: Mail },
+    ...(emailModuleEnabled ? [{ id: 'emails' as const, label: 'Email', icon: Mail }] : []),
     ...(currentUser?.role === UserRole.SUPER_ADMIN || currentUser?.role === UserRole.ADMIN
       ? [{ id: 'admin', label: 'Administration', icon: Sliders }]
       : []),
@@ -176,9 +252,47 @@ function DashboardLayout() {
               </button>
               <div className="flex items-center gap-2.5 min-w-0">
                 {activeTab && <activeTab.icon className="w-4 h-4 text-theme-accent shrink-0 hidden sm:block" strokeWidth={2} />}
-                <h1 className="text-base font-semibold text-theme-primary font-sans tracking-tight truncate">
-                  {activeTab?.label ?? 'Workspace'}
-                </h1>
+                <div className="relative">
+                  <button
+                    onClick={() => setModuleSwitcherOpen(o => !o)}
+                    className="flex items-center gap-1 text-base font-semibold text-theme-primary font-sans tracking-tight truncate hover:text-theme-accent transition-colors cursor-pointer bg-transparent border-none"
+                    title="Switch module"
+                    aria-label={`Current module: ${activeTab?.label ?? 'Workspace'}. Click to switch.`}
+                    aria-expanded={moduleSwitcherOpen}
+                    aria-haspopup="true"
+                  >
+                    <h1 className="text-base font-semibold text-inherit font-sans tracking-tight truncate">
+                      {activeTab?.label ?? 'Workspace'}
+                    </h1>
+                    <ChevronDown className={`w-3.5 h-3.5 text-theme-secondary shrink-0 transition-transform ${moduleSwitcherOpen ? 'rotate-180' : ''}`} />
+                  </button>
+                  {moduleSwitcherOpen && (
+                    <>
+                      <div className="fixed inset-0 z-[90]" onClick={() => setModuleSwitcherOpen(false)} />
+                      <div className="absolute top-full left-0 mt-1.5 w-52 bg-theme-card border border-theme-border rounded-xl shadow-overlay z-[91] animate-overlay-in overflow-hidden">
+                        <div className="py-1">
+                          {enterpriseTabs.map(tab => (
+                            <button
+                              key={tab.id}
+                              onClick={() => { setActiveModule(tab.id); setModuleSwitcherOpen(false); }}
+                              className={`w-full flex items-center gap-2.5 px-3 py-2 text-xs cursor-pointer border-none text-left font-sans transition-colors ${
+                                tab.id === activeModule
+                                  ? 'bg-theme-accent-soft text-theme-accent font-semibold'
+                                  : 'text-theme-primary hover:bg-theme-hover'
+                              }`}
+                            >
+                              <tab.icon className="w-3.5 h-3.5 shrink-0" />
+                              <span className="flex-1">{tab.label}</span>
+                              {tab.id === activeModule && (
+                                <span className="w-1.5 h-1.5 rounded-full bg-theme-accent" />
+                              )}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    </>
+                  )}
+                </div>
               </div>
             </div>
 
@@ -216,13 +330,11 @@ function DashboardLayout() {
                 onSelect={(id) => setActiveModule(id)}
                 currentUserRole={currentUser?.role ?? 'viewer'}
               />
-              <div
-                className="w-8 h-8 rounded-full bg-theme-accent-soft text-theme-accent flex items-center justify-center text-xs font-semibold ring-1 ring-inset ring-theme-accent/15"
-                title={currentUser?.name}
-                aria-label={`Signed in as ${currentUser?.name}`}
-              >
-                {currentUser?.name?.charAt(0)}
-              </div>
+              <UserMenu
+                currentUser={currentUser}
+                logout={logout}
+                setActiveModule={setActiveModule}
+              />
             </div>
           </div>
         </header>

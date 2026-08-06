@@ -1,4 +1,6 @@
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
+import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
+import { join } from 'node:path';
 import {
   INITIAL_ACCOUNTS,
   INITIAL_ACTIVITIES,
@@ -294,8 +296,138 @@ export class InMemoryCrmRepository implements CrmRepository {
   private securityPolicies = new Map<string, OrgSecurityPolicy>();
   private fieldPermissions: FieldPermission[] = [];
 
+  // ─── Persistence ────────────────────────────────────
+
+  #persistencePath: string;
+  #saveTimer: ReturnType<typeof setInterval> | null = null;
+  #lastWritten = ''; // checksum of last persisted state — skip writes when unchanged
+
   constructor(passwordPepper = 'development-password-pepper') {
     this.passwordPepper = passwordPepper;
+    this.#persistencePath = join(process.cwd(), 'data', 'crm-state.json');
+
+    const isTest = process.env.NODE_ENV === 'test' || process.env.VITEST;
+
+    // Try to restore persisted state; fall back to seed data
+    if (!isTest && this.#loadFromDisk()) {
+      // State restored successfully — passwords already loaded from disk
+    } else {
+      // First run — seed demo passwords so the built-in users can log in
+      this.#bootstrapDemoPasswordsInternal();
+    }
+
+    // Auto-save every 1 second (disabled in test mode)
+    if (!isTest) {
+      this.#saveTimer = setInterval(() => this.#flush(), 1_000);
+      const doSave = () => this.#flush();
+      process.once('SIGTERM', doSave);
+      process.once('SIGINT', doSave);
+    }
+  }
+
+  /** Call this when the process exits to clean up the save timer. */
+  destroy() {
+    if (this.#saveTimer) { clearInterval(this.#saveTimer); this.#saveTimer = null; }
+    this.#flush();
+  }
+
+  // ─── Serialization ──────────────────────────────────
+
+  #serializeState(): string {
+    return JSON.stringify({
+      v: 1, // schema version
+      organizations: this.organizations,
+      users: this.users,
+      accounts: this.accounts,
+      contacts: this.contacts,
+      pipelines: this.pipelines,
+      stages: this.stages,
+      deals: this.deals,
+      tasks: this.tasks,
+      activities: this.activities,
+      notifications: this.notifications,
+      customFields: this.customFields,
+      emailTemplates: this.emailTemplates,
+      emailCampaigns: this.emailCampaigns,
+      auditLogs: this.auditLogs,
+      files: this.files,
+      calendarTokens: this.calendarTokens,
+      passwordHashes: [...this.passwordHashes.entries()],
+      resetTokens: [...this.resetTokens.entries()].map(([k, v]) => [k, v] as [string, { userId: string; expiresAt: number }]),
+      totpSecrets: [...this.totpSecrets.entries()],
+      apiKeys: this.apiKeys,
+      apiKeyHashes: [...this.apiKeyHashes.entries()],
+      webhooks: this.webhooks,
+      webhookDeliveries: this.webhookDeliveries,
+      quotas: this.quotas,
+      approvals: this.approvals,
+      securityPolicies: [...this.securityPolicies.entries()],
+      fieldPermissions: this.fieldPermissions,
+    }, null, 2);
+  }
+
+  #loadFromDisk(): boolean {
+    try {
+      if (!existsSync(this.#persistencePath)) return false;
+      const raw = readFileSync(this.#persistencePath, 'utf-8');
+      const data = JSON.parse(raw);
+      if (!data || data.v !== 1) return false; // unknown version — don't corrupt
+
+      this.organizations = data.organizations ?? [];
+      this.users = data.users ?? [];
+      this.accounts = data.accounts ?? [];
+      this.contacts = data.contacts ?? [];
+      this.pipelines = data.pipelines ?? [];
+      this.stages = data.stages ?? [];
+      this.deals = data.deals ?? [];
+      this.tasks = data.tasks ?? [];
+      this.activities = data.activities ?? [];
+      this.notifications = data.notifications ?? [];
+      this.customFields = data.customFields ?? [];
+      this.emailTemplates = data.emailTemplates ?? [];
+      this.emailCampaigns = data.emailCampaigns ?? [];
+      this.auditLogs = data.auditLogs ?? [];
+      this.files = data.files ?? [];
+      this.calendarTokens = data.calendarTokens ?? [];
+      this.passwordHashes = new Map(data.passwordHashes ?? []);
+      this.resetTokens = new Map((data.resetTokens ?? []).map(([k, v]: [string, { userId: string; expiresAt: number }]) => [k, v]));
+      this.totpSecrets = new Map(data.totpSecrets ?? []);
+      this.apiKeys = data.apiKeys ?? [];
+      this.apiKeyHashes = new Map(data.apiKeyHashes ?? []);
+      this.webhooks = data.webhooks ?? [];
+      this.webhookDeliveries = data.webhookDeliveries ?? [];
+      this.quotas = data.quotas ?? [];
+      this.approvals = data.approvals ?? [];
+      this.securityPolicies = new Map(data.securityPolicies ?? []);
+      this.fieldPermissions = data.fieldPermissions ?? [];
+      return true;
+    } catch (err) {
+      console.error('[crmRepository] Failed to load persisted state — starting fresh:', (err as Error).message);
+      return false;
+    }
+  }
+
+  #flush() {
+    try {
+      const json = this.#serializeState();
+      // Skip write if nothing changed (fast checksum)
+      if (json === this.#lastWritten) return;
+      mkdirSync(join(process.cwd(), 'data'), { recursive: true });
+      writeFileSync(this.#persistencePath, json, 'utf-8');
+      this.#lastWritten = json;
+    } catch (err) {
+      // Non-critical — log and move on
+      if ((err as NodeJS.ErrnoException).code !== 'ENOENT') {
+        console.error('[crmRepository] Failed to persist state:', (err as Error).message);
+      }
+    }
+  }
+
+  /** Seed demo passwords for built-in users (first-run only). */
+  async #bootstrapDemoPasswordsInternal() {
+    const demoPassword = process.env.DEMO_PASSWORD || 'ChangeMe123!';
+    const hash = await hashPassword(demoPassword, this.passwordPepper);
+    this.users.forEach(user => this.passwordHashes.set(user.id, hash));
   }
 
   /** Filter items by current tenant org. Include items without org_id for backward compat. */

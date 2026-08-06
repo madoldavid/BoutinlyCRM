@@ -55,10 +55,13 @@ export function registerAuthRoutes(
   tokenBlocklist: TokenBlocklist,
 ) {
   app.post('/api/auth/signup', asyncHandler(async (req, res) => {
-    // Only allow signup when no users exist (first-user self-registration)
-    const userCount = await repository.countUsers();
-    if (userCount > 0) {
-      throw new ApiError(403, 'Signup is disabled. Contact your administrator.', 'signup_disabled');
+    // Allow signup when no users exist (first-user self-registration),
+    // or in demo mode (where seed users exist but we still allow new accounts)
+    if (!config.DEMO_LOGIN_ENABLED) {
+      const userCount = await repository.countUsers();
+      if (userCount > 0) {
+        throw new ApiError(403, 'Signup is disabled. Contact your administrator.', 'signup_disabled');
+      }
     }
 
     const body = signupSchema.parse(req.body);

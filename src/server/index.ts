@@ -80,6 +80,10 @@ const server = app.listen(config.PORT, () => {
 // Graceful shutdown
 function shutdown(signal: string) {
   logger.info({ signal }, 'Shutting down...');
+  // Flush in-memory state to disk before closing
+  if (repository instanceof InMemoryCrmRepository) {
+    repository.destroy();
+  }
   server.close(async () => {
     try {
       await closePool();

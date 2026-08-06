@@ -3,9 +3,10 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useCRM } from '../store';
-import { UserRole, Deal, Task } from '../types';
+import { useFeatureFlag } from '../utils/featureFlags';
+import { UserRole } from '../types';
 import {
   TrendingUp,
   DollarSign,
@@ -28,11 +29,57 @@ import {
   Copy,
   CheckCircle,
   XCircle,
+  Loader2,
 } from 'lucide-react';
 import { FunnelChart, DonutChart, TrendLine, BarChart } from './ui/charts';
-import { buildNextBestActions, findDuplicateContacts, type InsightContext } from '../ai/insights';
-import { dispatchSelectEntity } from './GlobalShortcuts';
+import { dispatchSelectEntity, NEW_RECORD_EVENT } from './GlobalShortcuts';
 import SetupChecklist from './SetupChecklist';
+import { Skeleton, toast } from './ui';
+
+// ─── Type helpers for API response shapes ──────────────────────────────────
+
+interface MappedAction {
+  id: string;
+  title: string;
+  reason: string;
+  priority: 'high' | 'medium' | 'low';
+  entityId?: string;
+  module: 'contacts' | 'deals' | 'tasks';
+}
+
+interface DuplicateGroup {
+  contacts: Array<{ id: string; first_name: string; last_name: string }>;
+  confidence: number;
+  matchingFields: string[];
+}
+
+interface ForecastData {
+  confidence: number;
+  expectedRevenue: number;
+  bestCase: number;
+  worstCase: number;
+  byMonth: Record<string, number>;
+}
+
+interface PipelineHealthData {
+  totalValue: number;
+  weightedValue: number;
+  avgProbability: number;
+  stageBreakdown: Array<{ stageName: string; count: number; value: number }>;
+}
+
+interface LeaderboardEntry {
+  userId: string;
+  userName: string;
+  revenue: number;
+  dealsClosed: number;
+  winRate: number;
+}
+
+interface CustomReportData {
+  rows: Array<Record<string, unknown>>;
+  summary: Record<string, unknown>;
+}
 
 export default function ReportsModule() {
   const {
@@ -40,91 +87,310 @@ export default function ReportsModule() {
     getScopedDeals,
     getScopedTasks,
     getScopedActivities,
-    accounts,
     contacts,
     users,
     stages,
     activePipelineId,
-    setActiveModule
+    setActiveModule,
+    getNextBestActions,
+    findDuplicates,
+    getForecast,
+    getLeaderboard,
+    getPipelineHealth,
+    getCustomReport,
   } = useCRM();
+
+  const aiFeaturesEnabled = useFeatureFlag('ai_features');
 
   const [activeSubTab, setActiveSubTab] = useState<'dash' | 'health' | 'winloss' | 'builder'>('dash');
 
-  // Custom Report Builder States
+  // ─── API-backed data state ────────────────────────────────────────────────
+  const [insightActions, setInsightActions] = useState<MappedAction[]>([]);
+  const [duplicateGroups, setDuplicateGroups] = useState<DuplicateGroup[]>([]);
+  const [forecastData, setForecastData] = useState<ForecastData | null>(null);
+  const [pipelineHealthData, setPipelineHealthData] = useState<PipelineHealthData | null>(null);
+  const [leaderboardData, setLeaderboardData] = useState<LeaderboardEntry[]>([]);
+
+  // ─── Loading & error state ────────────────────────────────────────────────
+  const [loading, setLoading] = useState<Record<string, boolean>>({});
+  const [errors, setErrors] = useState<Record<string, string | null>>({});
+
+  // ─── Custom Report Builder states ─────────────────────────────────────────
   const [reportEntity, setReportEntity] = useState<'contact' | 'account' | 'deal' | 'task'>('deal');
   const [reportGrouping, setReportGrouping] = useState<string>('owner_id');
   const [reportMetric, setReportMetric] = useState<'count' | 'sum_value'>('sum_value');
-  const [reportResult, setReportResult] = useState<any[]>([]);
+  const [reportResult, setReportResult] = useState<CustomReportData | null>(null);
   const [reportGenerated, setReportGenerated] = useState(false);
+
+  // ─── Win/Loss report state ────────────────────────────────────────────────
+  const [lostReasonData, setLostReasonData] = useState<CustomReportData | null>(null);
+  const [competitorData, setCompetitorData] = useState<CustomReportData | null>(null);
 
   const scopedDeals = getScopedDeals();
   const scopedTasks = getScopedTasks();
   const scopedActivities = getScopedActivities();
 
-  // ─── Boutinly Intelligence ───
-  const insightContext = useMemo<InsightContext>(() => ({
-    deals: scopedDeals,
-    stages,
-    contacts,
-    accounts,
-    tasks: scopedTasks,
-    activities: scopedActivities,
-    users,
-    currentUserId: currentUser?.id ?? '',
-    currentUserRole: currentUser?.role ?? UserRole.VIEWER,
-  }), [scopedDeals, stages, contacts, accounts, scopedTasks, scopedActivities, users, currentUser]);
+  const isManagerOrAdmin = currentUser
+    ? [UserRole.SUPER_ADMIN, UserRole.ADMIN, UserRole.MANAGER].includes(currentUser.role)
+    : false;
 
-  const nextBestActions = useMemo(() => buildNextBestActions(insightContext, 6), [insightContext]);
-  const duplicateGroups = useMemo(() => findDuplicateContacts(contacts), [contacts]);
-  const dataQuality = useMemo(() => {
-    const incomplete = contacts.filter(c => !c.phone || !c.title || !c.email).length;
-    const unassigned = contacts.filter(c => !users.some(u => u.id === c.owner_id)).length;
-    return { incomplete, unassigned, duplicates: duplicateGroups.reduce((n, g) => n + g.contacts.length, 0) };
-  }, [contacts, users, duplicateGroups]);
+  // ─── Generic fetch wrapper ────────────────────────────────────────────────
 
-  // Metrics
-  const wonDeals = scopedDeals.filter(d => stages.find(s => s.id === d.stage_id)?.type === 'won');
-  const lostDeals = scopedDeals.filter(d => stages.find(s => s.id === d.stage_id)?.type === 'lost');
-  const openDeals = scopedDeals.filter(d => stages.find(s => s.id === d.stage_id)?.type === 'open');
+  const fetchWithState = useCallback(
+    async <T,>(key: string, fn: () => Promise<T>, setter: (data: T) => void) => {
+      setLoading(prev => ({ ...prev, [key]: true }));
+      setErrors(prev => ({ ...prev, [key]: null }));
+      try {
+        const data = await fn();
+        setter(data);
+      } catch {
+        setErrors(prev => ({ ...prev, [key]: 'Failed to load. Please try again.' }));
+        toast.error(`Could not load ${key.replace(/([A-Z])/g, ' $1').toLowerCase()}`);
+      } finally {
+        setLoading(prev => ({ ...prev, [key]: false }));
+      }
+    },
+    [],
+  );
 
-  const totalClosedDealsCount = wonDeals.length + lostDeals.length;
-  const winRate = totalClosedDealsCount > 0 ? (wonDeals.length / totalClosedDealsCount) * 100 : 0;
-  const totalOpenValue = openDeals.reduce((sum, d) => sum + d.value, 0);
-  const totalWonValue = wonDeals.reduce((sum, d) => sum + d.value, 0);
+  // ─── Fetch all insight/report data ───────────────────────────────────────
+
+  const loadAllDashboardData = useCallback(() => {
+    // AI insights (gated behind ai_features flag)
+    if (aiFeaturesEnabled) {
+      fetchWithState('nextBestActions', getNextBestActions, (actions) => {
+        const mapped: MappedAction[] = actions.map((a, i) => ({
+          id: `action-${i}`,
+          title: a.action,
+          reason: a.rationale,
+          priority: a.priority,
+          entityId: a.deal_id || a.contact_id,
+          module: a.deal_id ? 'deals' : 'contacts',
+        }));
+        setInsightActions(mapped);
+      });
+
+      fetchWithState('duplicates', findDuplicates, (dupes) => {
+        const grouped: DuplicateGroup[] = dupes.map(d => ({
+          contacts: [
+            { id: d.contact_a.id, first_name: d.contact_a.first_name, last_name: d.contact_a.last_name },
+            { id: d.contact_b.id, first_name: d.contact_b.first_name, last_name: d.contact_b.last_name },
+          ],
+          confidence: d.confidence,
+          matchingFields: d.matching_fields,
+        }));
+        setDuplicateGroups(grouped);
+      });
+    }
+
+    fetchWithState('forecast', getForecast, (f) => {
+      setForecastData({
+        confidence: f.confidence ?? 0,
+        expectedRevenue: f.expected_revenue ?? 0,
+        bestCase: f.best_case ?? 0,
+        worstCase: f.worst_case ?? 0,
+        byMonth: f.by_month ?? {},
+      });
+    });
+
+    fetchWithState('pipelineHealth', getPipelineHealth, (ph) => {
+      setPipelineHealthData({
+        totalValue: ph.total_value ?? 0,
+        weightedValue: ph.weighted_value ?? 0,
+        avgProbability: ph.avg_probability ?? 0,
+        stageBreakdown: (ph.stage_breakdown ?? []).map(s => ({
+          stageName: s.stage_name ?? 'Unknown',
+          count: s.count ?? 0,
+          value: s.value ?? 0,
+        })),
+      });
+    });
+
+    fetchWithState('leaderboard', () => getLeaderboard({ limit: 10 }), (lb) => {
+      setLeaderboardData(
+        lb.map(e => ({
+          userId: e.user_id,
+          userName: e.user_name,
+          revenue: e.revenue,
+          dealsClosed: e.deals_closed,
+          winRate: e.win_rate,
+        })),
+      );
+    });
+  }, [fetchWithState, getNextBestActions, findDuplicates, getForecast, getPipelineHealth, getLeaderboard, aiFeaturesEnabled]);
+
+  // "+" New button → navigate to Pipeline and trigger deal creation
+  useEffect(() => {
+    const onNew = () => {
+      setActiveModule('deals');
+      // Re-dispatch after module mounts so PipelineModule picks it up
+      setTimeout(() => window.dispatchEvent(new Event(NEW_RECORD_EVENT)), 100);
+    };
+    window.addEventListener(NEW_RECORD_EVENT, onNew);
+    return () => window.removeEventListener(NEW_RECORD_EVENT, onNew);
+  }, [setActiveModule]);
+
+  // Load data on mount
+  useEffect(() => {
+    loadAllDashboardData();
+  }, [loadAllDashboardData]);
+
+  // Reload when pipeline changes
+  useEffect(() => {
+    fetchWithState('pipelineHealth', getPipelineHealth, (ph) => {
+      setPipelineHealthData({
+        totalValue: ph.total_value ?? 0,
+        weightedValue: ph.weighted_value ?? 0,
+        avgProbability: ph.avg_probability ?? 0,
+        stageBreakdown: (ph.stage_breakdown ?? []).map(s => ({
+          stageName: s.stage_name ?? 'Unknown',
+          count: s.count ?? 0,
+          value: s.value ?? 0,
+        })),
+      });
+    });
+  }, [activePipelineId, fetchWithState, getPipelineHealth]);
+
+  // ─── Fetch win/loss data when tab is active ──────────────────────────────
+  useEffect(() => {
+    if (activeSubTab !== 'winloss') return;
+    fetchWithState(
+      'lostReasons',
+      () => getCustomReport({ entity: 'deal', grouping: 'lost_reason', metric: 'count', filters: { stage_type: 'lost' } }),
+      setLostReasonData,
+    );
+    fetchWithState(
+      'competitors',
+      () => getCustomReport({ entity: 'deal', grouping: 'competitor_name', metric: 'count' }),
+      setCompetitorData,
+    );
+  }, [activeSubTab, fetchWithState, getCustomReport]);
+
+  // ─── Retry handler ────────────────────────────────────────────────────────
+
+  const handleRetry = useCallback(
+    (key: string) => {
+      if (!aiFeaturesEnabled && (key === 'nextBestActions' || key === 'duplicates')) return;
+      switch (key) {
+        case 'nextBestActions':
+          fetchWithState('nextBestActions', getNextBestActions, (actions) => {
+            const mapped: MappedAction[] = actions.map((a, i) => ({
+              id: `action-${i}`,
+              title: a.action,
+              reason: a.rationale,
+              priority: a.priority,
+              entityId: a.deal_id || a.contact_id,
+              module: a.deal_id ? 'deals' : 'contacts',
+            }));
+            setInsightActions(mapped);
+          });
+          break;
+        case 'duplicates':
+          fetchWithState('duplicates', findDuplicates, (dupes) => {
+            const grouped: DuplicateGroup[] = dupes.map(d => ({
+              contacts: [
+                { id: d.contact_a.id, first_name: d.contact_a.first_name, last_name: d.contact_a.last_name },
+                { id: d.contact_b.id, first_name: d.contact_b.first_name, last_name: d.contact_b.last_name },
+              ],
+              confidence: d.confidence,
+              matchingFields: d.matching_fields,
+            }));
+            setDuplicateGroups(grouped);
+          });
+          break;
+        case 'forecast':
+          fetchWithState('forecast', getForecast, (f) => {
+            setForecastData({
+              confidence: f.confidence ?? 0,
+              expectedRevenue: f.expected_revenue ?? 0,
+              bestCase: f.best_case ?? 0,
+              worstCase: f.worst_case ?? 0,
+              byMonth: f.by_month ?? {},
+            });
+          });
+          break;
+        case 'pipelineHealth':
+          fetchWithState('pipelineHealth', getPipelineHealth, (ph) => {
+            setPipelineHealthData({
+              totalValue: ph.total_value ?? 0,
+              weightedValue: ph.weighted_value ?? 0,
+              avgProbability: ph.avg_probability ?? 0,
+              stageBreakdown: (ph.stage_breakdown ?? []).map(s => ({
+                stageName: s.stage_name ?? 'Unknown',
+                count: s.count ?? 0,
+                value: s.value ?? 0,
+              })),
+            });
+          });
+          break;
+        case 'leaderboard':
+          fetchWithState('leaderboard', () => getLeaderboard({ limit: 10 }), (lb) => {
+            setLeaderboardData(
+              lb.map(e => ({
+                userId: e.user_id,
+                userName: e.user_name,
+                revenue: e.revenue,
+                dealsClosed: e.deals_closed,
+                winRate: e.win_rate,
+              })),
+            );
+          });
+          break;
+      }
+    },
+    [fetchWithState, getNextBestActions, findDuplicates, getForecast, getPipelineHealth, getLeaderboard],
+  );
+
+  // ─── Simple derived UI counts (memoized to avoid recomputation on unrelated renders) ──
+  const openDealsCount = useMemo(
+    () => scopedDeals.filter(d => stages.find(s => s.id === d.stage_id)?.type === 'open').length,
+    [scopedDeals, stages],
+  );
+  const activitiesCount = useMemo(() => scopedActivities.length, [scopedActivities]);
+
+  // Data quality: simple filter counts
+  const incompleteContacts = useMemo(
+    () => contacts.filter(c => !c.phone || !c.title || !c.email).length,
+    [contacts],
+  );
+  const unassignedContacts = useMemo(
+    () => contacts.filter(c => !users.some(u => u.id === c.owner_id)).length,
+    [contacts, users],
+  );
+  const totalDuplicateContacts = useMemo(
+    () => duplicateGroups.reduce((n, g) => n + g.contacts.length, 0),
+    [duplicateGroups],
+  );
 
   const personalQuota = Number(currentUser?.custom_fields?.quota) || 0;
-  const quotaAttainmentPct = personalQuota > 0 ? (totalWonValue / personalQuota) * 100 : 0;
 
-  const isManagerOrAdmin = currentUser ? [UserRole.SUPER_ADMIN, UserRole.ADMIN, UserRole.MANAGER].includes(currentUser.role) : false;
+  // ─── Custom Report handlers ──────────────────────────────────────────────
 
-  // Trend data
-  const trendData = (() => {
-    const now = new Date();
-    const months: { label: string; value: number }[] = [];
-    for (let i = 5; i >= 0; i--) {
-      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
-      const next = new Date(now.getFullYear(), now.getMonth() - i + 1, 1);
-      const value = wonDeals
-        .filter(deal => {
-          const t = new Date(deal.won_at || deal.close_date).getTime();
-          return t >= d.getTime() && t < next.getTime();
-        })
-        .reduce((sum, deal) => sum + deal.value, 0);
-      months.push({ label: d.toLocaleDateString('en-US', { month: 'short' }), value });
-    }
-    return months;
-  })();
+  const handleGenerateReport = useCallback(async () => {
+    setReportGenerated(true);
+    await fetchWithState(
+      'customReport',
+      () =>
+        getCustomReport({
+          entity: reportEntity,
+          grouping: reportGrouping,
+          metric: reportMetric,
+        }),
+      setReportResult,
+    );
+  }, [reportEntity, reportGrouping, reportMetric, fetchWithState, getCustomReport]);
 
-  const activeStagesForChart = stages.filter(s => s.pipeline_id === activePipelineId);
-
-  // CSV export
   const handleExportCsv = () => {
-    if (reportResult.length === 0) return;
+    if (!reportResult || reportResult.rows.length === 0) return;
     const headers = ['Group', 'Volume'];
     if (reportEntity === 'deal' && reportMetric === 'sum_value') headers.push('Total Value');
-    const rows = reportResult.map(row => {
-      const vals = [row.groupName, String(row.count)];
-      if (reportEntity === 'deal' && reportMetric === 'sum_value') vals.push(String(row.value));
+    const rows = reportResult.rows.map(row => {
+      const vals = [
+        String(row.groupName ?? row.group_name ?? row.label ?? 'Unknown'),
+        String(row.count ?? 0),
+      ];
+      if (reportEntity === 'deal' && reportMetric === 'sum_value')
+        vals.push(String(row.value ?? row.total_value ?? 0));
       return vals.map(v => `"${v}"`).join(',');
     });
     const csv = [headers.join(','), ...rows].join('\n');
@@ -137,50 +403,53 @@ export default function ReportsModule() {
     URL.revokeObjectURL(url);
   };
 
-  const handleGenerateReport = () => {
-    setReportGenerated(true);
-    let results: any[] = [];
+  // ─── Loading skeleton helpers ────────────────────────────────────────────
 
-    if (reportEntity === 'deal') {
-      const groups: Record<string, Deal[]> = {};
-      scopedDeals.forEach(d => {
-        let key = '';
-        if (reportGrouping === 'owner_id') {
-          key = users.find(u => u.id === d.owner_id)?.name || 'Unknown Rep';
-        } else if (reportGrouping === 'stage_id') {
-          key = stages.find(s => s.id === d.stage_id)?.name || 'Unknown Stage';
-        } else if (reportGrouping === 'account_id') {
-          key = accounts.find(a => a.id === d.account_id)?.name || 'Unknown Account';
-        }
-        if (!groups[key]) groups[key] = [];
-        groups[key].push(d);
-      });
-      results = Object.entries(groups).map(([groupName, items]) => ({
-        groupName, count: items.length, value: items.reduce((sum, i) => sum + i.value, 0)
-      }));
-    } else if (reportEntity === 'contact') {
-      const groups: Record<string, any[]> = {};
-      contacts.forEach(c => {
-        let key = '';
-        if (reportGrouping === 'owner_id') key = users.find(u => u.id === c.owner_id)?.name || 'Unknown Rep';
-        else if (reportGrouping === 'account_id') key = accounts.find(a => a.id === c.account_id)?.name || 'Unassigned Account';
-        if (!groups[key]) groups[key] = [];
-        groups[key].push(c);
-      });
-      results = Object.entries(groups).map(([groupName, items]) => ({ groupName, count: items.length, value: 0 }));
-    } else if (reportEntity === 'task') {
-      const groups: Record<string, Task[]> = {};
-      scopedTasks.forEach(t => {
-        let key = reportGrouping === 'owner_id'
-          ? users.find(u => u.id === t.assigned_to_id)?.name || 'Unknown User'
-          : t.type.toUpperCase();
-        if (!groups[key]) groups[key] = [];
-        groups[key].push(t);
-      });
-      results = Object.entries(groups).map(([groupName, items]) => ({ groupName, count: items.length, value: 0 }));
-    }
-    setReportResult(results);
-  };
+  const LoadingBlock = ({ lines = 3, className = '' }: { lines?: number; className?: string }) => (
+    <div className={`space-y-3 ${className}`}>
+      {Array.from({ length: lines }).map((_, i) => (
+        <Skeleton key={i} className="h-4 w-full" />
+      ))}
+    </div>
+  );
+
+  const ErrorBlock = ({
+    message,
+    onRetry,
+  }: {
+    message: string;
+    onRetry: () => void;
+  }) => (
+    <div className="flex flex-col items-center justify-center py-8 text-center gap-3">
+      <AlertTriangle className="w-8 h-8 text-warning" />
+      <p className="text-sm font-medium text-theme-secondary">{message}</p>
+      <button
+        onClick={onRetry}
+        className="inline-flex items-center gap-2 px-4 py-2 text-xs font-semibold rounded-lg bg-theme-accent text-white hover:bg-theme-accent-strong transition-colors cursor-pointer"
+      >
+        <RefreshCw className="w-3.5 h-3.5" /> Retry
+      </button>
+    </div>
+  );
+
+  // ─── Trend data from forecast (memoized) ──────────────────────────────────
+
+  const trendLabels = useMemo(
+    () => forecastData?.byMonth
+      ? Object.keys(forecastData.byMonth).map(m => {
+          const [y, mo] = m.split('-');
+          const d = new Date(Number(y), Number(mo) - 1, 1);
+          return d.toLocaleDateString('en-US', { month: 'short' });
+        })
+      : [],
+    [forecastData?.byMonth],
+  );
+  const trendValues = useMemo(
+    () => forecastData?.byMonth ? Object.values(forecastData.byMonth) : [],
+    [forecastData?.byMonth],
+  );
+
+  // ─── Render ──────────────────────────────────────────────────────────────
 
   return (
     <div className="flex-1 flex flex-col overflow-hidden bg-theme-base text-theme-primary">
@@ -220,40 +489,107 @@ export default function ReportsModule() {
 
             {/* ── KPI ROW ── */}
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-              {[
-                {
-                  label: 'Open Pipeline', value: `$${totalOpenValue.toLocaleString()}`, sub: `${openDeals.length} active deals`,
-                  icon: DollarSign, chip: 'bg-theme-accent-soft text-theme-accent', bar: 'bg-theme-accent',
-                },
-                {
-                  label: 'Closed Won Revenue', value: `$${totalWonValue.toLocaleString()}`, sub: personalQuota > 0 ? `${Math.round(quotaAttainmentPct)}% of $${(personalQuota / 1000).toFixed(0)}k quota` : 'Set a quota target in your profile',
-                  icon: Target, chip: 'bg-success-soft text-success', bar: 'bg-success',
-                },
-                {
-                  label: 'Win Rate', value: `${winRate.toFixed(1)}%`, sub: `${wonDeals.length} won · ${lostDeals.length} lost`,
-                  icon: Percent, chip: 'bg-info-soft text-info', bar: 'bg-info',
-                },
-                {
-                  label: 'Activities', value: scopedActivities.length.toLocaleString(), sub: 'Calls, notes, emails',
-                  icon: Zap, chip: 'bg-warning-soft text-warning', bar: 'bg-warning',
-                },
-              ].map(kpi => (
-                <div key={kpi.label} className="bg-theme-card border border-theme-border rounded-xl shadow-card p-5 hover:shadow-raised transition-shadow">
-                  <div className="flex items-center justify-between mb-3.5">
-                    <span className="text-2xs font-semibold text-theme-secondary uppercase tracking-wider font-sans">{kpi.label}</span>
-                    <span className={`w-7 h-7 rounded-lg flex items-center justify-center ${kpi.chip}`}>
-                      <kpi.icon className="w-3.5 h-3.5" strokeWidth={2} />
-                    </span>
-                  </div>
-                  <p className="text-[26px] leading-none font-semibold text-theme-primary tnum tracking-tight" data-metric>{kpi.value}</p>
-                  {/* Mini progress bar */}
-                  <div className="mt-3.5 h-1 w-full bg-theme-inset rounded-full overflow-hidden">
-                    <div className={`h-full rounded-full ${kpi.bar} transition-all duration-700`}
-                      style={{ width: `${kpi.label === 'Win Rate' ? winRate : kpi.label === 'Open Pipeline' ? (personalQuota > 0 ? Math.min(100, (totalOpenValue / personalQuota) * 100) : 0) : kpi.label === 'Closed Won Revenue' ? (personalQuota > 0 ? Math.min(100, quotaAttainmentPct) : 0) : Math.min(100, (scopedActivities.length / 30) * 100)}%` }} />
-                  </div>
-                  <p className="text-2xs text-theme-secondary mt-2.5 font-medium font-sans">{kpi.sub}</p>
+              {/* Open Pipeline */}
+              <div className="bg-theme-card border border-theme-border rounded-xl shadow-card p-5 hover:shadow-raised transition-shadow">
+                <div className="flex items-center justify-between mb-3.5">
+                  <span className="text-2xs font-semibold text-theme-secondary uppercase tracking-wider font-sans">Open Pipeline</span>
+                  <span className="w-7 h-7 rounded-lg flex items-center justify-center bg-theme-accent-soft text-theme-accent">
+                    <DollarSign className="w-3.5 h-3.5" strokeWidth={2} />
+                  </span>
                 </div>
-              ))}
+                {loading.pipelineHealth ? (
+                  <Skeleton className="h-8 w-28 mb-3" />
+                ) : (
+                  <p className="text-[26px] leading-none font-semibold text-theme-primary tnum tracking-tight" data-metric>
+                    ${((pipelineHealthData?.totalValue ?? 0)).toLocaleString()}
+                  </p>
+                )}
+                <div className="mt-3.5 h-1 w-full bg-theme-inset rounded-full overflow-hidden">
+                  <div
+                    className="h-full rounded-full bg-theme-accent transition-all duration-700"
+                    style={{
+                      width: `${personalQuota > 0 ? Math.min(100, ((pipelineHealthData?.totalValue ?? 0) / personalQuota) * 100) : 0}%`,
+                    }}
+                  />
+                </div>
+                <p className="text-2xs text-theme-secondary mt-2.5 font-medium font-sans">{openDealsCount} active deals</p>
+              </div>
+
+              {/* Closed Won / Forecast Revenue */}
+              <div className="bg-theme-card border border-theme-border rounded-xl shadow-card p-5 hover:shadow-raised transition-shadow">
+                <div className="flex items-center justify-between mb-3.5">
+                  <span className="text-2xs font-semibold text-theme-secondary uppercase tracking-wider font-sans">Forecast Revenue</span>
+                  <span className="w-7 h-7 rounded-lg flex items-center justify-center bg-success-soft text-success">
+                    <Target className="w-3.5 h-3.5" strokeWidth={2} />
+                  </span>
+                </div>
+                {loading.forecast ? (
+                  <Skeleton className="h-8 w-28 mb-3" />
+                ) : (
+                  <p className="text-[26px] leading-none font-semibold text-theme-primary tnum tracking-tight" data-metric>
+                    ${((forecastData?.expectedRevenue ?? 0)).toLocaleString()}
+                  </p>
+                )}
+                <div className="mt-3.5 h-1 w-full bg-theme-inset rounded-full overflow-hidden">
+                  <div
+                    className="h-full rounded-full bg-success transition-all duration-700"
+                    style={{
+                      width: `${personalQuota > 0 ? Math.min(100, ((forecastData?.expectedRevenue ?? 0) / personalQuota) * 100) : 0}%`,
+                    }}
+                  />
+                </div>
+                <p className="text-2xs text-theme-secondary mt-2.5 font-medium font-sans">
+                  {forecastData
+                    ? `${Math.round(forecastData.confidence)}% confidence · Best $${forecastData.bestCase.toLocaleString()}`
+                    : personalQuota > 0
+                      ? `Set a quota target in your profile`
+                      : 'Loading forecast...'}
+                </p>
+              </div>
+
+              {/* Win Rate */}
+              <div className="bg-theme-card border border-theme-border rounded-xl shadow-card p-5 hover:shadow-raised transition-shadow">
+                <div className="flex items-center justify-between mb-3.5">
+                  <span className="text-2xs font-semibold text-theme-secondary uppercase tracking-wider font-sans">Win Rate</span>
+                  <span className="w-7 h-7 rounded-lg flex items-center justify-center bg-info-soft text-info">
+                    <Percent className="w-3.5 h-3.5" strokeWidth={2} />
+                  </span>
+                </div>
+                {loading.pipelineHealth ? (
+                  <Skeleton className="h-8 w-20 mb-3" />
+                ) : (
+                  <p className="text-[26px] leading-none font-semibold text-theme-primary tnum tracking-tight" data-metric>
+                    {Math.round(pipelineHealthData?.avgProbability ?? 0)}%
+                  </p>
+                )}
+                <div className="mt-3.5 h-1 w-full bg-theme-inset rounded-full overflow-hidden">
+                  <div
+                    className="h-full rounded-full bg-info transition-all duration-700"
+                    style={{ width: `${Math.min(100, pipelineHealthData?.avgProbability ?? 0)}%` }}
+                  />
+                </div>
+                <p className="text-2xs text-theme-secondary mt-2.5 font-medium font-sans">Average deal probability</p>
+              </div>
+
+              {/* Activities */}
+              <div className="bg-theme-card border border-theme-border rounded-xl shadow-card p-5 hover:shadow-raised transition-shadow">
+                <div className="flex items-center justify-between mb-3.5">
+                  <span className="text-2xs font-semibold text-theme-secondary uppercase tracking-wider font-sans">Activities</span>
+                  <span className="w-7 h-7 rounded-lg flex items-center justify-center bg-warning-soft text-warning">
+                    <Zap className="w-3.5 h-3.5" strokeWidth={2} />
+                  </span>
+                </div>
+                <p className="text-[26px] leading-none font-semibold text-theme-primary tnum tracking-tight" data-metric>
+                  {activitiesCount.toLocaleString()}
+                </p>
+                <div className="mt-3.5 h-1 w-full bg-theme-inset rounded-full overflow-hidden">
+                  <div
+                    className="h-full rounded-full bg-warning transition-all duration-700"
+                    style={{ width: `${Math.min(100, (activitiesCount / 30) * 100)}%` }}
+                  />
+                </div>
+                <p className="text-2xs text-theme-secondary mt-2.5 font-medium font-sans">Calls, notes, emails</p>
+              </div>
             </div>
 
             {/* ── TWO COLUMN: Charts + AI ── */}
@@ -263,29 +599,57 @@ export default function ReportsModule() {
                 <h3 className="text-sm font-semibold text-theme-primary tracking-tight font-sans mb-4 flex items-center gap-2">
                   <GitPullRequest className="w-4 h-4 text-theme-accent" /> Pipeline Funnel
                 </h3>
-                <FunnelChart money data={activeStagesForChart.map(stg => ({
-                  label: stg.name,
-                  value: scopedDeals.filter(d => d.stage_id === stg.id).reduce((sum, d) => sum + d.value, 0),
-                }))} />
+                {loading.pipelineHealth ? (
+                  <LoadingBlock lines={4} className="py-4" />
+                ) : errors.pipelineHealth ? (
+                  <ErrorBlock message={errors.pipelineHealth} onRetry={() => handleRetry('pipelineHealth')} />
+                ) : pipelineHealthData && pipelineHealthData.stageBreakdown.length > 0 ? (
+                  <FunnelChart
+                    money
+                    data={pipelineHealthData.stageBreakdown.map(s => ({
+                      label: s.stageName,
+                      value: s.value,
+                    }))}
+                  />
+                ) : (
+                  <p className="text-xs text-theme-secondary py-8 text-center">No pipeline data available.</p>
+                )}
               </div>
 
               {/* Revenue Trend */}
               <div className="bg-theme-card border border-theme-border rounded-xl shadow-card p-5">
                 <h3 className="text-sm font-semibold text-theme-primary tracking-tight font-sans mb-4 flex items-center gap-2">
-                  <TrendingUp className="w-4 h-4 text-theme-accent" /> Revenue Trend
+                  <TrendingUp className="w-4 h-4 text-theme-accent" /> Revenue Forecast
                 </h3>
-                <TrendLine points={trendData.map(t => t.value)} labels={trendData.map(t => t.label)} money height={200} />
+                {loading.forecast ? (
+                  <LoadingBlock lines={3} className="py-4" />
+                ) : errors.forecast ? (
+                  <ErrorBlock message={errors.forecast} onRetry={() => handleRetry('forecast')} />
+                ) : trendValues.length > 0 ? (
+                  <TrendLine points={trendValues} labels={trendLabels} money height={200} />
+                ) : (
+                  <p className="text-xs text-theme-secondary py-8 text-center">No forecast data available.</p>
+                )}
               </div>
             </div>
 
             {/* ── THREE COLUMN: AI Actions + Donut + Data Quality ── */}
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
               {/* AI Next Best Actions */}
+              {aiFeaturesEnabled && (
               <div className="bg-theme-card border border-theme-border rounded-xl shadow-card p-5">
                 <h3 className="text-sm font-semibold text-theme-primary tracking-tight font-sans mb-4 flex items-center gap-2">
                   <Sparkles className="w-4 h-4 text-theme-accent" /> Next Best Actions
                 </h3>
-                {nextBestActions.length === 0 ? (
+                {loading.nextBestActions ? (
+                  <div className="space-y-3 py-2">
+                    {Array.from({ length: 3 }).map((_, i) => (
+                      <Skeleton key={i} className="h-16 w-full rounded-lg" />
+                    ))}
+                  </div>
+                ) : errors.nextBestActions ? (
+                  <ErrorBlock message={errors.nextBestActions} onRetry={() => handleRetry('nextBestActions')} />
+                ) : insightActions.length === 0 ? (
                   <div className="py-8 text-center">
                     <CheckCircle className="w-10 h-10 mx-auto text-success mb-3" />
                     <p className="text-sm font-bold text-theme-primary font-sans">All caught up</p>
@@ -293,7 +657,7 @@ export default function ReportsModule() {
                   </div>
                 ) : (
                   <div className="space-y-2 max-h-[320px] overflow-y-auto pr-1">
-                    {nextBestActions.map(action => {
+                    {insightActions.map(action => {
                       const tones: Record<string, { bg: string; text: string; bar: string }> = {
                         high: { bg: 'bg-danger-soft', text: 'text-danger', bar: 'bg-danger' },
                         medium: { bg: 'bg-warning-soft', text: 'text-warning', bar: 'bg-warning' },
@@ -301,13 +665,18 @@ export default function ReportsModule() {
                       };
                       const t = tones[action.priority] || tones.low;
                       return (
-                        <div key={action.id}
+                        <div
+                          key={action.id}
                           className="flex items-start gap-3 p-3 rounded-lg border border-theme-border hover:border-theme-accent/40 hover:shadow-card cursor-pointer transition-all bg-theme-inset/50"
-                          onClick={() => { if (action.entityId) dispatchSelectEntity({ module: action.module, entityId: action.entityId }); }}
+                          onClick={() => {
+                            if (action.entityId) dispatchSelectEntity({ module: action.module, entityId: action.entityId });
+                          }}
                         >
                           <div className={`w-1.5 self-stretch rounded-full shrink-0 ${t.bar}`} />
                           <div className="shrink-0">
-                             <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full uppercase tracking-wide ${t.bg} ${t.text}`}>{action.priority}</span>
+                            <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full uppercase tracking-wide ${t.bg} ${t.text}`}>
+                              {action.priority}
+                            </span>
                           </div>
                           <div className="min-w-0 flex-1">
                             <p className="text-xs font-bold text-theme-primary">{action.title}</p>
@@ -320,20 +689,30 @@ export default function ReportsModule() {
                   </div>
                 )}
               </div>
+              )}
 
               {/* Pipeline Distribution */}
               <div className="bg-theme-card border border-theme-border rounded-xl shadow-card p-5">
                 <h3 className="text-sm font-semibold text-theme-primary tracking-tight font-sans mb-4 flex items-center gap-2">
                   <PieChart className="w-4 h-4 text-theme-accent" /> Pipeline Distribution
                 </h3>
-                <DonutChart
-                  data={activeStagesForChart.map(stg => ({
-                    label: stg.name,
-                    value: scopedDeals.filter(d => d.stage_id === stg.id).length,
-                    color: stg.type === 'won' ? 'var(--success)' : stg.type === 'lost' ? 'var(--text-secondary)' : undefined,
-                  }))}
-                  centerLabel="Deals"
-                />
+                {loading.pipelineHealth ? (
+                  <div className="flex items-center justify-center py-10">
+                    <Loader2 className="w-8 h-8 animate-spin text-theme-accent" />
+                  </div>
+                ) : errors.pipelineHealth ? (
+                  <ErrorBlock message={errors.pipelineHealth} onRetry={() => handleRetry('pipelineHealth')} />
+                ) : pipelineHealthData && pipelineHealthData.stageBreakdown.length > 0 ? (
+                  <DonutChart
+                    data={pipelineHealthData.stageBreakdown.map(s => ({
+                      label: s.stageName,
+                      value: s.count,
+                    }))}
+                    centerLabel="Deals"
+                  />
+                ) : (
+                  <p className="text-xs text-theme-secondary py-10 text-center">No stage data available.</p>
+                )}
               </div>
 
               {/* Data Quality */}
@@ -342,24 +721,56 @@ export default function ReportsModule() {
                   <ShieldCheck className="w-4 h-4 text-theme-accent" /> Data Quality
                 </h3>
                 <div className="space-y-3">
-                  {[
-                    { icon: Phone, label: 'Incomplete Contacts', count: dataQuality.incomplete, tone: dataQuality.incomplete > 0 ? 'warning' : 'success' as const },
-                    { icon: UserX, label: 'Unassigned Contacts', count: dataQuality.unassigned, tone: dataQuality.unassigned > 0 ? 'warning' : 'success' as const },
-                    { icon: Copy, label: 'Duplicate Contacts', count: dataQuality.duplicates, tone: dataQuality.duplicates > 0 ? 'danger' : 'success' as const },
-                  ].map(item => (
-                     <div key={item.label} className="flex items-center justify-between py-2.5 px-3 rounded-lg bg-theme-inset/60 border border-theme-border/60">
+                  {([
+                    {
+                      icon: Phone,
+                      label: 'Incomplete Contacts',
+                      count: incompleteContacts,
+                      tone: incompleteContacts > 0 ? 'warning' : 'success',
+                    },
+                    {
+                      icon: UserX,
+                      label: 'Unassigned Contacts',
+                      count: unassignedContacts,
+                      tone: unassignedContacts > 0 ? 'warning' : 'success',
+                    },
+                    ...(aiFeaturesEnabled ? [{
+                      icon: Copy,
+                      label: 'Duplicate Contacts',
+                      count: totalDuplicateContacts,
+                      tone: totalDuplicateContacts > 0 ? 'danger' : 'success',
+                    } as const] : []),
+                  ] as const).map(item => (
+                    <div
+                      key={item.label}
+                      className="flex items-center justify-between py-2.5 px-3 rounded-lg bg-theme-inset/60 border border-theme-border/60"
+                    >
                       <div className="flex items-center gap-2.5">
                         <item.icon className="w-4 h-4 text-theme-secondary/60" />
                         <span className="text-xs font-semibold text-theme-primary font-sans">{item.label}</span>
                       </div>
-                       <span className={`text-sm font-semibold tnum font-sans ${item.tone === 'danger' ? 'text-danger' : item.tone === 'warning' ? 'text-warning' : 'text-success'}`}>
-                        {item.count}
-                      </span>
+                      {loading.duplicates && item.label === 'Duplicate Contacts' ? (
+                        <Loader2 className="w-4 h-4 animate-spin text-theme-secondary" />
+                      ) : (
+                        <span
+                          className={`text-sm font-semibold tnum font-sans ${
+                            item.tone === 'danger'
+                              ? 'text-danger'
+                              : item.tone === 'warning'
+                                ? 'text-warning'
+                                : 'text-success'
+                          }`}
+                        >
+                          {item.count}
+                        </span>
+                      )}
                     </div>
                   ))}
-                  {duplicateGroups.length > 0 && (
+                  {aiFeaturesEnabled && duplicateGroups.length > 0 && (
                     <div className="pt-3 border-t border-theme-border space-y-1.5">
-                      <p className="text-2xs font-bold text-theme-secondary uppercase tracking-wider">{duplicateGroups.length} duplicate group{duplicateGroups.length > 1 ? 's' : ''}</p>
+                      <p className="text-2xs font-bold text-theme-secondary uppercase tracking-wider">
+                        {duplicateGroups.length} duplicate group{duplicateGroups.length > 1 ? 's' : ''}
+                      </p>
                       {duplicateGroups.slice(0, 3).map((g, i) => (
                         <p key={i} className="text-2xs text-warning font-semibold bg-warning-soft/50 px-2 py-1 rounded">
                           {g.contacts.map(c => `${c.first_name} ${c.last_name}`).join(' ≈ ')}
@@ -370,6 +781,55 @@ export default function ReportsModule() {
                 </div>
               </div>
             </div>
+
+            {/* ── Leaderboard ── */}
+            {isManagerOrAdmin && leaderboardData.length > 0 && (
+              <div className="bg-theme-card border border-theme-border rounded-xl shadow-card p-5">
+                <h3 className="text-sm font-semibold text-theme-primary tracking-tight font-sans mb-4 flex items-center gap-2">
+                  <Users className="w-4 h-4 text-theme-accent" /> Team Leaderboard
+                </h3>
+                {loading.leaderboard ? (
+                  <LoadingBlock lines={5} />
+                ) : errors.leaderboard ? (
+                  <ErrorBlock message={errors.leaderboard} onRetry={() => handleRetry('leaderboard')} />
+                ) : (
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left text-sm">
+                      <thead className="text-2xs font-semibold uppercase tracking-wider text-theme-secondary border-b border-theme-border">
+                        <tr>
+                          <th className="py-3 px-4">Rank</th>
+                          <th className="py-3 px-4">Rep</th>
+                          <th className="py-3 px-4 text-right">Revenue</th>
+                          <th className="py-3 px-4 text-right">Deals Won</th>
+                          <th className="py-3 px-4 text-right">Win Rate</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-theme-border">
+                        {leaderboardData.map((entry, i) => (
+                          <tr key={entry.userId} className="hover:bg-theme-hover/50 transition-colors">
+                            <td className="py-3 px-4">
+                              <span
+                                className={`text-xs font-bold ${
+                                  i === 0 ? 'text-theme-accent' : i < 3 ? 'text-theme-primary' : 'text-theme-secondary'
+                                }`}
+                              >
+                                #{i + 1}
+                              </span>
+                            </td>
+                            <td className="py-3 px-4 font-semibold text-theme-primary text-xs">{entry.userName}</td>
+                            <td className="py-3 px-4 text-right font-semibold tnum text-theme-accent text-xs">
+                              ${entry.revenue.toLocaleString()}
+                            </td>
+                            <td className="py-3 px-4 text-right font-semibold text-xs">{entry.dealsClosed}</td>
+                            <td className="py-3 px-4 text-right font-semibold text-xs">{Math.round(entry.winRate)}%</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         )}
 
@@ -378,80 +838,119 @@ export default function ReportsModule() {
           <div className="bg-theme-card rounded-xl shadow-card border border-theme-border p-6 space-y-7">
             <div>
               <h3 className="text-base font-semibold text-theme-primary tracking-tight flex items-center gap-2.5">
-                <span className="w-8 h-8 rounded-lg bg-theme-accent-soft flex items-center justify-center"><GitPullRequest className="w-4 h-4 text-theme-accent" /></span>
-                Pipeline Conversion Funnel
+                <span className="w-8 h-8 rounded-lg bg-theme-accent-soft flex items-center justify-center">
+                  <GitPullRequest className="w-4 h-4 text-theme-accent" />
+                </span>
+                Pipeline Health Overview
               </h3>
-              <p className="text-xs text-theme-secondary mt-1 ml-10">Conversion degradation at each stage — identify friction bottlenecks.</p>
+              <p className="text-xs text-theme-secondary mt-1 ml-10">API-powered health metrics with weighted pipeline and stage breakdown.</p>
             </div>
 
-            <div className="max-w-2xl mx-auto space-y-3 py-4">
-              {stages.filter(s => s.pipeline_id === activePipelineId && s.type === 'open').length === 0 ? (
-                <div className="text-center py-10 text-xs text-theme-secondary font-sans">
-                  <GitPullRequest className="w-12 h-12 mx-auto mb-3 text-theme-border" />
-                  <p className="font-bold text-theme-primary">No pipeline stages configured</p>
-                  <p className="mt-1">Set up your pipeline stages in Admin to visualize the funnel.</p>
+            {loading.pipelineHealth ? (
+              <div className="space-y-4 py-4">
+                <Skeleton className="h-6 w-48" />
+                <Skeleton className="h-40 w-full" />
+                <Skeleton className="h-20 w-full" />
+              </div>
+            ) : errors.pipelineHealth ? (
+              <ErrorBlock message={errors.pipelineHealth} onRetry={() => handleRetry('pipelineHealth')} />
+            ) : pipelineHealthData ? (
+              <>
+                {/* Health summary KPIs */}
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <div className="p-4 bg-theme-inset rounded-xl border border-theme-border text-center">
+                    <p className="text-2xs font-semibold uppercase tracking-wider text-theme-secondary mb-1">Total Pipeline</p>
+                    <p className="text-2xl font-bold tnum text-theme-primary">${pipelineHealthData.totalValue.toLocaleString()}</p>
+                  </div>
+                  <div className="p-4 bg-theme-inset rounded-xl border border-theme-border text-center">
+                    <p className="text-2xs font-semibold uppercase tracking-wider text-theme-secondary mb-1">Weighted Value</p>
+                    <p className="text-2xl font-bold tnum text-theme-accent">${pipelineHealthData.weightedValue.toLocaleString()}</p>
+                  </div>
+                  <div className="p-4 bg-theme-inset rounded-xl border border-theme-border text-center">
+                    <p className="text-2xs font-semibold uppercase tracking-wider text-theme-secondary mb-1">Avg Probability</p>
+                    <p className="text-2xl font-bold tnum text-theme-primary">{Math.round(pipelineHealthData.avgProbability)}%</p>
+                  </div>
                 </div>
-              ) : (
-                stages.filter(s => s.pipeline_id === activePipelineId && s.type === 'open').map((stg, index) => {
-                  const dealsInStg = scopedDeals.filter(d => d.stage_id === stg.id);
-                  const count = dealsInStg.length;
-                  const val = dealsInStg.reduce((s, d) => s + d.value, 0);
-                  const widthPct = Math.max(16, 100 - index * 14);
-                  return (
-                    <div key={stg.id} className="flex items-center gap-4">
-                      <div className="w-36 text-right shrink-0">
-                         <p className="text-xs font-semibold text-theme-primary">{stg.name}</p>
-                        <p className="text-2xs text-theme-secondary font-semibold">{stg.probability}% probability</p>
-                      </div>
-                      <div className="flex-1">
-                        <div className="bg-theme-accent text-white text-xs font-semibold py-2.5 px-4 rounded-lg shadow-card flex justify-between items-center transition-all" style={{ width: `${widthPct}%` }}>
-                          <span>{count} Deal{count !== 1 ? 's' : ''}</span>
-                          <span className="font-mono text-white/90">${val.toLocaleString()}</span>
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })
-              )}
-            </div>
 
-             <div className="border-t border-theme-border pt-5">
-               <h4 className="text-xs font-semibold uppercase font-sans tracking-wider text-theme-secondary mb-4">Health Diagnostics</h4>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
-                {(() => {
-                  const stagnantDeals = openDeals.filter(d => new Date(d.stage_entered_at) < new Date(Date.now() - 14 * 24 * 60 * 60 * 1000));
-                  const recentWon = wonDeals.filter(d => d.won_at && new Date(d.won_at) > new Date(Date.now() - 30 * 24 * 60 * 60 * 1000));
-                  const recentLost = lostDeals.filter(d => d.lost_at && new Date(d.lost_at) > new Date(Date.now() - 30 * 24 * 60 * 60 * 1000));
-                  return (
-                    <>
-                      {stagnantDeals.length > 0 && (
-                         <div className="p-4 bg-warning-soft border border-warning/20 rounded-xl flex gap-3 items-start">
-                           <AlertTriangle className="w-5 h-5 text-warning shrink-0 mt-0.5" />
-                           <div>
-                             <p className="font-semibold text-theme-primary">Stagnant Deal{stagnantDeals.length > 1 ? 's' : ''} Detected</p>
-                            <p className="text-theme-secondary mt-1 leading-relaxed">
-                              {stagnantDeals.length} deal{stagnantDeals.length > 1 ? 's' : ''} stuck in current stage over 14 days.
-                              Review <strong>"{stagnantDeals[0].name}"</strong>{stagnantDeals.length > 1 ? ` and ${stagnantDeals.length - 1} other${stagnantDeals.length > 2 ? 's' : ''}` : ''}.
-                            </p>
+                {/* Stage breakdown funnel */}
+                <div className="max-w-2xl mx-auto space-y-3 py-4">
+                  {pipelineHealthData.stageBreakdown.length === 0 ? (
+                    <div className="text-center py-10 text-xs text-theme-secondary font-sans">
+                      <GitPullRequest className="w-12 h-12 mx-auto mb-3 text-theme-border" />
+                      <p className="font-bold text-theme-primary">No pipeline stages configured</p>
+                      <p className="mt-1">Set up your pipeline stages in Admin to visualize the funnel.</p>
+                    </div>
+                  ) : (
+                    pipelineHealthData.stageBreakdown.map((stg, index) => {
+                      const maxVal = pipelineHealthData.stageBreakdown[0]?.value || 1;
+                      const widthPct = Math.max(16, (stg.value / maxVal) * 100 - index * 10);
+                      return (
+                        <div key={stg.stageName} className="flex items-center gap-4">
+                          <div className="w-36 text-right shrink-0">
+                            <p className="text-xs font-semibold text-theme-primary">{stg.stageName}</p>
+                            <p className="text-2xs text-theme-secondary font-semibold">{stg.count} deal{stg.count !== 1 ? 's' : ''}</p>
+                          </div>
+                          <div className="flex-1">
+                            <div
+                              className="bg-theme-accent text-white text-xs font-semibold py-2.5 px-4 rounded-lg shadow-card flex justify-between items-center transition-all"
+                              style={{ width: `${widthPct}%` }}
+                            >
+                              <span>{stg.count} Deal{stg.count !== 1 ? 's' : ''}</span>
+                              <span className="font-mono text-white/90">${stg.value.toLocaleString()}</span>
+                            </div>
                           </div>
                         </div>
-                      )}
-                       <div className="p-4 bg-info-soft border border-info/20 rounded-xl flex gap-3 items-start">
-                         <Target className="w-5 h-5 text-info shrink-0 mt-0.5" />
-                         <div>
-                           <p className="font-semibold text-theme-primary">Pipeline Velocity</p>
+                      );
+                    })
+                  )}
+                </div>
+
+                {/* Health Diagnostics */}
+                <div className="border-t border-theme-border pt-5">
+                  <h4 className="text-xs font-semibold uppercase font-sans tracking-wider text-theme-secondary mb-4">Health Diagnostics</h4>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
+                    {pipelineHealthData.totalValue === 0 && (
+                      <div className="p-4 bg-warning-soft border border-warning/20 rounded-xl flex gap-3 items-start">
+                        <AlertTriangle className="w-5 h-5 text-warning shrink-0 mt-0.5" />
+                        <div>
+                          <p className="font-semibold text-theme-primary">Empty Pipeline</p>
                           <p className="text-theme-secondary mt-1 leading-relaxed">
-                            {recentWon.length > 0 ? `${recentWon.length} won in last 30 days. ` : 'No deals won in last 30 days. '}
-                            {recentLost.length > 0 ? `${recentLost.length} lost. ` : 'No recent losses. '}
-                            Open pipeline: <strong>${totalOpenValue.toLocaleString()}</strong>
+                            No deals currently in the pipeline. Start prospecting to build your pipeline.
                           </p>
                         </div>
                       </div>
-                    </>
-                  );
-                })()}
-              </div>
-            </div>
+                    )}
+                    <div className="p-4 bg-info-soft border border-info/20 rounded-xl flex gap-3 items-start">
+                      <Target className="w-5 h-5 text-info shrink-0 mt-0.5" />
+                      <div>
+                        <p className="font-semibold text-theme-primary">Pipeline Velocity</p>
+                        <p className="text-theme-secondary mt-1 leading-relaxed">
+                          Weighted pipeline: <strong>${pipelineHealthData.weightedValue.toLocaleString()}</strong>.
+                          {pipelineHealthData.avgProbability < 30
+                            ? ' Average probability is low — focus on qualification.'
+                            : pipelineHealthData.avgProbability > 60
+                              ? ' Healthy deal progression.'
+                              : ' Steady pipeline movement.'}
+                        </p>
+                      </div>
+                    </div>
+                    {pipelineHealthData.stageBreakdown.length > 2 && (
+                      <div className="p-4 bg-theme-accent-soft/20 border border-theme-accent/20 rounded-xl flex gap-3 items-start md:col-span-2">
+                        <BarChart3 className="w-5 h-5 text-theme-accent shrink-0 mt-0.5" />
+                        <div>
+                          <p className="font-semibold text-theme-primary">Stage Distribution</p>
+                          <p className="text-theme-secondary mt-1 leading-relaxed">
+                            {pipelineHealthData.stageBreakdown.map(s => `${s.stageName}: ${s.count} ($${s.value.toLocaleString()})`).join(' · ')}
+                          </p>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </>
+            ) : (
+              <p className="text-xs text-theme-secondary py-8 text-center">No pipeline health data available.</p>
+            )}
           </div>
         )}
 
@@ -460,7 +959,9 @@ export default function ReportsModule() {
           <div className="bg-theme-card rounded-xl shadow-card border border-theme-border p-6 space-y-7">
             <div>
               <h3 className="text-base font-semibold text-theme-primary tracking-tight flex items-center gap-2.5">
-                <span className="w-8 h-8 rounded-lg bg-theme-accent-soft flex items-center justify-center"><PieChart className="w-4 h-4 text-theme-accent" /></span>
+                <span className="w-8 h-8 rounded-lg bg-theme-accent-soft flex items-center justify-center">
+                  <PieChart className="w-4 h-4 text-theme-accent" />
+                </span>
                 Win / Loss Analysis
               </h3>
               <p className="text-xs text-theme-secondary mt-1 ml-10">Deal outcomes, competitor intelligence, and lost reason breakdown.</p>
@@ -468,58 +969,78 @@ export default function ReportsModule() {
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               {/* Lost Reason Breakdown */}
-               <div className="p-5 bg-theme-inset rounded-xl border border-theme-border">
-                 <h4 className="text-xs font-semibold uppercase font-sans tracking-wider text-theme-secondary mb-4">Lost Reason Attribution</h4>
-                {(() => {
-                  const lostWithReasons = lostDeals.filter(d => d.lost_reason);
-                  if (lostWithReasons.length === 0) return <p className="text-xs text-theme-secondary py-4">No lost deal data available yet.</p>;
-                  const reasonCounts: Record<string, number> = {};
-                  lostWithReasons.forEach(d => { const r = d.lost_reason || 'Unspecified'; reasonCounts[r] = (reasonCounts[r] || 0) + 1; });
-                  const total = lostWithReasons.length;
-                  return Object.entries(reasonCounts).sort(([,a],[,b]) => b - a).slice(0, 6).map(([reason, count], i) => {
-                    const pct = Math.round((count / total) * 100);
-                    return (
-                      <div key={reason} className="mb-3 last:mb-0">
-                        <div className="flex justify-between text-xs font-semibold mb-1"><span className="text-theme-primary">{reason}</span><span className="text-theme-secondary">{pct}%</span></div>
-                        <div className="w-full bg-theme-base h-2.5 rounded-full overflow-hidden"><div className="bg-theme-accent h-full rounded-full transition-all" style={{ width: `${pct}%`, opacity: 1 - i * 0.12 }} /></div>
-                      </div>
-                    );
-                  });
-                })()}
+              <div className="p-5 bg-theme-inset rounded-xl border border-theme-border">
+                <h4 className="text-xs font-semibold uppercase font-sans tracking-wider text-theme-secondary mb-4">Lost Reason Attribution</h4>
+                {loading.lostReasons ? (
+                  <LoadingBlock lines={4} />
+                ) : errors.lostReasons ? (
+                  <ErrorBlock message={errors.lostReasons} onRetry={() => handleRetry('lostReasons')} />
+                ) : lostReasonData && lostReasonData.rows.length > 0 ? (
+                  (() => {
+                    const total = lostReasonData.rows.reduce((sum: number, r: any) => sum + (Number(r.count) || 0), 0);
+                    return lostReasonData.rows.slice(0, 6).map((row: any, i: number) => {
+                      const count = Number(row.count) || 0;
+                      const pct = total > 0 ? Math.round((count / total) * 100) : 0;
+                      const label = String(row.groupName ?? row.group_name ?? row.label ?? 'Unspecified');
+                      return (
+                        <div key={label} className="mb-3 last:mb-0">
+                          <div className="flex justify-between text-xs font-semibold mb-1">
+                            <span className="text-theme-primary">{label}</span>
+                            <span className="text-theme-secondary">{pct}%</span>
+                          </div>
+                          <div className="w-full bg-theme-base h-2.5 rounded-full overflow-hidden">
+                            <div
+                              className="bg-theme-accent h-full rounded-full transition-all"
+                              style={{ width: `${pct}%`, opacity: 1 - i * 0.12 }}
+                            />
+                          </div>
+                        </div>
+                      );
+                    });
+                  })()
+                ) : (
+                  <p className="text-xs text-theme-secondary py-4">No lost deal data available yet.</p>
+                )}
               </div>
 
               {/* Competitor Standings */}
-               <div className="p-5 bg-theme-inset rounded-xl border border-theme-border">
-                 <h4 className="text-xs font-semibold uppercase font-sans tracking-wider text-theme-secondary mb-4">Competitor Head-to-Head</h4>
-                {(() => {
-                  const compStats: Record<string, { won: number; lost: number }> = {};
-                  scopedDeals.forEach(d => {
-                    const name = d.custom_fields?.competitor_name;
-                    if (!name || typeof name !== 'string') return;
-                    const s = stages.find(x => x.id === d.stage_id);
-                    if (!s) return;
-                    const key = name.trim();
-                    if (!key || !compStats[key]) compStats[key] = { won: 0, lost: 0 };
-                    if (s.type === 'won') compStats[key].won++;
-                    else if (s.type === 'lost') compStats[key].lost++;
-                  });
-                  const arr = Object.entries(compStats);
-                  if (!arr.length) return <p className="text-xs text-theme-secondary py-6 text-center">No competitor data logged yet.</p>;
-                  return arr.sort(([,a],[,b]) => (b.won + b.lost) - (a.won + a.lost)).slice(0, 8).map(([name, s]) => {
-                    const total = s.won + s.lost;
-                    const wr = total > 0 ? Math.round((s.won / total) * 100) : 0;
+              <div className="p-5 bg-theme-inset rounded-xl border border-theme-border">
+                <h4 className="text-xs font-semibold uppercase font-sans tracking-wider text-theme-secondary mb-4">Competitor Head-to-Head</h4>
+                {loading.competitors ? (
+                  <LoadingBlock lines={4} />
+                ) : errors.competitors ? (
+                  <ErrorBlock message={errors.competitors} onRetry={() => handleRetry('competitors')} />
+                ) : competitorData && competitorData.rows.length > 0 ? (
+                  competitorData.rows.slice(0, 8).map((row: any, i: number) => {
+                    const name = String(row.groupName ?? row.group_name ?? row.label ?? `Competitor ${i + 1}`);
+                    const won = Number(row.won ?? row.wins ?? 0);
+                    const lost = Number(row.lost ?? row.losses ?? 0);
+                    const count = Number(row.count ?? 0);
+                    const total = won + lost || count;
+                    const wr = total > 0 ? Math.round((won / total) * 100) : 0;
                     return (
-                       <div key={name} className="flex items-center justify-between py-2.5 px-3 rounded-lg border border-theme-border bg-theme-card mb-2 last:mb-0">
-                         <span className="text-xs font-semibold text-theme-primary">{name}</span>
-                         <div className="flex items-center gap-3 text-2xs font-semibold">
-                           <span className="flex items-center gap-1 text-success"><CheckCircle className="w-3 h-3" />{s.won} won</span>
-                           <span className="flex items-center gap-1 text-danger"><XCircle className="w-3 h-3" />{s.lost} lost</span>
-                           <span className="bg-theme-accent-soft text-theme-accent px-2 py-0.5 rounded-full">{wr}%</span>
-                         </div>
-                       </div>
+                      <div
+                        key={name}
+                        className="flex items-center justify-between py-2.5 px-3 rounded-lg border border-theme-border bg-theme-card mb-2 last:mb-0"
+                      >
+                        <span className="text-xs font-semibold text-theme-primary">{name}</span>
+                        <div className="flex items-center gap-3 text-2xs font-semibold">
+                          <span className="flex items-center gap-1 text-success">
+                            <CheckCircle className="w-3 h-3" />
+                            {won} won
+                          </span>
+                          <span className="flex items-center gap-1 text-danger">
+                            <XCircle className="w-3 h-3" />
+                            {lost} lost
+                          </span>
+                          <span className="bg-theme-accent-soft text-theme-accent px-2 py-0.5 rounded-full">{wr}%</span>
+                        </div>
+                      </div>
                     );
-                  });
-                })()}
+                  })
+                ) : (
+                  <p className="text-xs text-theme-secondary py-6 text-center">No competitor data logged yet.</p>
+                )}
               </div>
             </div>
           </div>
@@ -530,82 +1051,146 @@ export default function ReportsModule() {
           <div className="space-y-6">
             <div className="bg-theme-card rounded-xl shadow-card border border-theme-border p-6">
               <h3 className="text-base font-semibold text-theme-primary tracking-tight flex items-center gap-2.5">
-                <span className="w-8 h-8 rounded-lg bg-theme-accent-soft flex items-center justify-center"><Sparkles className="w-4 h-4 text-theme-accent" /></span>
+                <span className="w-8 h-8 rounded-lg bg-theme-accent-soft flex items-center justify-center">
+                  <Sparkles className="w-4 h-4 text-theme-accent" />
+                </span>
                 Custom Report Builder
               </h3>
-              <p className="text-xs text-theme-secondary mt-1 ml-10">Build analytical spreadsheets segmented by users, accounts, or stages.</p>
+              <p className="text-xs text-theme-secondary mt-1 ml-10">Build analytical spreadsheets powered by the server-side reporting engine.</p>
 
-               <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mt-6 p-5 bg-theme-inset rounded-xl border border-theme-border">
-                 <div className="space-y-1.5">
-                   <label className="text-2xs font-semibold uppercase tracking-wider text-theme-secondary font-sans">Entity</label>
-                   <select value={reportEntity} onChange={(e) => setReportEntity(e.target.value as any)} className="w-full bg-theme-card text-theme-primary rounded-lg border border-theme-border px-3 text-sm font-medium focus:border-theme-accent focus:outline-none h-9">
-                     <option value="deal">Deals</option>
-                     <option value="contact">Contacts</option>
-                     <option value="task">Tasks</option>
-                   </select>
-                 </div>
-                 <div className="space-y-1.5">
-                   <label className="text-2xs font-semibold uppercase tracking-wider text-theme-secondary font-sans">Group By</label>
-                   <select value={reportGrouping} onChange={(e) => setReportGrouping(e.target.value)} className="w-full bg-theme-card text-theme-primary rounded-lg border border-theme-border px-3 text-sm font-medium focus:border-theme-accent focus:outline-none h-9">
-                     <option value="owner_id">Owner</option>
-                     {reportEntity === 'deal' && <option value="stage_id">Stage</option>}
-                     {(reportEntity === 'deal' || reportEntity === 'contact') && <option value="account_id">Account</option>}
-                     {reportEntity === 'task' && <option value="type">Task Type</option>}
-                   </select>
-                 </div>
-                 <div className="space-y-1.5">
-                   <label className="text-2xs font-semibold uppercase tracking-wider text-theme-secondary font-sans">Metric</label>
-                   <select value={reportMetric} onChange={(e) => setReportMetric(e.target.value as any)} className="w-full bg-theme-card text-theme-primary rounded-lg border border-theme-border px-3 text-sm font-medium focus:border-theme-accent focus:outline-none h-9">
-                     <option value="count">Count</option>
-                     {reportEntity === 'deal' && <option value="sum_value">Total Value ($)</option>}
-                   </select>
-                 </div>
-                 <div className="flex items-end">
-                   <button onClick={handleGenerateReport}
-                     className="w-full bg-theme-accent hover:bg-theme-accent-strong text-white font-semibold px-4 rounded-lg text-sm transition-all cursor-pointer flex items-center justify-center gap-2 h-9 shadow-card">
-                     <RefreshCw className="w-4 h-4" /> Compile Report
-                   </button>
-                 </div>
-               </div>
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mt-6 p-5 bg-theme-inset rounded-xl border border-theme-border">
+                <div className="space-y-1.5">
+                  <label className="text-2xs font-semibold uppercase tracking-wider text-theme-secondary font-sans">Entity</label>
+                  <select
+                    value={reportEntity}
+                    onChange={e => setReportEntity(e.target.value as any)}
+                    className="w-full bg-theme-card text-theme-primary rounded-lg border border-theme-border px-3 text-sm font-medium focus:border-theme-accent focus:outline-none h-9"
+                  >
+                    <option value="deal">Deals</option>
+                    <option value="contact">Contacts</option>
+                    <option value="task">Tasks</option>
+                  </select>
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-2xs font-semibold uppercase tracking-wider text-theme-secondary font-sans">Group By</label>
+                  <select
+                    value={reportGrouping}
+                    onChange={e => setReportGrouping(e.target.value)}
+                    className="w-full bg-theme-card text-theme-primary rounded-lg border border-theme-border px-3 text-sm font-medium focus:border-theme-accent focus:outline-none h-9"
+                  >
+                    <option value="owner_id">Owner</option>
+                    {reportEntity === 'deal' && <option value="stage_id">Stage</option>}
+                    {(reportEntity === 'deal' || reportEntity === 'contact') && <option value="account_id">Account</option>}
+                    {reportEntity === 'task' && <option value="type">Task Type</option>}
+                  </select>
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-2xs font-semibold uppercase tracking-wider text-theme-secondary font-sans">Metric</label>
+                  <select
+                    value={reportMetric}
+                    onChange={e => setReportMetric(e.target.value as any)}
+                    className="w-full bg-theme-card text-theme-primary rounded-lg border border-theme-border px-3 text-sm font-medium focus:border-theme-accent focus:outline-none h-9"
+                  >
+                    <option value="count">Count</option>
+                    {reportEntity === 'deal' && <option value="sum_value">Total Value ($)</option>}
+                  </select>
+                </div>
+                <div className="flex items-end">
+                  <button
+                    onClick={handleGenerateReport}
+                    disabled={loading.customReport}
+                    className="w-full bg-theme-accent hover:bg-theme-accent-strong text-white font-semibold px-4 rounded-lg text-sm transition-all cursor-pointer flex items-center justify-center gap-2 h-9 shadow-card disabled:opacity-60 disabled:cursor-not-allowed"
+                  >
+                    {loading.customReport ? (
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                    ) : (
+                      <RefreshCw className="w-4 h-4" />
+                    )}{' '}
+                    Compile Report
+                  </button>
+                </div>
+              </div>
             </div>
 
             {reportGenerated && (
               <div className="bg-theme-card rounded-xl shadow-card border border-theme-border p-5 space-y-4">
                 <div className="flex justify-between items-center">
-                   <h4 className="text-sm font-semibold font-sans tracking-tight text-theme-primary">Report Output</h4>
-                  <button onClick={handleExportCsv} className="flex items-center gap-1.5 text-sm font-bold text-theme-accent hover:opacity-80 cursor-pointer">
+                  <h4 className="text-sm font-semibold font-sans tracking-tight text-theme-primary">Report Output</h4>
+                  <button
+                    onClick={handleExportCsv}
+                    disabled={!reportResult || reportResult.rows.length === 0}
+                    className="flex items-center gap-1.5 text-sm font-bold text-theme-accent hover:opacity-80 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+                  >
                     <FileDown className="w-4 h-4" /> Export CSV
                   </button>
                 </div>
-                 <div className="overflow-x-auto rounded-lg border border-theme-border">
-                  <table className="w-full text-left text-sm divide-y divide-theme-border">
-                     <thead className="bg-theme-inset font-semibold text-theme-secondary uppercase font-sans text-2xs tracking-wider">
-                      <tr>
-                        <th className="px-5 py-3">Group</th>
-                        <th className="px-5 py-3 text-right">Count</th>
-                        {reportEntity === 'deal' && reportMetric === 'sum_value' && <th className="px-5 py-3 text-right">Total Value</th>}
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-theme-border">
-                      {reportResult.length === 0 ? (
-                        <tr><td colSpan={3} className="px-5 py-10 text-center text-theme-secondary font-medium">No matching records</td></tr>
-                      ) : reportResult.map((row, idx) => (
-                        <tr key={idx} className="hover:bg-theme-hover/50 transition-colors">
-                          <td className="px-5 py-3 font-bold text-theme-primary">{row.groupName}</td>
-                          <td className="px-5 py-3 text-right font-semibold">{row.count}</td>
+
+                {loading.customReport ? (
+                  <div className="py-8 space-y-3">
+                    <Skeleton className="h-8 w-full" />
+                    <Skeleton className="h-8 w-full" />
+                    <Skeleton className="h-8 w-full" />
+                    <Skeleton className="h-8 w-full" />
+                  </div>
+                ) : errors.customReport ? (
+                  <ErrorBlock message={errors.customReport} onRetry={handleGenerateReport} />
+                ) : reportResult && reportResult.rows.length > 0 ? (
+                  <div className="overflow-x-auto rounded-lg border border-theme-border">
+                    <table className="w-full text-left text-sm divide-y divide-theme-border">
+                      <thead className="bg-theme-inset font-semibold text-theme-secondary uppercase font-sans text-2xs tracking-wider">
+                        <tr>
+                          <th className="px-5 py-3">Group</th>
+                          <th className="px-5 py-3 text-right">Count</th>
                           {reportEntity === 'deal' && reportMetric === 'sum_value' && (
-                             <td className="px-5 py-3 text-right font-semibold tnum text-theme-accent">${row.value.toLocaleString()}</td>
+                            <th className="px-5 py-3 text-right">Total Value</th>
                           )}
                         </tr>
+                      </thead>
+                      <tbody className="divide-y divide-theme-border">
+                        {reportResult.rows.map((row: any, idx: number) => {
+                          const groupLabel = String(
+                            row.groupName ?? row.group_name ?? row.label ?? `Row ${idx + 1}`,
+                          );
+                          const count = Number(row.count ?? 0);
+                          const value = Number(row.value ?? row.total_value ?? 0);
+                          return (
+                            <tr key={idx} className="hover:bg-theme-hover/50 transition-colors">
+                              <td className="px-5 py-3 font-bold text-theme-primary">{groupLabel}</td>
+                              <td className="px-5 py-3 text-right font-semibold">{count}</td>
+                              {reportEntity === 'deal' && reportMetric === 'sum_value' && (
+                                <td className="px-5 py-3 text-right font-semibold tnum text-theme-accent">
+                                  ${value.toLocaleString()}
+                                </td>
+                              )}
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                ) : (
+                  <div className="text-center py-10">
+                    <p className="text-xs text-theme-secondary font-medium">No matching records found.</p>
+                  </div>
+                )}
+
+                {/* Summary row from API */}
+                {reportResult?.summary && Object.keys(reportResult.summary).length > 0 && (
+                  <div className="mt-4 p-4 bg-theme-inset rounded-lg border border-theme-border">
+                    <h5 className="text-2xs font-semibold uppercase tracking-wider text-theme-secondary mb-2">Summary</h5>
+                    <div className="flex flex-wrap gap-3">
+                      {Object.entries(reportResult.summary).map(([key, val]) => (
+                        <span key={key} className="text-xs font-semibold bg-theme-card text-theme-primary px-3 py-1.5 rounded-md border border-theme-border">
+                          {key}: {typeof val === 'number' ? (val as number).toLocaleString() : String(val)}
+                        </span>
                       ))}
-                    </tbody>
-                  </table>
-                </div>
+                    </div>
+                  </div>
+                )}
               </div>
             )}
           </div>
         )}
-
       </div>
     </div>
   );

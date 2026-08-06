@@ -143,18 +143,6 @@ export function registerAdminRoutes(
     res.json({ auditLogs: paged, total, page: query.page, limit: query.limit });
   }));
 
-  // ─── Pipelines & Stages ─────────────────────────────
-
-  app.get('/api/pipelines', authenticate(config), asyncHandler(async (_req, res) => {
-    const pipelines = await repository.listPipelines();
-    res.json({ pipelines });
-  }));
-
-  app.get('/api/stages', authenticate(config), asyncHandler(async (_req, res) => {
-    const stages = await repository.listStages();
-    res.json({ stages });
-  }));
-
   // ─── SES Domain Configuration ─────────────────────
 
   // Get SES configuration status

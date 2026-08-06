@@ -13,6 +13,7 @@ import {
 } from 'lucide-react';
 import { ApiError, apiClient } from '../apiClient';
 import { runtimeConfig } from '../runtimeConfig';
+import { useCRM } from '../store';
 import { Button, Input } from './ui';
 
 interface LoginPageProps { onLoginSuccess: () => void; }
@@ -20,6 +21,7 @@ type PageMode = 'landing' | 'login' | 'mfa' | 'forgot' | 'reset' | 'signup';
 interface OidcProvider { id: string; name: string; }
 
 export default function LoginPage({ onLoginSuccess }: LoginPageProps) {
+  const { getOidcProviders } = useCRM();
   const [mode, setMode] = useState<PageMode>('landing');
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [email, setEmail] = useState('');
@@ -52,9 +54,8 @@ export default function LoginPage({ onLoginSuccess }: LoginPageProps) {
   }, []);
 
   useEffect(() => {
-    fetch(`${runtimeConfig.apiUrl}/api/auth/oidc/providers`)
-      .then(r => r.json()).then(d => setOidcProviders(d.providers || [])).catch(() => {});
-  }, []);
+    getOidcProviders().then(providers => setOidcProviders(providers)).catch(() => {});
+  }, [getOidcProviders]);
 
   const resetToLanding = () => { setMode('landing'); setError(null); setSuccessMsg(null); };
 

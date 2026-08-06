@@ -3,6 +3,13 @@ import { z } from 'zod';
 
 dotenv.config();
 
+// Zod 4 compat: coerce.boolean() treats "false" string as truthy.
+// Wrap with preprocess to handle string bools correctly.
+const boolString = z.preprocess(
+  (v) => (v === 'false' || v === '0' || v === 0 ? false : v === 'true' || v === '1' || v === 1 ? true : v),
+  z.boolean(),
+);
+
 const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
   PORT: z.coerce.number().int().positive().default(8080),
@@ -11,8 +18,8 @@ const envSchema = z.object({
   JWT_SECRET: z.string().min(32).default('development-only-secret-change-before-prod'),
   PASSWORD_PEPPER: z.string().min(16).default('development-password-pepper'),
   DATABASE_URL: z.string().optional(),
-  DATABASE_SSL: z.coerce.boolean().default(true),
-  DATABASE_SSL_REJECT_UNAUTHORIZED: z.coerce.boolean().default(true),
+  DATABASE_SSL: boolString.default(true),
+  DATABASE_SSL_REJECT_UNAUTHORIZED: boolString.default(true),
   ALLOWED_ORIGINS: z.string().default('http://localhost:3000,http://localhost:3001,http://localhost:3002'),
   DEMO_LOGIN_ENABLED: z.coerce.boolean().default(true),
   DEMO_PASSWORD: z.string().min(8).default('ChangeMe123!'),
