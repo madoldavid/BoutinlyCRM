@@ -52,13 +52,20 @@ function SplashScreen() {
   );
 }
 
-function OfflineBanner({ error }: { error: string }) {
+function OfflineBanner({ error, onRetry, retrying }: { error: string; onRetry: () => void; retrying: boolean }) {
   return (
     <div className="bg-warning-soft border-b border-warning/20 px-4 py-2 flex items-center gap-2" role="status">
       <WifiOff className="w-3.5 h-3.5 text-warning shrink-0" />
-      <p className="text-[11px] text-warning font-sans">
-        {error} Some features may be limited.
+      <p className="text-[11px] text-warning font-sans flex-1">
+        {error}
       </p>
+      <button
+        onClick={onRetry}
+        disabled={retrying}
+        className="shrink-0 text-[11px] font-semibold text-warning underline hover:no-underline disabled:opacity-50 bg-transparent border-none cursor-pointer px-1 py-0.5"
+      >
+        {retrying ? 'Retrying…' : 'Retry'}
+      </button>
     </div>
   );
 }
@@ -136,7 +143,7 @@ function UserMenu({ currentUser, logout, setActiveModule }: {
 }
 
 function DashboardLayout() {
-  const { activeModule, setActiveModule, currentUser, logout, apiError } = useCRM();
+  const { activeModule, setActiveModule, currentUser, logout, apiError, retryBootstrap, initialLoading } = useCRM();
   const [mobileSidebarOpen, setMobileSidebarOpen] = React.useState(false);
   const [moduleSwitcherOpen, setModuleSwitcherOpen] = useState(false);
   const emailModuleEnabled = useFeatureFlag('email_module');
@@ -237,7 +244,7 @@ function DashboardLayout() {
       <div id="main-content" className="flex-1 flex flex-col overflow-hidden h-full" role="main">
 
         {/* Offline/Error Banner */}
-        {apiError && <OfflineBanner error={apiError} />}
+        {apiError && <OfflineBanner error={apiError} onRetry={retryBootstrap} retrying={initialLoading} />}
 
         {/* Workspace Header — slim utility bar */}
         <header className="shrink-0 bg-theme-card border-b border-theme-border select-none">

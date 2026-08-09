@@ -52,6 +52,7 @@ interface CRMContextType {
   isAuthenticated: boolean;
   initialLoading: boolean;
   apiError: string | null;
+  retryBootstrap: () => void;
   featureFlags: Array<{ key: string; enabled: boolean }>;
   login: (email: string, password: string) => Promise<MfaRequiredResponse | void>;
 
@@ -256,113 +257,26 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [adminFlags, setAdminFlags] = useState<Array<{ key: string; description: string; defaultEnabled: boolean; enabled: boolean; source: string; overridden: boolean }>>([]);
   const [featureFlags, setFeatureFlags] = useState<Array<{ key: string; enabled: boolean }>>([]);
 
-  // ─── Bootstrap from API ────────────────────────────
-
-  useEffect(() => {
-    if (!isAuthenticated) return;
-
-    let cancelled = false;
-
-    async function bootstrap() {
-      try {
-        setInitialLoading(true);
-        setApiError(null);
-
-        // Refresh current user from server
-        const me = await apiClient.getMe();
-        if (cancelled) return;
-
-        userStoreSet(JSON.stringify(me));
-        setCurrentUserState(me);
-
-        // Load full CRM snapshot
-        const snapshot = await apiClient.bootstrapCrm();
-        if (cancelled) return;
-
-        // Replace all state with server data (always sync, even if empty)
-        setUsers(snapshot.users);
-        setAccounts(snapshot.accounts);
-        setContacts(snapshot.contacts);
-        if (snapshot.pipelines.length > 0) setPipelines(snapshot.pipelines);
-        if (snapshot.stages.length > 0) setStages(snapshot.stages);
-        // Auto-select the default pipeline on first bootstrap
-        if (snapshot.pipelines.length > 0 && !initialPipelineSelectedRef.current) {
-          const defaultPipeline = snapshot.pipelines.find(p => p.is_default) || snapshot.pipelines[0];
-          setActivePipelineId(defaultPipeline.id);
-          initialPipelineSelectedRef.current = true;
-        }
-        setDeals(snapshot.deals);
-        setTasks(snapshot.tasks);
-        setActivities(snapshot.activities);
-        setNotifications(snapshot.notifications);
-        setCustomFields(snapshot.customFields);
-        setEmailTemplates(snapshot.emailTemplates);
-        setEmailCampaigns(snapshot.emailCampaigns);
-        setAuditLogs(snapshot.auditLogs);
-
-        // Fetch feature flags (separate endpoint)
-        try {
-          const flags = await apiClient.getFlags();
-          if (!cancelled) setFeatureFlags(flags.map(f => ({ key: f.key, enabled: f.enabled })));
-        } catch { /* flags optional — keep defaults */ }
-
-        // Fetch admin flags at startup
-        try {
-          const af = await apiClient.getAdminFlags();
-          if (!cancelled) setAdminFlags(af);
-        } catch { /* admin flags optional */ }
-
-        // Fetch file list so shared context is populated
-        try {
-          const fl = await apiClient.listFiles();
-          if (!cancelled) setFiles(fl as FileRecord[]);
-        } catch { /* files optional */ }
-
-        // Update localStorage as cache
-        persistToLocalStorage(snapshot);
-      } catch (err) {
-        if (cancelled) return;
-        // Auth error — user no longer exists (e.g. server restarted in dev mode)
-        // Force logout so the user can re-authenticate cleanly
-        if (err instanceof ApiError && (err.code === 'user_not_found' || err.status === 404)) {
-          logout();
-          return;
-        }
-        console.error('Bootstrap failed, using localStorage fallback:', err);
-        // Keep localStorage/initial data as fallback
-        if (err instanceof ApiError) {
-          setApiError(err.message);
-        } else {
-          setApiError('Failed to connect to API server. Using offline data.');
-        }
-        // Offline fallback: auto-select the default pipeline so the board renders
-        if (pipelinesRef.current.length > 0 && !initialPipelineSelectedRef.current) {
-          const defaultPipeline = pipelinesRef.current.find(p => p.is_default) || pipelinesRef.current[0];
-          setActivePipelineId(defaultPipeline.id);
-          initialPipelineSelectedRef.current = true;
-        }
-      } finally {
-        if (!cancelled) setInitialLoading(false);
-      }
-    }
-
-    bootstrap();
-    return () => { cancelled = true; };
-  }, [isAuthenticated]);
-
-  function persistToLocalStorage(snapshot: Awaited<ReturnType<typeof apiClient.bootstrapCrm>>) {
+  function persistToLocalStorage(
+    snapshot: Awaited<ReturnType<typeof apiClient.bootstrapCrm>>,
+    failed: Set<string> = new Set(),
+  ) {
     const set = safeSetItem;
-    set(LOCAL_STORAGE_KEY_PREFIX + 'users', JSON.stringify(snapshot.users));
-    set(LOCAL_STORAGE_KEY_PREFIX + 'accounts', JSON.stringify(snapshot.accounts));
-    set(LOCAL_STORAGE_KEY_PREFIX + 'contacts', JSON.stringify(snapshot.contacts));
-    set(LOCAL_STORAGE_KEY_PREFIX + 'deals', JSON.stringify(snapshot.deals));
-    set(LOCAL_STORAGE_KEY_PREFIX + 'tasks', JSON.stringify(snapshot.tasks));
-    set(LOCAL_STORAGE_KEY_PREFIX + 'activities', JSON.stringify(snapshot.activities));
-    set(LOCAL_STORAGE_KEY_PREFIX + 'notifications', JSON.stringify(snapshot.notifications));
-    set(LOCAL_STORAGE_KEY_PREFIX + 'custom_fields', JSON.stringify(snapshot.customFields));
-    set(LOCAL_STORAGE_KEY_PREFIX + 'email_templates', JSON.stringify(snapshot.emailTemplates));
-    set(LOCAL_STORAGE_KEY_PREFIX + 'email_campaigns', JSON.stringify(snapshot.emailCampaigns));
-    set(LOCAL_STORAGE_KEY_PREFIX + 'audit_logs', JSON.stringify(snapshot.auditLogs));
+    const write = (key: string, resourceKey: string, value: unknown) => {
+      if (failed.has(resourceKey)) return; // don't cache data that failed to load — keep prior cache
+      set(LOCAL_STORAGE_KEY_PREFIX + key, JSON.stringify(value));
+    };
+    write('users', 'users', snapshot.users);
+    write('accounts', 'accounts', snapshot.accounts);
+    write('contacts', 'contacts', snapshot.contacts);
+    write('deals', 'deals', snapshot.deals);
+    write('tasks', 'tasks', snapshot.tasks);
+    write('activities', 'activities', snapshot.activities);
+    write('notifications', 'notifications', snapshot.notifications);
+    write('custom_fields', 'customFields', snapshot.customFields);
+    write('email_templates', 'emailTemplates', snapshot.emailTemplates);
+    write('email_campaigns', 'emailCampaigns', snapshot.emailCampaigns);
+    write('audit_logs', 'auditLogs', snapshot.auditLogs);
   }
 
   // ─── Theme ─────────────────────────────────────────
@@ -440,6 +354,124 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setFeatureFlags([]);
     setIsAuthenticated(false);
   }, []);
+
+  // ─── Bootstrap from API ────────────────────────────
+
+  // Human-readable labels for failedResources keys, used to build a specific banner message.
+  const RESOURCE_LABELS: Record<string, string> = {
+    users: 'team members', accounts: 'accounts', contacts: 'contacts', pipelines: 'pipelines',
+    stages: 'stages', deals: 'deals', tasks: 'tasks', activities: 'activities',
+    notifications: 'notifications', customFields: 'custom fields', emailTemplates: 'email templates',
+    emailCampaigns: 'email campaigns', auditLogs: 'audit logs',
+  };
+
+  const runBootstrap = useCallback(async (cancelledRef: { current: boolean }) => {
+    try {
+      setInitialLoading(true);
+      setApiError(null);
+
+      // Refresh current user from server
+      const me = await apiClient.getMe();
+      if (cancelledRef.current) return;
+
+      userStoreSet(JSON.stringify(me));
+      setCurrentUserState(me);
+
+      // Load full CRM snapshot. Individual resources fail independently
+      // (see bootstrapCrm) so a single bad endpoint can't wipe live data.
+      const snapshot = await apiClient.bootstrapCrm();
+      if (cancelledRef.current) return;
+
+      const failed = new Set(snapshot.failedResources);
+
+      // Only replace state for resources that loaded successfully — a
+      // resource that failed keeps whatever was already in the store
+      // (localStorage cache or prior live data) instead of being blanked.
+      if (!failed.has('users')) setUsers(snapshot.users);
+      if (!failed.has('accounts')) setAccounts(snapshot.accounts);
+      if (!failed.has('contacts')) setContacts(snapshot.contacts);
+      if (!failed.has('pipelines') && snapshot.pipelines.length > 0) setPipelines(snapshot.pipelines);
+      if (!failed.has('stages') && snapshot.stages.length > 0) setStages(snapshot.stages);
+      // Auto-select the default pipeline on first successful bootstrap
+      if (!failed.has('pipelines') && snapshot.pipelines.length > 0 && !initialPipelineSelectedRef.current) {
+        const defaultPipeline = snapshot.pipelines.find(p => p.is_default) || snapshot.pipelines[0];
+        setActivePipelineId(defaultPipeline.id);
+        initialPipelineSelectedRef.current = true;
+      }
+      if (!failed.has('deals')) setDeals(snapshot.deals);
+      if (!failed.has('tasks')) setTasks(snapshot.tasks);
+      if (!failed.has('activities')) setActivities(snapshot.activities);
+      if (!failed.has('notifications')) setNotifications(snapshot.notifications);
+      if (!failed.has('customFields')) setCustomFields(snapshot.customFields);
+      if (!failed.has('emailTemplates')) setEmailTemplates(snapshot.emailTemplates);
+      if (!failed.has('emailCampaigns')) setEmailCampaigns(snapshot.emailCampaigns);
+      if (!failed.has('auditLogs')) setAuditLogs(snapshot.auditLogs);
+
+      if (failed.size > 0) {
+        const names = [...failed].map(k => RESOURCE_LABELS[k] || k).join(', ');
+        setApiError(`Couldn't load ${names} from the server — showing cached data for these. Retry to sync.`);
+        console.error('bootstrapCrm: partial failure for', [...failed]);
+      }
+
+      // Fetch feature flags (separate endpoint)
+      try {
+        const flags = await apiClient.getFlags();
+        if (!cancelledRef.current) setFeatureFlags(flags.map(f => ({ key: f.key, enabled: f.enabled })));
+      } catch { /* flags optional — keep defaults */ }
+
+      // Fetch admin flags at startup
+      try {
+        const af = await apiClient.getAdminFlags();
+        if (!cancelledRef.current) setAdminFlags(af);
+      } catch { /* admin flags optional */ }
+
+      // Fetch file list so shared context is populated
+      try {
+        const fl = await apiClient.listFiles();
+        if (!cancelledRef.current) setFiles(fl as FileRecord[]);
+      } catch { /* files optional */ }
+
+      // Update localStorage as cache (only for resources that actually loaded)
+      persistToLocalStorage(snapshot, failed);
+    } catch (err) {
+      if (cancelledRef.current) return;
+      // Auth error — user no longer exists (e.g. server restarted in dev mode)
+      // Force logout so the user can re-authenticate cleanly
+      if (err instanceof ApiError && (err.code === 'user_not_found' || err.status === 404)) {
+        logout();
+        return;
+      }
+      console.error('Bootstrap failed, using localStorage fallback:', err);
+      // Keep localStorage/initial data as fallback
+      if (err instanceof ApiError) {
+        setApiError(err.message);
+      } else {
+        setApiError('Failed to connect to API server. Using offline data.');
+      }
+      // Offline fallback: auto-select the default pipeline so the board renders
+      if (pipelinesRef.current.length > 0 && !initialPipelineSelectedRef.current) {
+        const defaultPipeline = pipelinesRef.current.find(p => p.is_default) || pipelinesRef.current[0];
+        setActivePipelineId(defaultPipeline.id);
+        initialPipelineSelectedRef.current = true;
+      }
+    } finally {
+      if (!cancelledRef.current) setInitialLoading(false);
+    }
+  }, [logout]);
+
+  /** Re-runs the bootstrap sync on demand (e.g. "Retry" on the offline/error banner). */
+  const retryBootstrap = useCallback(() => {
+    if (!isAuthenticated) return;
+    const cancelledRef = { current: false };
+    runBootstrap(cancelledRef);
+  }, [isAuthenticated, runBootstrap]);
+
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    const cancelledRef = { current: false };
+    runBootstrap(cancelledRef);
+    return () => { cancelledRef.current = true; };
+  }, [isAuthenticated, runBootstrap]);
 
   // ─── OIDC Providers ─────────────────────────────────
 
@@ -1223,6 +1255,7 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     isAuthenticated,
     initialLoading,
     apiError,
+    retryBootstrap,
     featureFlags,
     login,
     getOidcProviders,

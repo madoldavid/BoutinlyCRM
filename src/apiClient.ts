@@ -39,6 +39,8 @@ export interface CrmBootstrapResponse {
   emailTemplates: EmailTemplate[];
   emailCampaigns: EmailCampaign[];
   auditLogs: AuditLog[];
+  /** Resource keys that failed to load during bootstrap (partial-failure support). Empty on a clean sync. */
+  failedResources: string[];
 }
 
 export interface LoginResponse {
@@ -289,52 +291,70 @@ export class ApiClient {
 
   // ─── Bootstrap ─────────────────────────────────────
 
-  async bootstrapCrm(): Promise<CrmBootstrapResponse> {
-    const [
-      users,
-      accountsRes,
-      contactsRes,
-      pipelines,
-      stages,
-      dealsRes,
-      tasksRes,
-      activitiesRes,
-      notifications,
-      customFields,
-      emailTemplates,
-      emailCampaigns,
-      auditLogsRes,
-    ] = await Promise.all([
-      this.listUsers(),
-      this.listAccounts({ limit: 10000 }),
-      this.listContacts({ limit: 10000 }),
-      this.listPipelines(),
-      this.listStages(),
-      this.listDeals({ limit: 10000 }),
-      this.listTasks({ limit: 10000 }),
-      this.listActivities({ limit: 10000 }),
-      this.listNotifications(),
-      this.listCustomFields(),
-      this.listEmailTemplates(),
-      this.listEmailCampaigns(),
-      this.listAuditLogs({ limit: 10000 }),
-    ]);
+  /**
+   * Fetches every page of a paginated list endpoint and concatenates the
+   * results. The server caps `limit` at 100 (see paginationSchema), so this
+   * pages through with limit=100 instead of ever sending a single oversized
+   * request. Bounded at 500 pages (50k records) as a sanity ceiling.
+   */
+  private async fetchAllPages<T>(
+    listFn: (params: { page: number; limit: number }) => Promise<PaginatedResponse<T>>,
+    pageSize = 100,
+    maxPages = 500,
+  ): Promise<T[]> {
+    const first = await listFn({ page: 1, limit: pageSize });
+    const all = [...first.data];
+    let page = 1;
+    while (all.length < first.total && first.data.length === pageSize && page < maxPages) {
+      page += 1;
+      const next = await listFn({ page, limit: pageSize });
+      if (next.data.length === 0) break;
+      all.push(...next.data);
+    }
+    return all;
+  }
 
-    return {
-      users,
-      accounts: accountsRes.data,
-      contacts: contactsRes.data,
-      pipelines,
-      stages,
-      deals: dealsRes.data,
-      tasks: tasksRes.data,
-      activities: activitiesRes.data,
-      notifications,
-      customFields,
-      emailTemplates,
-      emailCampaigns,
-      auditLogs: auditLogsRes.data,
-    };
+  /**
+   * Loads the full CRM snapshot used to populate the store on login/refresh.
+   * Each resource is fetched independently (Promise.allSettled) so a single
+   * failing resource doesn't take down the whole bootstrap — callers get
+   * whatever loaded successfully plus a `failedResources` list to surface a
+   * targeted error instead of discarding everything to a stale local cache.
+   */
+  async bootstrapCrm(): Promise<CrmBootstrapResponse> {
+    const jobs = {
+      users: () => this.listUsers(),
+      accounts: () => this.fetchAllPages(p => this.listAccounts(p)),
+      contacts: () => this.fetchAllPages(p => this.listContacts(p)),
+      pipelines: () => this.listPipelines(),
+      stages: () => this.listStages(),
+      deals: () => this.fetchAllPages(p => this.listDeals(p)),
+      tasks: () => this.fetchAllPages(p => this.listTasks(p)),
+      activities: () => this.fetchAllPages(p => this.listActivities(p)),
+      notifications: () => this.listNotifications(),
+      customFields: () => this.listCustomFields(),
+      emailTemplates: () => this.listEmailTemplates(),
+      emailCampaigns: () => this.listEmailCampaigns(),
+      auditLogs: () => this.fetchAllPages(p => this.listAuditLogs(p)),
+    } as const;
+
+    const keys = Object.keys(jobs) as Array<keyof typeof jobs>;
+    const settled = await Promise.allSettled(keys.map(k => jobs[k]()));
+
+    const failedResources: string[] = [];
+    const result = {} as Record<keyof typeof jobs, unknown>;
+    settled.forEach((outcome, i) => {
+      const key = keys[i];
+      if (outcome.status === 'fulfilled') {
+        result[key] = outcome.value;
+      } else {
+        failedResources.push(key);
+        result[key] = [];
+        console.error(`bootstrapCrm: failed to load "${key}"`, outcome.reason);
+      }
+    });
+
+    return { ...(result as unknown as Omit<CrmBootstrapResponse, 'failedResources'>), failedResources };
   }
 
   // ─── Contacts ──────────────────────────────────────

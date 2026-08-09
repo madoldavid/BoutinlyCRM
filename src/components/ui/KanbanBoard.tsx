@@ -32,6 +32,8 @@ export interface KanbanCard {
   currency?: string;
   owner?: string;
   closeDate?: string;
+  /** True when the card sits in a closed (won/lost) column — suppresses due/overdue urgency styling. */
+  isClosed?: boolean;
   /** Arbitrary data passed back on move */
   meta?: Record<string, unknown>;
 }

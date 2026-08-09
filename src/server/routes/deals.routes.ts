@@ -184,6 +184,20 @@ export function registerDealsRoutes(
       user_agent: String(req.get('user-agent') || ''),
     });
 
+    // Record on the deal's activity timeline so closing a deal shows up
+    // alongside calls/emails/notes (previously only move-stage did this).
+    await repository.addActivity({
+      type: 'deal_closed',
+      title: body.outcome === 'won' ? 'Deal Won' : 'Deal Lost',
+      body: body.outcome === 'won'
+        ? `Deal closed as Won at $${deal.value.toLocaleString()}.`
+        : `Deal closed as Lost.${body.reason ? ` Reason: ${body.reason}` : ''}`,
+      user_id: req.principal.userId,
+      deal_id: deal.id,
+      outcome: body.outcome,
+      metadata: { outcome: body.outcome, reason: body.reason },
+    });
+
     res.json({ deal });
   }));
 }

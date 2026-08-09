@@ -654,10 +654,14 @@ export default function PipelineModule() {
             <FieldRow label="Account" value={dealAccount?.name || '—'} />
             <FieldRow label="Stage" value={dealStage?.name} />
             <FieldRow label="Probability" value={`${dealScore?.score ?? dealStage?.probability ?? 0}%`} />
-            <FieldRow label="Expected Close" value={
-              <span className={new Date(deal.close_date) < new Date() ? 'text-danger' : ''}>
+            <FieldRow label={dealStage?.type !== 'open' ? 'Closed On' : 'Expected Close'} value={
+              <span className={dealStage?.type === 'open' && new Date(deal.close_date) < new Date() ? 'text-danger' : ''}>
                 {new Date(deal.close_date).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })}
-                <span className="block text-2xs text-theme-secondary">{relativeDueLabel(deal.close_date, currentUser?.timezone).text}</span>
+                <span className="block text-2xs text-theme-secondary">
+                  {dealStage?.type !== 'open'
+                    ? (dealStage?.type === 'won' ? 'Won' : 'Lost')
+                    : relativeDueLabel(deal.close_date, currentUser?.timezone).text}
+                </span>
               </span>
             } />
             <FieldRow label="Owner" value={dealOwner?.name || 'Unassigned'} />
@@ -803,6 +807,7 @@ export default function PipelineModule() {
                   currency: deal.currency,
                   owner: users.find(u => u.id === deal.owner_id)?.name || '',
                   closeDate: deal.close_date,
+                  isClosed: stg.type !== 'open',
                   meta: { deal },
                 })),
               };
@@ -850,7 +855,11 @@ export default function PipelineModule() {
                         )}
                         {card.closeDate && (
                           (() => {
-                            const rel = relativeDueLabel(card.closeDate, currentUser?.timezone);
+                            // Closed (won/lost) deals aren't "due" anymore — show a plain
+                            // date, never the overdue/soon urgency styling.
+                            const rel = card.isClosed
+                              ? { tone: 'normal' as const, text: new Date(card.closeDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) }
+                              : relativeDueLabel(card.closeDate, currentUser?.timezone);
                             return (
                               <span
                                 className={`flex items-center gap-0.5 ${
@@ -866,7 +875,7 @@ export default function PipelineModule() {
                             );
                           })()
                         )}
-                        {(hasStagnation || hasOverdueStep) && (
+                        {!card.isClosed && (hasStagnation || hasOverdueStep) && (
                           <span className="ml-auto flex items-center gap-0.5 text-warning font-medium" title={hasStagnation ? 'Stalled in stage — see score breakdown' : 'Overdue next step — see score breakdown'}>
                             <AlertTriangle className="w-2.5 h-2.5" />
                             {hasStagnation ? 'stalled' : 'step overdue'}
@@ -1188,10 +1197,13 @@ export default function PipelineModule() {
                   </span>
                 </div>
                 <div>
-                  <span className="text-theme-secondary/80 block font-sans text-[9px] uppercase tracking-wider font-semibold">Expected Close</span>
+                  <span className="text-theme-secondary/80 block font-sans text-[9px] uppercase tracking-wider font-semibold">
+                    {stages.find(s => s.id === activeDeal.stage_id)?.type !== 'open' ? 'Closed On' : 'Expected Close'}
+                  </span>
                   <span
                     className={`text-xs font-bold block mt-1 ${
                       (() => {
+                        if (stages.find(s => s.id === activeDeal.stage_id)?.type !== 'open') return 'text-theme-primary';
                         const rel = relativeDueLabel(activeDeal.close_date, currentUser?.timezone);
                         return rel.tone === 'overdue' ? 'text-danger' : rel.tone === 'soon' ? 'text-warning' : 'text-theme-primary';
                       })()
@@ -1200,7 +1212,9 @@ export default function PipelineModule() {
                   >
                     {new Date(activeDeal.close_date).toLocaleDateString()}
                     <span className="block text-[9px] font-medium text-theme-secondary normal-case">
-                      {relativeDueLabel(activeDeal.close_date, currentUser?.timezone).text}
+                      {stages.find(s => s.id === activeDeal.stage_id)?.type !== 'open'
+                        ? (stages.find(s => s.id === activeDeal.stage_id)?.type === 'won' ? 'Won' : 'Lost')
+                        : relativeDueLabel(activeDeal.close_date, currentUser?.timezone).text}
                     </span>
                   </span>
                 </div>
