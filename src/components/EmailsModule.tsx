@@ -157,6 +157,20 @@ export default function EmailsModule() {
     return () => window.removeEventListener(NEW_RECORD_EVENT, onNewRecord);
   }, [activeSubView]);
 
+  // Escape-to-close for the two custom `fixed inset-0` overlays (create
+  // template + create campaign), matching the documented global
+  // "Esc — Close dialogs & overlays" behavior.
+  useEffect(() => {
+    if (!showCreateTemplate && !showCreateCampaign) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      if (showCreateTemplate) { setShowCreateTemplate(false); return; }
+      if (showCreateCampaign) { setShowCreateCampaign(false); return; }
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [showCreateTemplate, showCreateCampaign]);
+
   // Load template into single compose
   const handleLoadTemplate = (templateId: string) => {
     const template = emailTemplates.find(t => t.id === templateId);

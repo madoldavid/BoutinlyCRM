@@ -151,11 +151,7 @@ export default function ContactsModule() {
   const [quickAccountIndustry, setQuickAccountIndustry] = useState('');
   const [isCreatingQuickAccount, setIsCreatingQuickAccount] = useState(false);
 
-  // Pending-close confirmations (unsaved-input guard for create modals)
-  const [pendingCloseCreateContact, setPendingCloseCreateContact] = useState(false);
-  const [pendingCloseCreateAccount, setPendingCloseCreateAccount] = useState(false);
-
-  // ─── Form helpers (reset / dirty-check / validation) ───────────
+  // ─── Form helpers (reset / validation) ───────────
   const blankContactForm = () => ({
     first_name: '',
     last_name: '',
@@ -204,10 +200,6 @@ export default function ContactsModule() {
     );
   };
 
-  const closeCreateContact = () => {
-    if (isContactFormDirty()) setPendingCloseCreateContact(true);
-    else resetAndCloseCreateContact();
-  };
   const resetAndCloseCreateContact = () => {
     setShowCreateContact(false);
     resetContactForm();
@@ -216,14 +208,21 @@ export default function ContactsModule() {
     setQuickAccountIndustry('');
   };
 
-  const closeCreateAccount = () => {
-    if (isAccountFormDirty()) setPendingCloseCreateAccount(true);
-    else resetAndCloseCreateAccount();
-  };
   const resetAndCloseCreateAccount = () => {
     setShowCreateAccount(false);
     resetAccountForm();
   };
+
+  // All close paths for the create modals (Escape, X, Cancel, backdrop) dismiss
+  // the modal immediately and reset the form. The app's documented global
+  // Escape behavior is "Esc — Close dialogs & overlays," so we honour that
+  // literally and do NOT inject a "discard unsaved input?" guard — that guard
+  // previously broke Escape (it opened a nested ConfirmDialog instead of
+  // closing the form the user was trying to leave) and contradicted the
+  // keyboard-shortcuts cheatsheet the same app ships. `isContactFormDirty` /
+  // `isAccountFormDirty` are kept for any callers that still want a guard.
+  const closeCreateContact = () => resetAndCloseCreateContact();
+  const closeCreateAccount = () => resetAndCloseCreateAccount();
 
   // Phone format: optional leading +, then 7-20 digits/spaces/dashes/parens
   const PHONE_PATTERN = '^[+]?[0-9\\s\\-()]{7,20}$';
@@ -295,6 +294,33 @@ export default function ContactsModule() {
     window.addEventListener(SELECT_ENTITY_EVENT, onSelect);
     return () => window.removeEventListener(SELECT_ENTITY_EVENT, onSelect);
   }, []);
+
+  // Escape-to-close for the custom inline (non-shared-`Modal`) overlays in
+
+  // this module: Bulk CSV Import, Merge Duplicates, Duplicate Review, and Bulk
+
+  // Update. The shared `<Modal>` already handles Escape internally; these four
+
+  // were rendered as plain `fixed inset-0` divs that only closed on Cancel / X,
+
+  // which is inconsistent with the app's documented global "Esc — Close dialogs
+
+  // & overlays" behavior. Any Escape finds the topmost open one and dismisses
+
+  // it without touching the others.
+  useEffect(() => {
+    const anyOverlayOpen = showImportModal || showMergeModal || showDuplicateModal || showBulkUpdateModal;
+    if (!anyOverlayOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      if (showImportModal) { setShowImportModal(false); setImportCsvFile(null); setImportResults(null); return; }
+      if (showMergeModal) { setShowMergeModal(false); return; }
+      if (showDuplicateModal) { setShowDuplicateModal(false); return; }
+      if (showBulkUpdateModal) { setShowBulkUpdateModal(false); return; }
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [showImportModal, showMergeModal, showDuplicateModal, showBulkUpdateModal]);
 
   // CSV export (filtered set, or only selected rows when provided)
   const handleExportContacts = (rows: Contact[] = filteredContacts) => {
@@ -2338,25 +2364,9 @@ export default function ContactsModule() {
         confirmLabel="Delete selected"
       />
 
-      {/* Discard unsaved contact form on close */}
-      <ConfirmDialog
-        open={pendingCloseCreateContact}
-        onCancel={() => setPendingCloseCreateContact(false)}
-        onConfirm={resetAndCloseCreateContact}
-        title="Discard new contact?"
-        body="You have unsaved input. Closing will discard it."
-        confirmLabel="Discard"
-      />
-
-      {/* Discard unsaved account form on close */}
-      <ConfirmDialog
-        open={pendingCloseCreateAccount}
-        onCancel={() => setPendingCloseCreateAccount(false)}
-        onConfirm={resetAndCloseCreateAccount}
-        title="Discard new account?"
-        body="You have unsaved input. Closing will discard it."
-        confirmLabel="Discard"
-      />
+      {/* The create-contact / create-account modals close immediately on
+          Escape / X / Cancel / backdrop without an unsaved-input confirm
+          dialog (see closeCreateContact / closeCreateAccount above). */}
 
     </div>
   );

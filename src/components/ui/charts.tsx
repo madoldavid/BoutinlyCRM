@@ -20,6 +20,11 @@ export interface ChartDatum {
   label: string;
   value: number;
   color?: string;
+  /** Optional stable identifier used as the React key when the label may
+   *  legitimately repeat (e.g. the same stage name across pipelines). Falls
+   *  back to `${label}-${index}` when absent so the chart never renders
+   *  "Encountered two children with the same key" warnings. */
+  id?: string;
 }
 
 function formatValue(v: number, money?: boolean) {
@@ -39,7 +44,7 @@ export function BarChart({ data, money = false, onDrillDown }: { data: ChartDatu
     <div className="space-y-2.5" role="img" aria-label="Bar chart">
       {data.map((d, i) => (
         <div
-          key={d.label}
+          key={d.id ?? `${d.label}-${i}`}
           className={onDrillDown ? 'cursor-pointer hover:opacity-80 transition-opacity' : ''}
           onClick={() => onDrillDown?.(d.label)}
           role={onDrillDown ? 'button' : undefined}
@@ -87,7 +92,7 @@ export function DonutChart({
   let cumulative = 0;
   const segments = data.map((d, i) => {
     const frac = total > 0 ? d.value / total : 0;
-    const seg = { ...d, frac, offset: cumulative, i };
+    const seg = { ...d, id: d.id, frac, offset: cumulative, i };
     cumulative += frac;
     return seg;
   });
@@ -100,7 +105,7 @@ export function DonutChart({
         <circle cx="80" cy="80" r={R} fill="none" stroke="var(--bg-inset)" strokeWidth={STROKE} />
         {segments.map(s => (
           <circle
-            key={s.label}
+            key={s.id ?? `${s.label}-${s.i}`}
             cx="80"
             cy="80"
             r={R}
@@ -143,7 +148,7 @@ export function DonutChart({
       <div className="space-y-1.5 min-w-0">
         {segments.map(s => (
           <div
-            key={s.label}
+            key={s.id ?? `${s.label}-${s.i}`}
             className={`flex items-center gap-2 rounded px-1 -mx-1 transition-colors ${hovered === s.i ? 'bg-theme-hover' : ''} ${onDrillDown ? 'cursor-pointer' : ''}`}
             onMouseEnter={() => setHovered(s.i)}
             onMouseLeave={() => setHovered(null)}
@@ -283,7 +288,7 @@ export function FunnelChart({ data, money = false, onDrillDown }: { data: ChartD
       {data.map((d, i) => {
         const pct = (d.value / max) * 100;
         return (
-          <div key={d.label} className={`flex items-center gap-3 ${onDrillDown ? 'cursor-pointer hover:opacity-85 transition-opacity' : ''}`} onClick={() => onDrillDown?.(d.label)} role={onDrillDown ? 'button' : undefined} tabIndex={onDrillDown ? 0 : undefined} onKeyDown={onDrillDown ? (e) => { if (e.key === 'Enter') onDrillDown(d.label); } : undefined}>
+          <div key={d.id ?? `${d.label}-${i}`} className={`flex items-center gap-3 ${onDrillDown ? 'cursor-pointer hover:opacity-85 transition-opacity' : ''}`} onClick={() => onDrillDown?.(d.label)} role={onDrillDown ? 'button' : undefined} tabIndex={onDrillDown ? 0 : undefined} onKeyDown={onDrillDown ? (e) => { if (e.key === 'Enter') onDrillDown(d.label); } : undefined}>
             <span className="text-2xs text-theme-secondary font-sans w-28 truncate text-right shrink-0">{d.label}</span>
             <div className="flex-1 h-6 bg-theme-inset/60 rounded-md overflow-hidden flex items-center">
               <div

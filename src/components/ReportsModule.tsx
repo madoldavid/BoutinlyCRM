@@ -65,7 +65,12 @@ interface PipelineHealthData {
   totalValue: number;
   weightedValue: number;
   avgProbability: number;
-  stageBreakdown: Array<{ stageName: string; count: number; value: number }>;
+  winRate: number;
+  openDealsCount: number;
+  wonCount: number;
+  lostCount: number;
+  closedCount: number;
+  stageBreakdown: Array<{ stageId: string; stageName: string; count: number; value: number }>;
 }
 
 interface LeaderboardEntry {
@@ -143,8 +148,13 @@ export default function ReportsModule() {
       try {
         const data = await fn();
         setter(data);
-      } catch {
-        setErrors(prev => ({ ...prev, [key]: 'Failed to load. Please try again.' }));
+      } catch (err) {
+        // Surface real request failures (4xx/5xx) so the caller can render an
+        // error state instead of disguising them as an empty result. Logging to
+        // the console is intentional — the user-reported bug masked /api/reports
+        // failures behind generic "no data" copy with no diagnostic trail.
+        console.error(`[Reports] ${key} request failed:`, err);
+        setErrors(prev => ({ ...prev, [key]: err instanceof Error ? err.message : 'Failed to load. Please try again.' }));
         toast.error(`Could not load ${key.replace(/([A-Z])/g, ' $1').toLowerCase()}`);
       } finally {
         setLoading(prev => ({ ...prev, [key]: false }));
@@ -193,12 +203,18 @@ export default function ReportsModule() {
       });
     });
 
-    fetchWithState('pipelineHealth', getPipelineHealth, (ph) => {
+    fetchWithState('pipelineHealth', () => getPipelineHealth({ pipelineId: activePipelineId || undefined }), (ph) => {
       setPipelineHealthData({
         totalValue: ph.total_value ?? 0,
         weightedValue: ph.weighted_value ?? 0,
         avgProbability: ph.avg_probability ?? 0,
+        winRate: ph.win_rate ?? 0,
+        openDealsCount: ph.open_deals_count ?? 0,
+        wonCount: ph.won_count ?? 0,
+        lostCount: ph.lost_count ?? 0,
+        closedCount: ph.closed_count ?? 0,
         stageBreakdown: (ph.stage_breakdown ?? []).map(s => ({
+          stageId: s.stage_id ?? '',
           stageName: s.stage_name ?? 'Unknown',
           count: s.count ?? 0,
           value: s.value ?? 0,
@@ -217,7 +233,7 @@ export default function ReportsModule() {
         })),
       );
     });
-  }, [fetchWithState, getNextBestActions, findDuplicates, getForecast, getPipelineHealth, getLeaderboard, aiFeaturesEnabled]);
+  }, [fetchWithState, getNextBestActions, findDuplicates, getForecast, getPipelineHealth, getLeaderboard, aiFeaturesEnabled, activePipelineId]);
 
   // "+" New button → navigate to Pipeline and trigger deal creation
   useEffect(() => {
@@ -237,12 +253,18 @@ export default function ReportsModule() {
 
   // Reload when pipeline changes
   useEffect(() => {
-    fetchWithState('pipelineHealth', getPipelineHealth, (ph) => {
+    fetchWithState('pipelineHealth', () => getPipelineHealth({ pipelineId: activePipelineId || undefined }), (ph) => {
       setPipelineHealthData({
         totalValue: ph.total_value ?? 0,
         weightedValue: ph.weighted_value ?? 0,
         avgProbability: ph.avg_probability ?? 0,
+        winRate: ph.win_rate ?? 0,
+        openDealsCount: ph.open_deals_count ?? 0,
+        wonCount: ph.won_count ?? 0,
+        lostCount: ph.lost_count ?? 0,
+        closedCount: ph.closed_count ?? 0,
         stageBreakdown: (ph.stage_breakdown ?? []).map(s => ({
+          stageId: s.stage_id ?? '',
           stageName: s.stage_name ?? 'Unknown',
           count: s.count ?? 0,
           value: s.value ?? 0,
@@ -252,19 +274,27 @@ export default function ReportsModule() {
   }, [activePipelineId, fetchWithState, getPipelineHealth]);
 
   // ─── Fetch win/loss data when tab is active ──────────────────────────────
-  useEffect(() => {
-    if (activeSubTab !== 'winloss') return;
+  const loadLostReasons = useCallback(() => {
     fetchWithState(
       'lostReasons',
       () => getCustomReport({ entity: 'deal', grouping: 'lost_reason', metric: 'count', filters: { stage_type: 'lost' } }),
       setLostReasonData,
     );
+  }, [fetchWithState, getCustomReport]);
+
+  const loadCompetitors = useCallback(() => {
     fetchWithState(
       'competitors',
       () => getCustomReport({ entity: 'deal', grouping: 'competitor_name', metric: 'count' }),
       setCompetitorData,
     );
-  }, [activeSubTab, fetchWithState, getCustomReport]);
+  }, [fetchWithState, getCustomReport]);
+
+  useEffect(() => {
+    if (activeSubTab !== 'winloss') return;
+    loadLostReasons();
+    loadCompetitors();
+  }, [activeSubTab, loadLostReasons, loadCompetitors]);
 
   // ─── Retry handler ────────────────────────────────────────────────────────
 
@@ -310,12 +340,18 @@ export default function ReportsModule() {
           });
           break;
         case 'pipelineHealth':
-          fetchWithState('pipelineHealth', getPipelineHealth, (ph) => {
+          fetchWithState('pipelineHealth', () => getPipelineHealth({ pipelineId: activePipelineId || undefined }), (ph) => {
             setPipelineHealthData({
               totalValue: ph.total_value ?? 0,
               weightedValue: ph.weighted_value ?? 0,
               avgProbability: ph.avg_probability ?? 0,
+              winRate: ph.win_rate ?? 0,
+              openDealsCount: ph.open_deals_count ?? 0,
+              wonCount: ph.won_count ?? 0,
+              lostCount: ph.lost_count ?? 0,
+              closedCount: ph.closed_count ?? 0,
               stageBreakdown: (ph.stage_breakdown ?? []).map(s => ({
+                stageId: s.stage_id ?? '',
                 stageName: s.stage_name ?? 'Unknown',
                 count: s.count ?? 0,
                 value: s.value ?? 0,
@@ -336,9 +372,18 @@ export default function ReportsModule() {
             );
           });
           break;
+        // The Win/Loss tab's retry buttons must re-issue the report requests
+        // that failed (otherwise the ErrorBlock's Retry action was silently
+        // no-op'ed because these cases were missing from the switch).
+        case 'lostReasons':
+          loadLostReasons();
+          break;
+        case 'competitors':
+          loadCompetitors();
+          break;
       }
     },
-    [fetchWithState, getNextBestActions, findDuplicates, getForecast, getPipelineHealth, getLeaderboard],
+    [fetchWithState, getNextBestActions, findDuplicates, getForecast, getPipelineHealth, getLeaderboard, loadLostReasons, loadCompetitors, activePipelineId],
   );
 
   // ─── Simple derived UI counts (memoized to avoid recomputation on unrelated renders) ──
@@ -368,13 +413,19 @@ export default function ReportsModule() {
 
   const handleGenerateReport = useCallback(async () => {
     setReportGenerated(true);
+    // Defensive: never send an aggregate the active entity can't compute.
+    // "sum_value" is only valid for deals; collapse to "count" otherwise so
+    // the request parameters always match what is visibly selected in the
+    // dropdowns (the Metric select for non-deal entities only offers Count,
+    // but the underlying state could still hold the stale deals-only value).
+    const effectiveMetric = reportEntity === 'deal' ? reportMetric : 'count';
     await fetchWithState(
       'customReport',
       () =>
         getCustomReport({
           entity: reportEntity,
           grouping: reportGrouping,
-          metric: reportMetric,
+          metric: effectiveMetric,
         }),
       setReportResult,
     );
@@ -454,29 +505,35 @@ export default function ReportsModule() {
   return (
     <div className="flex-1 flex flex-col overflow-hidden bg-theme-base text-theme-primary">
       {/* Module toolbar — segmented view switcher */}
-      <header className="bg-theme-card border-b border-theme-border px-4 sm:px-6 py-3 shrink-0 flex items-center justify-between gap-4">
-        <div className="flex items-center gap-1 bg-theme-inset p-1 rounded-lg border border-theme-border text-xs font-semibold overflow-x-auto scrollbar-none max-w-full">
-          {[
-            { id: 'dash' as const, label: isManagerOrAdmin ? 'Team Dashboard' : 'My Performance', icon: BarChart3 },
-            { id: 'health' as const, label: 'Pipeline Health', icon: GitPullRequest },
-            { id: 'winloss' as const, label: 'Win/Loss', icon: PieChart },
-            { id: 'builder' as const, label: 'Custom Reports', icon: Sparkles },
-          ].map(tab => (
-            <button
-              key={tab.id}
-              onClick={() => setActiveSubTab(tab.id)}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md cursor-pointer transition-all shrink-0 whitespace-nowrap ${
-                activeSubTab === tab.id
-                  ? 'bg-theme-card text-theme-primary shadow-card border border-theme-border'
-                  : 'border border-transparent text-theme-secondary hover:text-theme-primary'
-              }`}
-            >
-              <tab.icon className={`w-3.5 h-3.5 ${activeSubTab === tab.id ? 'text-theme-accent' : ''}`} />
-              {tab.label}
-            </button>
-          ))}
+      {/* Layout: tab bar owns its own row so its labels can never be squeezed
+          by the adjacent subtitle text. The subtitle moves below the tabs on
+          narrower layouts and stays on the right only when there's room. */}
+      <header className="bg-theme-card border-b border-theme-border px-4 sm:px-6 py-3 shrink-0 flex flex-col gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
+          <div className="flex items-center gap-1 bg-theme-inset p-1 rounded-lg border border-theme-border text-xs font-semibold overflow-x-auto scrollbar-none min-w-0 flex-1">
+            {[
+              { id: 'dash' as const, label: isManagerOrAdmin ? 'Team Dashboard' : 'My Performance', icon: BarChart3 },
+              { id: 'health' as const, label: 'Pipeline Health', icon: GitPullRequest },
+              { id: 'winloss' as const, label: 'Win/Loss', icon: PieChart },
+              { id: 'builder' as const, label: 'Custom Reports', icon: Sparkles },
+            ].map(tab => (
+              <button
+                key={tab.id}
+                onClick={() => setActiveSubTab(tab.id)}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md cursor-pointer transition-all shrink-0 whitespace-nowrap ${
+                  activeSubTab === tab.id
+                    ? 'bg-theme-card text-theme-primary shadow-card border border-theme-border'
+                    : 'border border-transparent text-theme-secondary hover:text-theme-primary'
+                }`}
+              >
+                <tab.icon className={`w-3.5 h-3.5 shrink-0 ${activeSubTab === tab.id ? 'text-theme-accent' : ''}`} />
+                <span>{tab.label}</span>
+              </button>
+            ))}
+          </div>
+          <p className="text-xs text-theme-secondary font-medium hidden xl:block shrink-0">Real-time revenue forecast, team targets, and pipeline snapshots.</p>
         </div>
-        <p className="text-xs text-theme-secondary font-medium hidden md:block">Real-time revenue forecast, team targets, and pipeline snapshots.</p>
+        <p className="text-xs text-theme-secondary font-medium xl:hidden">Real-time revenue forecast, team targets, and pipeline snapshots.</p>
       </header>
 
       {/* Main scroll */}
@@ -557,18 +614,31 @@ export default function ReportsModule() {
                 </div>
                 {loading.pipelineHealth ? (
                   <Skeleton className="h-8 w-20 mb-3" />
-                ) : (
+                ) : (pipelineHealthData && pipelineHealthData.closedCount > 0) ? (
                   <p className="text-[26px] leading-none font-semibold text-theme-primary tnum tracking-tight" data-metric>
-                    {Math.round(pipelineHealthData?.avgProbability ?? 0)}%
+                    {Math.round(pipelineHealthData.winRate)}%
+                  </p>
+                ) : (
+                  <p className="text-[26px] leading-none font-semibold text-theme-secondary tnum tracking-tight" data-metric>
+                    N/A
                   </p>
                 )}
-                <div className="mt-3.5 h-1 w-full bg-theme-inset rounded-full overflow-hidden">
-                  <div
-                    className="h-full rounded-full bg-info transition-all duration-700"
-                    style={{ width: `${Math.min(100, pipelineHealthData?.avgProbability ?? 0)}%` }}
-                  />
-                </div>
-                <p className="text-2xs text-theme-secondary mt-2.5 font-medium font-sans">Average deal probability</p>
+                {/* Hide the progress bar entirely when there is no closed-deal
+                    data — showing a 0% bar next to "N/A" contradicts the
+                    leaderboard's 0% win rate for the same user on the same page. */}
+                {(pipelineHealthData && pipelineHealthData.closedCount > 0) && (
+                  <div className="mt-3.5 h-1 w-full bg-theme-inset rounded-full overflow-hidden">
+                    <div
+                      className="h-full rounded-full bg-info transition-all duration-700"
+                      style={{ width: `${Math.min(100, pipelineHealthData.winRate)}%` }}
+                    />
+                  </div>
+                )}
+                <p className="text-2xs text-theme-secondary mt-2.5 font-medium font-sans">
+                  {pipelineHealthData && pipelineHealthData.closedCount > 0
+                    ? `${pipelineHealthData.wonCount} won · ${pipelineHealthData.lostCount} lost`
+                    : 'No closed deals yet'}
+                </p>
               </div>
 
               {/* Activities */}
@@ -607,6 +677,7 @@ export default function ReportsModule() {
                   <FunnelChart
                     money
                     data={pipelineHealthData.stageBreakdown.map(s => ({
+                      id: s.stageId,
                       label: s.stageName,
                       value: s.value,
                     }))}
@@ -705,6 +776,7 @@ export default function ReportsModule() {
                 ) : pipelineHealthData && pipelineHealthData.stageBreakdown.length > 0 ? (
                   <DonutChart
                     data={pipelineHealthData.stageBreakdown.map(s => ({
+                      id: s.stageId,
                       label: s.stageName,
                       value: s.count,
                     }))}
@@ -868,7 +940,16 @@ export default function ReportsModule() {
                   </div>
                   <div className="p-4 bg-theme-inset rounded-xl border border-theme-border text-center">
                     <p className="text-2xs font-semibold uppercase tracking-wider text-theme-secondary mb-1">Avg Probability</p>
-                    <p className="text-2xl font-bold tnum text-theme-primary">{Math.round(pipelineHealthData.avgProbability)}%</p>
+                    {pipelineHealthData.openDealsCount > 0 ? (
+                      <p className="text-2xl font-bold tnum text-theme-primary">{Math.round(pipelineHealthData.avgProbability)}%</p>
+                    ) : (
+                      <p className="text-2xl font-bold tnum text-theme-secondary">N/A</p>
+                    )}
+                    <p className="text-2xs text-theme-secondary mt-1 font-medium font-sans">
+                      {pipelineHealthData.openDealsCount > 0
+                        ? `${pipelineHealthData.openDealsCount} open deal${pipelineHealthData.openDealsCount !== 1 ? 's' : ''}`
+                        : 'No open deals'}
+                    </p>
                   </div>
                 </div>
 
@@ -885,7 +966,7 @@ export default function ReportsModule() {
                       const maxVal = pipelineHealthData.stageBreakdown[0]?.value || 1;
                       const widthPct = Math.max(16, (stg.value / maxVal) * 100 - index * 10);
                       return (
-                        <div key={`${stg.stageName}-${index}`} className="flex items-center gap-4">
+                        <div key={stg.stageId || `${stg.stageName}-${index}`} className="flex items-center gap-4">
                           <div className="w-36 text-right shrink-0">
                             <p className="text-xs font-semibold text-theme-primary">{stg.stageName}</p>
                             <p className="text-2xs text-theme-secondary font-semibold">{stg.count} deal{stg.count !== 1 ? 's' : ''}</p>
@@ -1063,7 +1144,15 @@ export default function ReportsModule() {
                   <label className="text-2xs font-semibold uppercase tracking-wider text-theme-secondary font-sans">Entity</label>
                   <select
                     value={reportEntity}
-                    onChange={e => setReportEntity(e.target.value as any)}
+                    onChange={e => {
+                      const next = e.target.value as typeof reportEntity;
+                      setReportEntity(next);
+                      // Keep the visible Metric dropdown and the state that
+                      // feeds the API request in sync: "Total Value ($)" only
+                      // exists for Deals; any other entity falls back to Count
+                      // so the request always matches what's visibly selected.
+                      if (next !== 'deal') setReportMetric('count');
+                    }}
                     className="w-full bg-theme-card text-theme-primary rounded-lg border border-theme-border px-3 text-sm font-medium focus:border-theme-accent focus:outline-none h-9"
                   >
                     <option value="deal">Deals</option>

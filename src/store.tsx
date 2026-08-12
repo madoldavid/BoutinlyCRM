@@ -62,7 +62,7 @@ interface CRMContextType {
   // Reports
   getLeaderboard: (params?: { period?: string; limit?: number }) => Promise<Array<{ user_id: string; user_name: string; revenue: number; deals_closed: number; win_rate: number }>>;
   getCustomReport: (config: { entity: string; grouping?: string; metric?: string; filters?: Record<string, unknown> }) => Promise<{ rows: Array<Record<string, unknown>>; summary: Record<string, unknown> }>;
-  getPipelineHealth: () => Promise<{ total_value: number; weighted_value: number; avg_probability: number; stage_breakdown: Array<{ stage_name: string; count: number; value: number }> }>;
+  getPipelineHealth: (params?: { pipelineId?: string }) => Promise<{ total_value: number; weighted_value: number; avg_probability: number; win_rate: number; open_deals_count: number; won_count: number; lost_count: number; closed_count: number; stage_breakdown: Array<{ stage_id: string; stage_name: string; count: number; value: number }> }>;
 
   // Pipeline & Stage CRUD
   createPipeline: (data: { name: string; is_default?: boolean }) => Promise<void>;
@@ -1114,18 +1114,27 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   }, []);
 
   const getCustomReport = useCallback(async (config: { entity: string; grouping?: string; metric?: string; filters?: Record<string, unknown> }) => {
-    try {
-      return await apiClient.getCustomReport(config);
-    } catch {
-      return { rows: [], summary: {} };
-    }
+    // Propagate API failures to the caller — never silently substitute an empty
+    // result, which would render the same UI as a genuine "no rows" 200 response
+    // and mask real backend errors from the user.
+    return await apiClient.getCustomReport(config);
   }, []);
 
-  const getPipelineHealth = useCallback(async () => {
+  const getPipelineHealth = useCallback(async (params?: { pipelineId?: string }) => {
     try {
-      return await apiClient.getPipelineHealth();
+      return await apiClient.getPipelineHealth(params);
     } catch {
-      return { total_value: 0, weighted_value: 0, avg_probability: 0, stage_breakdown: [] };
+      return {
+        total_value: 0,
+        weighted_value: 0,
+        avg_probability: 0,
+        win_rate: 0,
+        open_deals_count: 0,
+        won_count: 0,
+        lost_count: 0,
+        closed_count: 0,
+        stage_breakdown: [],
+      };
     }
   }, []);
 

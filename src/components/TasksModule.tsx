@@ -87,6 +87,16 @@ export default function TasksModule() {
     window.addEventListener(SELECT_ENTITY_EVENT, onSelect);
     return () => window.removeEventListener(SELECT_ENTITY_EVENT, onSelect);
   }, []);
+
+  // Escape-to-close for the Create Task overlay (rendered as a custom
+  // `fixed inset-0` modal, not the shared `<Modal>`), matching the documented
+  // global "Esc — Close dialogs & overlays" behavior.
+  useEffect(() => {
+    if (!showCreateTask) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setShowCreateTask(false); };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [showCreateTask]);
   const [taskForm, setTaskForm] = useState({
     title: '',
     type: 'todo' as Task['type'],

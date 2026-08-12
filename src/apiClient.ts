@@ -1013,27 +1013,57 @@ export class ApiClient {
   async getCustomReport(config: { entity: string; grouping?: string; metric?: string; filters?: Record<string, unknown> }): Promise<{ rows: Array<Record<string, unknown>>; summary: Record<string, unknown> }> {
     const qs: Record<string, string> = { entity: config.entity };
     if (config.grouping) qs.group_by = config.grouping;
-    if (config.metric) qs.aggregate = config.metric.startsWith('sum') ? 'sum' : config.metric;
+    // Map the user-facing "metric" (e.g. "sum_value", "count") into the
+    // backend aggregate + aggregate_field pair. "count" => aggregate=count;
+    // anything else => aggregate=<verb> and an aggregate_field for "sum_value".
+    if (config.metric && config.metric !== 'count') {
+      if (config.metric.startsWith('sum')) {
+        qs.aggregate = 'sum';
+        qs.aggregate_field = config.metric === 'sum_value' ? 'value' : config.metric.replace(/^sum_/, '');
+      } else {
+        qs.aggregate = config.metric;
+      }
+    } else {
+      qs.aggregate = 'count';
+    }
+    // Forward filters as nested query params: filters[stage_type]=lost
+    if (config.filters) {
+      for (const [k, v] of Object.entries(config.filters)) {
+        if (v !== undefined && v !== null && v !== '') qs[`filters[${k}]`] = String(v);
+      }
+    }
     const query = Object.entries(qs).map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`).join('&');
     const res = await this.request<{ data: Array<Record<string, unknown>>; total_rows: number; aggregate: string }>(`/api/reports/custom?${query}`);
     return { rows: res.data, summary: { total_rows: res.total_rows, aggregate: res.aggregate } };
   }
 
-  async getPipelineHealth(): Promise<{ total_value: number; weighted_value: number; avg_probability: number; stage_breakdown: Array<{ stage_name: string; count: number; value: number }> }> {
+  async getPipelineHealth(params?: { pipelineId?: string }): Promise<{ total_value: number; weighted_value: number; avg_probability: number; win_rate: number; open_deals_count: number; won_count: number; lost_count: number; closed_count: number; stage_breakdown: Array<{ stage_id: string; stage_name: string; count: number; value: number }> }> {
     const res = await this.request<{
       funnel: Array<{ stage_id: string; stage_name: string; count: number; value: number; probability: number }>;
       total_pipeline_value: number;
       weighted_pipeline_value: number;
-    }>('/api/reports/pipeline-health');
+      avg_probability?: number;
+      win_rate?: number;
+      open_deals_count?: number;
+      won_count?: number;
+      lost_count?: number;
+      closed_count?: number;
+    }>('/api/reports/pipeline-health' + this.toQuery({ pipeline_id: params?.pipelineId }));
     const stages = res.funnel ?? [];
-    const avgPct = stages.length > 0
-      ? Math.round(stages.reduce((s, st) => s + (st.probability ?? 0), 0) / stages.length)
-      : 0;
+    // Use the backend-computed avg_probability / win_rate when available so the
+    // UI never displays a fabricated "50%" (the average of stage defaults) when
+    // there are zero deals in the pipeline.
     return {
       total_value: res.total_pipeline_value,
       weighted_value: res.weighted_pipeline_value,
-      avg_probability: avgPct,
+      avg_probability: res.avg_probability ?? 0,
+      win_rate: res.win_rate ?? 0,
+      open_deals_count: res.open_deals_count ?? stages.reduce((s, st) => s + st.count, 0),
+      won_count: res.won_count ?? 0,
+      lost_count: res.lost_count ?? 0,
+      closed_count: res.closed_count ?? 0,
       stage_breakdown: stages.map(s => ({
+        stage_id: s.stage_id,
         stage_name: s.stage_name,
         count: s.count,
         value: s.value,

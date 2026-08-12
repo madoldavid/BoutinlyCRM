@@ -20,9 +20,30 @@ const leaderboardQuerySchema = z.object({
 });
 
 // ─── Custom report query schema ──────────────────
+//
+// `entity` accepts both singular ("deal", "contact", ...) and plural
+// ("deals", "contacts", ...) spellings; the legacy frontend had been sending
+// the singular form for years, which failed zod validation with HTTP 400 and
+// silently surfaced as an empty UI. Normalize here so any reasonable spelling
+// returns a 200 with possibly-empty data instead.
+
+const ENTITY_ALIASES: Record<string, string> = {
+  deal: 'deals',
+  deals: 'deals',
+  contact: 'contacts',
+  contacts: 'contacts',
+  account: 'accounts',
+  accounts: 'accounts',
+  task: 'tasks',
+  tasks: 'tasks',
+  activity: 'activities',
+  activities: 'activities',
+};
 
 const customReportSchema = z.object({
-  entity: z.enum(['deals', 'contacts', 'accounts', 'tasks', 'activities']),
+  entity: z.string().transform(s => ENTITY_ALIASES[s] ?? s).pipe(
+    z.enum(['deals', 'contacts', 'accounts', 'tasks', 'activities']),
+  ),
   group_by: z.string().optional(),
   aggregate: z.enum(['count', 'sum', 'avg', 'min', 'max']).default('count'),
   aggregate_field: z.string().optional(),
@@ -195,21 +216,55 @@ export function registerReportsRoutes(
 
   // ─── Pipeline Health ───────────────────────────
 
-  app.get('/api/reports/pipeline-health', authenticate(config), asyncHandler<AuthenticatedRequest>(async (_req, res) => {
-    const snapshot = await repository.snapshot();
-    const scoped = scopeSnapshot(snapshot, _req.principal);
+  const pipelineHealthQuerySchema = z.object({
+    pipeline_id: z.string().optional(),
+  });
 
-    const stages = scoped.stages.filter(s => s.type === 'open').sort((a, b) => a.order - b.order);
-    const deals = scoped.deals.filter(d => !d.won_at && !d.lost_at);
+  app.get('/api/reports/pipeline-health', authenticate(config), asyncHandler<AuthenticatedRequest>(async (req, res) => {
+    const query = pipelineHealthQuerySchema.parse(req.query);
+    const snapshot = await repository.snapshot();
+    const scoped = scopeSnapshot(snapshot, req.principal);
+
+    // Restrict stages to a single pipeline so duplicate pipelines (e.g. a stale
+    // seed file or a default pipeline that was provisioned twice at signup)
+    // never render every stage twice in the funnel / donut / stage cards.
+    // Prefer the explicitly requested pipeline, then the default, then the first.
+    const targetPipeline =
+      (query.pipeline_id && scoped.pipelines.find(p => p.id === query.pipeline_id)) ||
+      scoped.pipelines.find(p => p.is_default) ||
+      scoped.pipelines[0];
+
+    const pipelineStageIds = new Set(
+      targetPipeline ? scoped.stages.filter(s => s.pipeline_id === targetPipeline.id).map(s => s.id) : [],
+    );
+
+    // Defensive de-dup: keep only the first row per stage id, so even legacy
+    // duplicated stage rows collapse to a single entry in every widget.
+    const seenStageIds = new Set<string>();
+    const stages = scoped.stages
+      .filter(s => s.type === 'open' && (!targetPipeline || pipelineStageIds.has(s.id)))
+      .filter(s => {
+        if (seenStageIds.has(s.id)) return false;
+        seenStageIds.add(s.id);
+        return true;
+      })
+      .sort((a, b) => a.order - b.order);
+
+    const deals = scoped.deals.filter(d =>
+      !d.won_at && !d.lost_at && (!targetPipeline || d.pipeline_id === targetPipeline.id),
+    );
 
     // Funnel: count of deals per stage
-    const funnel = stages.map(stage => ({
-      stage_id: stage.id,
-      stage_name: stage.name,
-      count: deals.filter(d => d.stage_id === stage.id).length,
-      value: deals.filter(d => d.stage_id === stage.id).reduce((sum, d) => sum + d.value, 0),
-      probability: stage.probability,
-    }));
+    const funnel = stages.map(stage => {
+      const stageDeals = deals.filter(d => d.stage_id === stage.id);
+      return {
+        stage_id: stage.id,
+        stage_name: stage.name,
+        count: stageDeals.length,
+        value: stageDeals.reduce((sum, d) => sum + d.value, 0),
+        probability: stage.probability,
+      };
+    });
 
     // Stagnant deals (no stage change in 30 days)
     const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
@@ -225,13 +280,39 @@ export function registerReportsRoutes(
     const totalPipeline = deals.reduce((sum, d) => sum + d.value, 0);
     const weightedValue = deals.reduce((sum, d) => sum + d.value * (d.probability || 0) / 100, 0);
 
+    // Average probability of OPEN deals (uses deal-level override when present,
+    // falls back to the stage default). Reported as 0 when there are no open
+    // deals — never a fabricated "50%" from averaging stage defaults.
+    const avgProbability = deals.length > 0
+      ? Math.round(
+          deals.reduce((sum, d) => {
+            const stage = scoped.stages.find(s => s.id === d.stage_id);
+            return sum + (d.probability ?? stage?.probability ?? 0);
+          }, 0) / deals.length,
+        )
+      : 0;
+
+    // Real win rate: won / (won + lost) across all deals in scope. 0 when no
+    // closed deals exist — matches the leaderboard widget, never a fabricated 50%.
+    const wonCount = scoped.deals.filter(d => d.won_at).length;
+    const lostCount = scoped.deals.filter(d => d.lost_at).length;
+    const closedCount = wonCount + lostCount;
+    const winRate = closedCount > 0 ? Math.round((wonCount / closedCount) * 100) : 0;
+
     res.json({
       funnel,
+      pipeline_id: targetPipeline?.id ?? null,
       stagnant_deals_count: stagnant.length,
       stagnant_deals_value: stagnant.reduce((sum, d) => sum + d.value, 0),
       closed_this_quarter_count: closedThisQuarter.length,
       total_pipeline_value: totalPipeline,
       weighted_pipeline_value: Math.round(weightedValue),
+      avg_probability: avgProbability,
+      open_deals_count: deals.length,
+      won_count: wonCount,
+      lost_count: lostCount,
+      closed_count: closedCount,
+      win_rate: winRate,
       generated_at: new Date().toISOString(),
     });
   }));

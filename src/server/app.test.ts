@@ -324,6 +324,128 @@ describe('Boutinly CRM API', () => {
     expect(r.body.data).toBeInstanceOf(Array);
   });
 
+  // ── Reports: dashboard data-correctness regressions ───────────────
+  //
+  // These cover the regressions reported against the Dashboards module:
+  //   * pipeline-health funnel must render every stage exactly once even when
+  //     duplicate pipelines/stages exist in the snapshot (CRITICAL — was
+  //     duplicating stages in the funnel & donut charts);
+  //   * win_rate / avg_probability must be 0 (not a fabricated 50%) when there
+  //     are zero closed deals (HIGH — contradicted the team leaderboard's
+  //     0% win-rate on the same page);
+  //   * GET /api/reports/custom with the legacy singular `entity=deal` spellings
+  //     or with arbitrary group_by values (lost_reason / competitor_name /
+  //     owner_id) must return 200 with possibly-empty data instead of HTTP 400
+  //     (HIGH — the Win/Loss tab was silently rendering empty states for failed
+  //     requests).
+
+  it('pipeline-health funnel de-duplicates stages across duplicate pipelines', async () => {
+    const { token } = await h.signup('A', 'a@t.com', 'ChangeMe123!', 'TC');
+    const bs = await request(h.app).get('/api/crm/bootstrap')
+      .set('Authorization', `Bearer ${token}`).expect(200);
+    const defaultPipeline = bs.body.pipelines.find((p: any) => p.is_default) ?? bs.body.pipelines[0];
+    const defaultPipelineId = defaultPipeline.id;
+    const openStageNames = (bs.body.stages as any[])
+      .filter((s: any) => s.pipeline_id === defaultPipelineId && s.type === 'open')
+      .map((s: any) => s.name);
+    expect(openStageNames.length).toBeGreaterThan(0);
+
+    // Add a SECOND default pipeline with the same stage names — reproduces the
+    // seed / signup-twice scenario that was doubling every stage on the
+    // dashboard. (Setting is_default=true also tests that the dedupe prefers
+    // the original default rather than picking the most recent.)
+    const newPipe = await request(h.app).post('/api/pipelines')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ name: 'Duplicate Default Sales Pipeline', is_default: true })
+      .expect(201);
+    for (const stg of (bs.body.stages as any[]).filter((s: any) => s.pipeline_id === defaultPipelineId)) {
+      await request(h.app).post('/api/stages')
+        .set('Authorization', `Bearer ${token}`)
+        .send({
+          pipeline_id: newPipe.body.pipeline.id,
+          name: stg.name,
+          probability: stg.probability,
+          order: stg.order,
+          type: stg.type,
+        })
+        .expect(201);
+    }
+
+    const r = await request(h.app).get('/api/reports/pipeline-health')
+      .set('Authorization', `Bearer ${token}`).expect(200);
+    expect(r.body.funnel).toBeInstanceOf(Array);
+    const funnelStageNames = (r.body.funnel as any[]).map(s => s.stage_name);
+    // Each open stage appears exactly once — never twice.
+    for (const name of openStageNames) {
+      const occurrences = funnelStageNames.filter(n => n === name).length;
+      expect(occurrences).toBe(1);
+    }
+    expect(funnelStageNames.length).toBe(openStageNames.length);
+  });
+
+  it('pipeline-health reports 0% win rate / avg probability with no deals', async () => {
+    const { token } = await h.signup('A', 'a@t.com', 'ChangeMe123!', 'TC');
+    const r = await request(h.app).get('/api/reports/pipeline-health')
+      .set('Authorization', `Bearer ${token}`).expect(200);
+    // No deals exist for a brand-new tenant; the previous default of 50%
+    // (averaging the stage probabilities) is gone.
+    expect(r.body.win_rate).toBe(0);
+    expect(r.body.avg_probability).toBe(0);
+    expect(r.body.won_count).toBe(0);
+    expect(r.body.lost_count).toBe(0);
+    expect(r.body.closed_count).toBe(0);
+    expect(r.body.open_deals_count).toBe(0);
+    expect(r.body.total_pipeline_value).toBe(0);
+  });
+
+  it('custom report accepts the legacy singular entity spellings', async () => {
+    const { token } = await h.signup('A', 'a@t.com', 'ChangeMe123!', 'TC');
+    // Frontend sent `entity=deal` (singular) for the Win/Loss tab; this used to
+    // 400 because the schema only matched the plural form.
+    for (const entity of ['deal', 'contact', 'account', 'task']) {
+      const r = await request(h.app).get(`/api/reports/custom?entity=${entity}&aggregate=count`)
+        .set('Authorization', `Bearer ${token}`).expect(200);
+      expect(r.body.data).toBeInstanceOf(Array);
+    }
+  });
+
+  it('custom report returns 200 (not 400) for group_by=lost_reason / competitor_name / owner_id', async () => {
+    const { token } = await h.signup('A', 'a@t.com', 'ChangeMe123!', 'TC');
+    for (const groupBy of ['lost_reason', 'competitor_name', 'owner_id']) {
+      const r = await request(h.app).get(`/api/reports/custom?entity=deal&group_by=${groupBy}&aggregate=count`)
+        .set('Authorization', `Bearer ${token}`).expect(200);
+      expect(r.body.data).toBeInstanceOf(Array);
+      expect(r.body.group_by).toBe(groupBy);
+    }
+  });
+
+  it('custom report surfaces lost-deal lost_reason in the grouped result', async () => {
+    const { token, userId } = await h.signup('A', 'a@t.com', 'ChangeMe123!', 'TC');
+    const bs = await request(h.app).get('/api/crm/bootstrap')
+      .set('Authorization', `Bearer ${token}`).expect(200);
+    const pipeline = bs.body.pipelines[0];
+    const openStage = (bs.body.stages as any[]).find((s: any) => s.type === 'open');
+    const acct = await request(h.app).post('/api/accounts')
+      .set('Authorization', `Bearer ${token}`).send({ name: 'A', owner_id: userId }).expect(201);
+    const d = await request(h.app).post('/api/deals')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ name: 'Lost Deal', pipeline_id: pipeline.id, stage_id: openStage.id,
+        account_id: acct.body.account.id, owner_id: userId, value: 1000,
+        close_date: new Date(Date.now() + 3e10).toISOString().split('T')[0] })
+      .expect(201);
+    await request(h.app).post(`/api/deals/${d.body.deal.id}/close`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ outcome: 'lost', reason: 'Price too high' })
+      .expect(200);
+
+    // group_by=lost_reason must return 200 and surface the lost reason as a
+    // group label (the previous behavior was HTTP 400 + silent empty UI).
+    const r = await request(h.app).get('/api/reports/custom?entity=deal&group_by=lost_reason&aggregate=count')
+      .set('Authorization', `Bearer ${token}`).expect(200);
+    const groups = (r.body.data as any[]).map(row => row.group);
+    expect(groups).toContain('Price too high');
+  });
+
   // ── GDPR ──────────────────────────────────────────
 
   it('exports user data', async () => {

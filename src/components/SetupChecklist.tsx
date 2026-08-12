@@ -9,11 +9,17 @@
  * Dismissal + completion state are local preferences only.
  */
 
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useCRM } from '../store';
 import { Check, ChevronRight, Rocket, X, Building2 } from 'lucide-react';
 
-const DISMISS_KEY = 'boutinly_setup_dismissed';
+// Dismissal of the "Getting Started" card must persist across sessions AND be
+// scoped to the individual user — a single global `boutinly_setup_dismissed`
+// key previously meant that one person dismissing the card hid it for every
+// other user signing in on the same browser (shared lab machines, kiosks,
+// family devices). The key now incorporates the user id so each user's
+// dismissal is independent.
+const DISMISS_KEY_PREFIX = 'boutinly_setup_dismissed';
 
 export default function SetupChecklist() {
   const {
@@ -24,11 +30,23 @@ export default function SetupChecklist() {
     users,
     emailTemplates,
     setActiveModule,
+    currentUser,
   } = useCRM();
 
+  const dismissKey = currentUser?.id ? `${DISMISS_KEY_PREFIX}:${currentUser.id}` : DISMISS_KEY_PREFIX;
+
   const [dismissed, setDismissed] = useState<boolean>(() => {
-    try { return localStorage.getItem(DISMISS_KEY) === '1'; } catch { return false; }
+    try { return localStorage.getItem(dismissKey) === '1'; } catch { return false; }
   });
+
+  // When the signed-in user changes (different account, or idle re-login),
+  // re-read the per-user key so the card can re-appear for a user who hasn't
+  // dismissed it while staying hidden for one who has.
+  useEffect(() => {
+    let stored = false;
+    try { stored = localStorage.getItem(dismissKey) === '1'; } catch { /* ignore */ }
+    setDismissed(stored);
+  }, [dismissKey]);
 
   const items = useMemo(() => [
     {
@@ -82,7 +100,7 @@ export default function SetupChecklist() {
 
   const dismiss = () => {
     setDismissed(true);
-    try { localStorage.setItem(DISMISS_KEY, '1'); } catch { /* ignore */ }
+    try { localStorage.setItem(dismissKey, '1'); } catch { /* ignore */ }
   };
 
   return (

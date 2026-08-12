@@ -521,6 +521,21 @@ export default function PipelineModule() {
     return () => window.removeEventListener(NEW_RECORD_EVENT, onNewRecord);
   }, [isReadOnly]);
 
+  // Escape-to-close for the two custom `fixed inset-0` overlays in this module
+  // (Create Deal & Close-Deal Outcome). The documented global "Esc — Close
+  // dialogs & overlays" behavior must apply to these too, not just to the
+  // shared `<Modal>` usages elsewhere.
+  useEffect(() => {
+    if (!showCreateDeal && !showCloseDealModal) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      if (showCreateDeal) { setShowCreateDeal(false); return; }
+      if (showCloseDealModal) { setShowCloseDealModal(false); return; }
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [showCreateDeal, showCloseDealModal]);
+
   if (fullDealDetail) {
     const deal = scopedDeals.find(d => d.id === fullDealDetail);
     if (deal) {

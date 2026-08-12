@@ -190,6 +190,32 @@ export default function AdminModule() {
     return () => window.removeEventListener(NEW_RECORD_EVENT, onNew);
   }, []);
 
+  // Escape-to-close for the custom `fixed inset-0` admin overlays (Invite,
+  // Field, API key, Webhook, Quota, Field-Permission, Pipeline, Stage). The
+  // shared `<Modal>` already handles Escape; these custom overlays would
+  // otherwise only close on Cancel / X, which contradicts the documented
+  // global "Esc — Close dialogs & overlays" behavior.
+  const adminModalCloseMap: Array<[boolean, () => void]> = [
+    [showInviteModal, () => setShowInviteModal(false)],
+    [showFieldModal, () => setShowFieldModal(false)],
+    [showApiKeyModal, () => setShowApiKeyModal(false)],
+    [showWebhookModal, () => setShowWebhookModal(false)],
+    [showQuotaModal, () => setShowQuotaModal(false)],
+    [showFieldPermModal, () => setShowFieldPermModal(false)],
+    [showPipelineModal, () => setShowPipelineModal(false)],
+    [showStageModal, () => setShowStageModal(false)],
+  ];
+  useEffect(() => {
+    if (!adminModalCloseMap.some(([open]) => open)) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      for (const [, close] of adminModalCloseMap) close();
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showInviteModal, showFieldModal, showApiKeyModal, showWebhookModal, showQuotaModal, showFieldPermModal, showPipelineModal, showStageModal]);
+
   // Load governance data on mount for the right-column security status cards
   useEffect(() => {
     if (enterpriseFeaturesEnabled && !governanceLoaded) {
