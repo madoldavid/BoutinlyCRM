@@ -75,7 +75,7 @@ export default function ContactsModule() {
     bulkUpdateContacts,
   } = useCRM();
 
-  const [activeTab, setActiveTab] = useState<'contacts' | 'accounts'>('contacts');
+  const [activeTab, setActiveTab] = useState<'contacts' | 'accounts'>('accounts');
   const [viewMode, setViewMode] = useState<'cards' | 'table'>('cards');
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedTag, setSelectedTag] = useState<string>('All');
@@ -845,8 +845,13 @@ export default function ContactsModule() {
         
         {/* Module Header Toolbar */}
         <div className="p-3 sm:p-4 border-b border-theme-border space-y-3 shrink-0">
-          <div className="flex items-center justify-between gap-2">
-            <div className="flex items-center gap-0.5 bg-theme-base p-0.5 rounded-lg border border-theme-border text-xs font-semibold min-w-0 overflow-x-auto scrollbar-none">
+          <div className="flex items-center justify-between gap-2 flex-wrap">
+            {/* Accounts/Contacts switcher.
+                Owns its row and never scrolls/clips — the right-side action
+                cluster (view toggle + quick actions) wraps to its own line
+                when the panel is narrow, so both tabs are always visible
+                together and neither label is cut off. */}
+            <div className="flex items-center gap-0.5 bg-theme-base p-0.5 rounded-lg border border-theme-border text-xs font-semibold shrink-0">
               <button
                 onClick={() => { setActiveTab('accounts'); setSelectedTag('All'); }}
                 className={`px-2.5 sm:px-3 py-1.5 rounded-md cursor-pointer transition-all flex items-center gap-1.5 shrink-0 whitespace-nowrap border ${
