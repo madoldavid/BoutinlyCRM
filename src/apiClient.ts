@@ -291,7 +291,6 @@ export class ApiClient {
 
   // ─── Bootstrap ─────────────────────────────────────
 
-<<<<<<< HEAD
   /**
    * Fetches every page of a paginated list endpoint and concatenates the
    * results. The server caps `limit` at 100 (see paginationSchema), so this
@@ -314,48 +313,6 @@ export class ApiClient {
     }
     return all;
   }
-=======
-  async bootstrapCrm(): Promise<CrmBootstrapResponse> {
-    // Admin-only endpoints — resolve gracefully for non-admin users.
-    const safeUsers = this.listUsers().catch((e: unknown) => {
-      if (e instanceof ApiError && e.status === 403) return [] as User[];
-      throw e;
-    });
-    const safeAuditLogs = this.listAuditLogs({ limit: 10000 }).catch((e: unknown) => {
-      if (e instanceof ApiError && e.status === 403) return { data: [] as AuditLog[], total: 0, page: 1, limit: 0 };
-      throw e;
-    });
-
-    const [
-      users,
-      accountsRes,
-      contactsRes,
-      pipelines,
-      stages,
-      dealsRes,
-      tasksRes,
-      activitiesRes,
-      notifications,
-      customFields,
-      emailTemplates,
-      emailCampaigns,
-      auditLogsRes,
-    ] = await Promise.all([
-      safeUsers,
-      this.listAccounts({ limit: 10000 }),
-      this.listContacts({ limit: 10000 }),
-      this.listPipelines(),
-      this.listStages(),
-      this.listDeals({ limit: 10000 }),
-      this.listTasks({ limit: 10000 }),
-      this.listActivities({ limit: 10000 }),
-      this.listNotifications(),
-      this.listCustomFields(),
-      this.listEmailTemplates(),
-      this.listEmailCampaigns(),
-      safeAuditLogs,
-    ]);
->>>>>>> 3b30668954fd98f21869a81b42c464b052acb7e7
 
   /**
    * Loads the full CRM snapshot used to populate the store on login/refresh.

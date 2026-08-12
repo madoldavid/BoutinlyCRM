@@ -243,12 +243,6 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [adminFlags, setAdminFlags] = useState<Array<{ key: string; description: string; defaultEnabled: boolean; enabled: boolean; source: string; overridden: boolean }>>([]);
   const [featureFlags, setFeatureFlags] = useState<Array<{ key: string; enabled: boolean }>>([]);
 
-<<<<<<< HEAD
-  function persistToLocalStorage(
-    snapshot: Awaited<ReturnType<typeof apiClient.bootstrapCrm>>,
-    failed: Set<string> = new Set(),
-  ) {
-=======
   // ─── Bootstrap from API ────────────────────────────
 
   useEffect(() => {
@@ -344,8 +338,10 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return () => { cancelled = true; };
   }, [isAuthenticated]);
 
-  function persistToLocalStorage(snapshot: Awaited<ReturnType<typeof apiClient.bootstrapCrm>>) {
->>>>>>> 3b30668954fd98f21869a81b42c464b052acb7e7
+  function persistToLocalStorage(
+    snapshot: Awaited<ReturnType<typeof apiClient.bootstrapCrm>>,
+    failed: Set<string> = new Set(),
+  ) {
     const set = safeSetItem;
     const write = (key: string, resourceKey: string, value: unknown) => {
       if (failed.has(resourceKey)) return; // don't cache data that failed to load — keep prior cache
