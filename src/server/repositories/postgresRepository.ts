@@ -50,12 +50,6 @@ import type {
 } from './crmRepository.js';
 
 export class PostgresCrmRepository implements CrmRepository {
-  // ─── Bootstrap (no-op: passwords handled by seed) ────
-
-  async bootstrapDemoPasswords(_password: string, _pepper: string) {
-    // PostgreSQL passwords are set via seed script — nothing to do here
-  }
-
   // ─── Organization ────────────────────────────────────
 
   async createOrganization(name: string, slug: string): Promise<Organization> {
@@ -71,11 +65,6 @@ export class PostgresCrmRepository implements CrmRepository {
   async getOrganizationById(orgId: string): Promise<Organization | null> {
     const result = await query('SELECT * FROM organizations WHERE id = $1', [orgId]);
     return result.rows.length > 0 ? this.rowToOrganization(result.rows[0]) : null;
-  }
-
-  async countUsers(): Promise<number> {
-    const result = await query('SELECT count(*) as cnt FROM users');
-    return Number(result.rows[0]?.cnt || 0);
   }
 
   // ─── Auth ────────────────────────────────────────────
@@ -191,18 +180,17 @@ export class PostgresCrmRepository implements CrmRepository {
     return result.rows.map((row: DbRow) => this.rowToUser(row));
   }
 
-  async addUser(input: CreateUserInput): Promise<User> {
-    const pepper = process.env.PASSWORD_PEPPER || 'development-password-pepper';
-    const demoPassword = process.env.DEMO_PASSWORD || 'ChangeMe123!';
-    const passwordHash = await hashPassword(demoPassword, pepper);
+  async addUser(input: CreateUserInput): Promise<{ user: User; temporaryPassword: string }> {
+    const temporaryPassword = randomBytes(18).toString('base64url');
+    const passwordHash = await hashPassword(temporaryPassword, process.env.PASSWORD_PEPPER || '');
 
     const result = await query(
       `INSERT INTO users (id, organization_id, email, name, password_hash, role, is_active, timezone)
        VALUES ($1, current_setting('app.organization_id'), $2, $3, $4, $5, true, 'UTC')
-       RETURNING id, email, name, avatar_url, role, mfa_enabled, is_active, timezone, team_id`,
+       RETURNING id, organization_id, email, name, avatar_url, role, mfa_enabled, is_active, timezone, team_id`,
       [randomUUID(), input.email, input.name, passwordHash, input.role],
     );
-    return this.rowToUser(result.rows[0]);
+    return { user: this.rowToUser(result.rows[0]), temporaryPassword };
   }
 
   async addUserWithPassword(input: { name: string; email: string; passwordHash: string; role: UserRole; organization_id?: string }): Promise<User> {
@@ -218,7 +206,7 @@ export class PostgresCrmRepository implements CrmRepository {
   async updateUserRole(userId: string, role: UserRole): Promise<User | null> {
     const result = await query(
       `UPDATE users SET role = $2 WHERE id = $1
-       RETURNING id, email, name, avatar_url, role, mfa_enabled, is_active, timezone, team_id`,
+       RETURNING id, organization_id, email, name, avatar_url, role, mfa_enabled, is_active, timezone, team_id`,
       [userId, role],
     );
     return result.rows.length > 0 ? this.rowToUser(result.rows[0]) : null;
@@ -227,10 +215,15 @@ export class PostgresCrmRepository implements CrmRepository {
   async toggleUserStatus(userId: string): Promise<User | null> {
     const result = await query(
       `UPDATE users SET is_active = NOT is_active WHERE id = $1
-       RETURNING id, email, name, avatar_url, role, mfa_enabled, is_active, timezone, team_id`,
+       RETURNING id, organization_id, email, name, avatar_url, role, mfa_enabled, is_active, timezone, team_id`,
       [userId],
     );
     return result.rows.length > 0 ? this.rowToUser(result.rows[0]) : null;
+  }
+
+  async deleteUser(userId: string): Promise<boolean> {
+    const result = await query(`DELETE FROM users WHERE id = $1`, [userId]);
+    return (result.rowCount ?? 0) > 0;
   }
 
   // ─── Contacts ───────────────────────────────────────
@@ -335,12 +328,16 @@ export class PostgresCrmRepository implements CrmRepository {
       // Reassign tasks
       await conn.query('UPDATE tasks SET contact_id = $1 WHERE contact_id = $2', [targetId, sourceId]);
 
-      // Update target
+      // Update target — whitelist allowed columns (same as updateContact)
+      const ALLOWED_UPDATE_COLS = new Set([
+        'first_name', 'last_name', 'email', 'phone', 'title', 'linkedin_url',
+        'owner_id', 'account_id', 'tags', 'custom_fields',
+      ]);
       const fields: string[] = [];
       const values: unknown[] = [targetId];
       let idx = 2;
       for (const [key, val] of Object.entries(finalValues)) {
-        if (val !== undefined) {
+        if (val !== undefined && ALLOWED_UPDATE_COLS.has(key)) {
           fields.push(`${key} = $${idx++}`);
           values.push(key === 'custom_fields' ? JSON.stringify(val) : val);
         }
@@ -772,9 +769,14 @@ export class PostgresCrmRepository implements CrmRepository {
   // ─── Pipelines & Stages ─────────────────────────────
 
   async listPipelines(): Promise<Pipeline[]> {
-    const result = await query(`SELECT * FROM pipelines ORDER BY created_at`);
+    const result = await query(
+      `SELECT * FROM pipelines
+       WHERE organization_id = current_setting('app.organization_id', true)
+       ORDER BY created_at`,
+    );
     return result.rows.map((row: DbRow) => ({
       id: row.id,
+      organization_id: row.organization_id,
       name: row.name,
       is_default: row.is_default,
       is_archived: row.is_archived,
@@ -782,10 +784,15 @@ export class PostgresCrmRepository implements CrmRepository {
   }
 
   async listStages(): Promise<Stage[]> {
-    const result = await query(`SELECT * FROM stages ORDER BY stage_order`);
+    const result = await query(
+      `SELECT * FROM stages
+       WHERE organization_id = current_setting('app.organization_id', true)
+       ORDER BY stage_order`,
+    );
     return result.rows.map((row: DbRow) => ({
       id: row.id,
       pipeline_id: row.pipeline_id,
+      organization_id: row.organization_id,
       name: row.name,
       probability: row.probability,
       order: row.stage_order,
@@ -797,11 +804,12 @@ export class PostgresCrmRepository implements CrmRepository {
     const result = await query(
       `INSERT INTO pipelines (id, organization_id, name, is_default, is_archived)
        VALUES ($1, current_setting('app.organization_id'), $2, $3, false)
-       RETURNING id, name, is_default, is_archived`,
+       RETURNING id, organization_id, name, is_default, is_archived`,
       [randomUUID(), input.name, input.is_default],
     );
     return {
       id: result.rows[0].id,
+      organization_id: result.rows[0].organization_id,
       name: result.rows[0].name,
       is_default: result.rows[0].is_default,
       is_archived: result.rows[0].is_archived,
@@ -812,12 +820,13 @@ export class PostgresCrmRepository implements CrmRepository {
     const result = await query(
       `INSERT INTO stages (id, organization_id, pipeline_id, name, probability, stage_order, type)
        VALUES ($1, current_setting('app.organization_id'), $2, $3, $4, $5, $6)
-       RETURNING id, pipeline_id, name, probability, stage_order, type`,
+       RETURNING id, organization_id, pipeline_id, name, probability, stage_order, type`,
       [randomUUID(), input.pipeline_id, input.name, input.probability, input.order, input.type],
     );
     return {
       id: result.rows[0].id,
       pipeline_id: result.rows[0].pipeline_id,
+      organization_id: result.rows[0].organization_id,
       name: result.rows[0].name,
       probability: result.rows[0].probability,
       order: result.rows[0].stage_order,
@@ -827,7 +836,8 @@ export class PostgresCrmRepository implements CrmRepository {
 
   async updatePipeline(id: string, input: { name?: string; is_default?: boolean; is_archived?: boolean }): Promise<Pipeline | null> {
     if (input.is_default) {
-      await query(`UPDATE pipelines SET is_default = false WHERE id != $1`, [id]);
+      await query(`UPDATE pipelines SET is_default = false
+                   WHERE id != $1 AND organization_id = current_setting('app.organization_id', true)`, [id]);
     }
     const fields: string[] = [];
     const values: unknown[] = [id];
@@ -836,20 +846,26 @@ export class PostgresCrmRepository implements CrmRepository {
     if (input.is_default !== undefined) { fields.push(`is_default = $${idx++}`); values.push(input.is_default); }
     if (input.is_archived !== undefined) { fields.push(`is_archived = $${idx++}`); values.push(input.is_archived); }
     if (fields.length === 0) {
-      const r = await query('SELECT * FROM pipelines WHERE id = $1', [id]);
-      return r.rows.length > 0 ? { id: r.rows[0].id, name: r.rows[0].name, is_default: r.rows[0].is_default, is_archived: r.rows[0].is_archived } : null;
+      const r = await query('SELECT * FROM pipelines WHERE id = $1 AND organization_id = current_setting(\'app.organization_id\', true)', [id]);
+      return r.rows.length > 0
+        ? { id: r.rows[0].id, organization_id: r.rows[0].organization_id, name: r.rows[0].name, is_default: r.rows[0].is_default, is_archived: r.rows[0].is_archived }
+        : null;
     }
     const result = await query(
-      `UPDATE pipelines SET ${fields.join(', ')} WHERE id = $1 RETURNING id, name, is_default, is_archived`,
+      `UPDATE pipelines SET ${fields.join(', ')}
+       WHERE id = $1 AND organization_id = current_setting('app.organization_id', true)
+       RETURNING id, organization_id, name, is_default, is_archived`,
       values,
     );
     if (result.rows.length === 0) return null;
-    return { id: result.rows[0].id, name: result.rows[0].name, is_default: result.rows[0].is_default, is_archived: result.rows[0].is_archived };
+    return { id: result.rows[0].id, organization_id: result.rows[0].organization_id, name: result.rows[0].name, is_default: result.rows[0].is_default, is_archived: result.rows[0].is_archived };
   }
 
   async deletePipeline(id: string): Promise<boolean> {
-    await query('DELETE FROM stages WHERE pipeline_id = $1', [id]);
-    const result = await query('DELETE FROM pipelines WHERE id = $1', [id]);
+    await query(`DELETE FROM stages
+                 WHERE pipeline_id = $1 AND organization_id = current_setting('app.organization_id', true)`, [id]);
+    const result = await query(`DELETE FROM pipelines
+                                WHERE id = $1 AND organization_id = current_setting('app.organization_id', true)`, [id]);
     return (result.rowCount || 0) > 0;
   }
 
@@ -862,19 +878,24 @@ export class PostgresCrmRepository implements CrmRepository {
     if (input.order !== undefined) { fields.push(`stage_order = $${idx++}`); values.push(input.order); }
     if (input.type !== undefined) { fields.push(`type = $${idx++}`); values.push(input.type); }
     if (fields.length === 0) {
-      const r = await query('SELECT * FROM stages WHERE id = $1', [id]);
-      return r.rows.length > 0 ? { id: r.rows[0].id, pipeline_id: r.rows[0].pipeline_id, name: r.rows[0].name, probability: r.rows[0].probability, order: r.rows[0].stage_order, type: r.rows[0].type } : null;
+      const r = await query('SELECT * FROM stages WHERE id = $1 AND organization_id = current_setting(\'app.organization_id\', true)', [id]);
+      return r.rows.length > 0
+        ? { id: r.rows[0].id, pipeline_id: r.rows[0].pipeline_id, organization_id: r.rows[0].organization_id, name: r.rows[0].name, probability: r.rows[0].probability, order: r.rows[0].stage_order, type: r.rows[0].type }
+        : null;
     }
     const result = await query(
-      `UPDATE stages SET ${fields.join(', ')} WHERE id = $1 RETURNING id, pipeline_id, name, probability, stage_order, type`,
+      `UPDATE stages SET ${fields.join(', ')}
+       WHERE id = $1 AND organization_id = current_setting('app.organization_id', true)
+       RETURNING id, organization_id, pipeline_id, name, probability, stage_order, type`,
       values,
     );
     if (result.rows.length === 0) return null;
-    return { id: result.rows[0].id, pipeline_id: result.rows[0].pipeline_id, name: result.rows[0].name, probability: result.rows[0].probability, order: result.rows[0].stage_order, type: result.rows[0].type };
+    return { id: result.rows[0].id, pipeline_id: result.rows[0].pipeline_id, organization_id: result.rows[0].organization_id, name: result.rows[0].name, probability: result.rows[0].probability, order: result.rows[0].stage_order, type: result.rows[0].type };
   }
 
   async deleteStage(id: string): Promise<boolean> {
-    const result = await query('DELETE FROM stages WHERE id = $1', [id]);
+    const result = await query(`DELETE FROM stages
+                                WHERE id = $1 AND organization_id = current_setting('app.organization_id', true)`, [id]);
     return (result.rowCount || 0) > 0;
   }
 

@@ -156,16 +156,24 @@ export async function query(text: string, params?: unknown[]): Promise<pg.QueryR
 
     // Tenant context active
     if (isReadQuery(text)) {
-      // Optimized read path: borrow a client, SET LOCAL org + trace, run query, release
+      // Optimized read path: borrow a client, SET LOCAL org + trace, run query, release.
+      // SET LOCAL (is_local=true) only survives inside a transaction, so the read is
+      // wrapped in BEGIN/COMMIT — otherwise the org scope is lost on the autocommitted
+      // set_config statement and the query sees nothing.
       const client = await getPool(globalDbConfig).connect();
       try {
+        await client.query('BEGIN');
         await client.query('SELECT set_config($1, $2, true)', ['app.organization_id', orgId]);
         if (trace) {
           await client.query('SELECT set_config($1, $2, true)', ['app.trace_id', trace.traceId]);
         }
         const result = await client.query(text, params);
+        await client.query('COMMIT');
         recordDbMetrics(operation, Date.now() - start);
         return result;
+      } catch (err) {
+        await client.query('ROLLBACK').catch(() => {});
+        throw err;
       } finally {
         client.release();
       }

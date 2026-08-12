@@ -33,7 +33,7 @@ export function createRateLimiter(opts: RateLimiterOpts): RateLimiter {
   }, Math.min(windowMs, 60_000)).unref();
 
   const middleware = (req: Request, _res: Response, next: NextFunction) => {
-    if (process.env.NODE_ENV === 'test') return next();
+    if (process.env.NODE_ENV === 'test' || process.env.NODE_ENV === 'development') return next();
     const key = keyFn ? keyFn(req) : req.ip || req.socket.remoteAddress || 'unknown';
     const now = Date.now();
     const existing = windows.get(key);

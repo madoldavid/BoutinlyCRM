@@ -77,6 +77,7 @@ export type ForecastCategory = 'pipeline' | 'best_case' | 'commit' | 'omitted' |
 
 export interface Pipeline {
   id: string;
+  organization_id?: string;
   name: string;
   is_default: boolean;
   is_archived: boolean;
@@ -85,6 +86,7 @@ export interface Pipeline {
 export interface Stage {
   id: string;
   pipeline_id: string;
+  organization_id?: string;
   name: string;
   probability: number; // 0-100
   order: number;

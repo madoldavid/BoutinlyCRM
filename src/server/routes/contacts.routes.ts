@@ -44,6 +44,10 @@ export function registerContactsRoutes(
   app.get('/api/contacts/:id', authenticate(config), asyncHandler<AuthenticatedRequest>(async (req, res) => {
     const contact = await repository.getContactById(req.params.id);
     if (!contact) throw new ApiError(404, 'Contact not found.', 'not_found');
+    // RBAC: verify the contact belongs to the current user's organization
+    if (contact.organization_id && contact.organization_id !== req.principal.organizationId) {
+      throw new ApiError(404, 'Contact not found.', 'not_found');
+    }
     res.json({ contact });
   }));
 
@@ -77,28 +81,38 @@ export function registerContactsRoutes(
 
   app.put('/api/contacts/:id', authenticate(config), asyncHandler<AuthenticatedRequest>(async (req, res) => {
     requireWriteAccess(req);
-    const body = updateContactSchema.parse(req.body);
-    const contact = await repository.updateContact(req.params.id, body);
+    const contact = await repository.getContactById(req.params.id);
     if (!contact) throw new ApiError(404, 'Contact not found.', 'not_found');
+    // RBAC: verify the contact belongs to the current user's organization
+    if (contact.organization_id && contact.organization_id !== req.principal.organizationId) {
+      throw new ApiError(404, 'Contact not found.', 'not_found');
+    }
+    const body = updateContactSchema.parse(req.body);
+    const updated = await repository.updateContact(req.params.id, body);
+    if (!updated) throw new ApiError(404, 'Contact not found.', 'not_found');
 
     await repository.addAuditLog({
       user_id: req.principal.userId,
       user_name: req.principal.email,
       action: 'contact.updated',
       entity_type: 'contact',
-      entity_id: contact.id,
+      entity_id: updated.id,
       diff: body,
       ip_address: String(req.ip || ''),
       user_agent: String(req.get('user-agent') || ''),
     });
 
-    res.json({ contact });
+    res.json({ contact: updated });
   }));
 
   app.delete('/api/contacts/:id', authenticate(config), asyncHandler<AuthenticatedRequest>(async (req, res) => {
     requireWriteAccess(req);
     const contact = await repository.getContactById(req.params.id);
     if (!contact) throw new ApiError(404, 'Contact not found.', 'not_found');
+    // RBAC: verify the contact belongs to the current user's organization
+    if (contact.organization_id && contact.organization_id !== req.principal.organizationId) {
+      throw new ApiError(404, 'Contact not found.', 'not_found');
+    }
 
     await repository.deleteContact(req.params.id);
 
@@ -143,6 +157,13 @@ export function registerContactsRoutes(
     const csvData = req.body.csv as string | undefined;
     const defaultOwnerId = (req.body.owner_id as string) || req.principal.userId;
 
+    // RBAC: enforce ownership boundaries on CSV import
+    const owner = await repository.getUserById(defaultOwnerId);
+    if (!owner) throw new ApiError(400, 'Owner user does not exist.', 'invalid_owner');
+    if (!canAccessOwner(req.principal, defaultOwnerId, owner.team_id)) {
+      throw new ApiError(403, 'You cannot create records for that owner.', 'owner_forbidden');
+    }
+
     if (!csvData || typeof csvData !== 'string') {
       throw new ApiError(400, 'Missing CSV data. Send as JSON: { csv: "header1,header2\\nvalue1,value2" }', 'missing_csv');
     }
@@ -158,9 +179,6 @@ export function registerContactsRoutes(
     if (missingColumns.length > 0) {
       throw new ApiError(400, `CSV is missing required columns: ${missingColumns.join(', ')}. Found: ${headers.join(', ')}`, 'missing_columns');
     }
-
-    const owner = await repository.getUserById(defaultOwnerId);
-    if (!owner) throw new ApiError(400, 'Owner user does not exist.', 'invalid_owner');
 
     // Resolve and require default account_id from the request body when rows lack it
     const defaultAccountId = (req.body.account_id as string || '').trim();

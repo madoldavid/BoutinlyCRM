@@ -16,7 +16,6 @@ async function createTestHarness() {
   process.env.NODE_ENV = 'test';
   process.env.JWT_SECRET = 'test-secret-that-is-long-enough-for-hmac';
   process.env.PASSWORD_PEPPER = 'test-password-pepper';
-  process.env.DEMO_PASSWORD = 'ChangeMe123!';
 
   const config = loadConfig();
   const repository = new InMemoryCrmRepository(config.PASSWORD_PEPPER);
@@ -77,17 +76,18 @@ describe('Boutinly CRM API', () => {
 
   // ── Auth ──────────────────────────────────────────
 
-  it('signs up, allows second signup in demo mode, and logs in', async () => {
+  it('allows multiple signups (open registration), each creating their own org, and logs in', async () => {
     const sr = await request(h.app).post('/api/auth/signup')
       .send({ name: 'Admin', email: 'a@t.com', password: 'ChangeMe123!', company_name: 'TC' })
       .expect(201);
     expect(sr.body.token).toBeTruthy();
 
-    // In demo mode, multiple signups are allowed (no user-count restriction)
+    // Open registration: a second signup provisions a separate org
     const sr2 = await request(h.app).post('/api/auth/signup')
       .send({ name: 'B', email: 'b@t.com', password: 'ChangeMe123!', company_name: 'TC2' })
       .expect(201);
     expect(sr2.body.token).toBeTruthy();
+    expect(sr2.body.user.organization_id).not.toBe(sr.body.user.organization_id);
 
     const lr = await request(h.app).post('/api/auth/login')
       .send({ email: 'a@t.com', password: 'ChangeMe123!' }).expect(200);
@@ -99,8 +99,38 @@ describe('Boutinly CRM API', () => {
     const r = await request(h.app).get('/api/crm/bootstrap')
       .set('Authorization', `Bearer ${token}`).expect(200);
     expect(r.body.users).toHaveLength(1);
-    expect(r.body.pipelines).toHaveLength(2); // 1 seed + 1 from signup
-    expect(r.body.stages).toHaveLength(14); // 7 seed + 7 from signup
+    expect(r.body.pipelines).toHaveLength(1); // signup provisions the org pipeline
+    expect(r.body.stages).toHaveLength(7); // signup provisions default stages
+  });
+
+  it('does not leak pipelines/stages across organizations', async () => {
+    const a = await h.signup('A', 'pa@t.com', 'ChangeMe123!', 'OrgA');
+    const b = await h.signup('B', 'pb@t.com', 'ChangeMe123!', 'OrgB');
+
+    const bsA = await request(h.app).get('/api/crm/bootstrap')
+      .set('Authorization', `Bearer ${a.token}`).expect(200);
+    const bsB = await request(h.app).get('/api/crm/bootstrap')
+      .set('Authorization', `Bearer ${b.token}`).expect(200);
+
+    expect(bsA.body.pipelines).toHaveLength(1);
+    expect(bsA.body.stages).toHaveLength(7);
+    expect(bsB.body.pipelines).toHaveLength(1);
+    expect(bsB.body.stages).toHaveLength(7);
+
+    // Each org only sees its own pipeline & stages
+    expect(bsA.body.pipelines[0].id).not.toBe(bsB.body.pipelines[0].id);
+    expect(bsA.body.stages.map((s: any) => s.id)).not.toContain(bsB.body.stages[0].id);
+    expect(bsB.body.stages.map((s: any) => s.id)).not.toContain(bsA.body.stages[0].id);
+
+    // List endpoints are equally isolated
+    const pipesA = await request(h.app).get('/api/pipelines')
+      .set('Authorization', `Bearer ${a.token}`).expect(200);
+    const stagesB = await request(h.app).get('/api/stages')
+      .set('Authorization', `Bearer ${b.token}`).expect(200);
+    expect(pipesA.body.pipelines).toHaveLength(1);
+    expect(pipesA.body.pipelines[0].id).toBe(bsA.body.pipelines[0].id);
+    expect(stagesB.body.stages).toHaveLength(7);
+    expect(stagesB.body.stages.map((s: any) => s.id)).not.toContain(bsA.body.stages[0].id);
   });
 
   it('rejects missing token', async () => {
@@ -123,10 +153,10 @@ describe('Boutinly CRM API', () => {
 
   it('blocks viewer writes', async () => {
     const at = await h.signup('A', 'a@t.com', 'ChangeMe123!', 'TC');
-    await request(h.app).post('/api/users/invite')
+    const invite = await request(h.app).post('/api/users/invite')
       .set('Authorization', `Bearer ${at.token}`)
       .send({ name: 'V', email: 'v@t.com', role: UserRole.VIEWER }).expect(201);
-    const vt = await h.login('v@t.com', 'ChangeMe123!');
+    const vt = await h.login('v@t.com', invite.body.temporary_password);
     await request(h.app).post('/api/contacts')
       .set('Authorization', `Bearer ${vt}`)
       .send({ first_name: 'R', last_name: 'O', email: 'ro@x.com', account_id: 'na', owner_id: 'nu' })

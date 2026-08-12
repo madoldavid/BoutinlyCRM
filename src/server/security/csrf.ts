@@ -71,7 +71,7 @@ export function csrfProtection() {
     }
 
     // In test/dev, skip CSRF enforcement for API testing convenience
-    if (process.env.NODE_ENV === 'test') return next();
+    if (process.env.NODE_ENV === 'test' || process.env.NODE_ENV === 'development') return next();
 
     // Validate CSRF on mutating methods (skip exempt paths)
     if (isExempt) return next();

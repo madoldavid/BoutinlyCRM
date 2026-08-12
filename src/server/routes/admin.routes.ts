@@ -27,7 +27,13 @@ export function registerAdminRoutes(
 
   app.post('/api/users/invite', authenticate(config), authorize(adminRoles), asyncHandler<AuthenticatedRequest>(async (req, res) => {
     const body = inviteUserSchema.parse(req.body);
-    const user = await repository.addUser(body);
+
+    // Only super_admin can invite new super_admins
+    if (body.role === UserRole.SUPER_ADMIN && req.principal.role !== UserRole.SUPER_ADMIN) {
+      throw new ApiError(403, 'Only super admins can invite other super admins.', 'super_admin_required');
+    }
+
+    const { user, temporaryPassword } = await repository.addUser(body);
 
     await repository.addAuditLog({
       user_id: req.principal.userId,
@@ -40,13 +46,21 @@ export function registerAdminRoutes(
       user_agent: String(req.get('user-agent') || ''),
     });
 
-    res.status(201).json({ user });
+    res.status(201).json({ user, temporary_password: temporaryPassword });
   }));
 
   app.put('/api/users/:id/role', authenticate(config), authorize(adminRoles), asyncHandler<AuthenticatedRequest>(async (req, res) => {
     const body = updateUserRoleSchema.parse(req.body);
     if (req.params.id === req.principal.userId) {
       throw new ApiError(400, 'Cannot change your own role.', 'self_role_change');
+    }
+
+    // Only super_admin can assign or remove super_admin role
+    const target = await repository.getUserById(req.params.id);
+    if (!target) throw new ApiError(404, 'User not found.', 'not_found');
+
+    if ((body.role === UserRole.SUPER_ADMIN || target.role === UserRole.SUPER_ADMIN) && req.principal.role !== UserRole.SUPER_ADMIN) {
+      throw new ApiError(403, 'Only super admins can assign or revoke the super admin role.', 'super_admin_required');
     }
 
     const user = await repository.updateUserRole(req.params.id, body.role);
@@ -71,6 +85,13 @@ export function registerAdminRoutes(
       throw new ApiError(400, 'Cannot toggle your own status.', 'self_status_change');
     }
 
+    // Only super_admin can deactivate/reactivate admins or super_admins
+    const targetUser = await repository.getUserById(req.params.id);
+    if (!targetUser) throw new ApiError(404, 'User not found.', 'not_found');
+    if ([UserRole.SUPER_ADMIN, UserRole.ADMIN].includes(targetUser.role) && req.principal.role !== UserRole.SUPER_ADMIN) {
+      throw new ApiError(403, 'Only super admins can modify the status of admin users.', 'super_admin_required');
+    }
+
     const user = await repository.toggleUserStatus(req.params.id);
     if (!user) throw new ApiError(404, 'User not found.', 'not_found');
 
@@ -88,7 +109,35 @@ export function registerAdminRoutes(
     res.json({ user });
   }));
 
-  // ─── Custom Fields ──────────────────────────────────
+  app.delete('/api/users/:id', authenticate(config), authorize(adminRoles), asyncHandler<AuthenticatedRequest>(async (req, res) => {
+    if (req.params.id === req.principal.userId) {
+      throw new ApiError(400, 'Cannot delete your own account.', 'self_delete');
+    }
+
+    const target = await repository.getUserById(req.params.id);
+    if (!target) throw new ApiError(404, 'User not found.', 'not_found');
+
+    // Only super_admin can delete admin or super_admin accounts
+    if ([UserRole.SUPER_ADMIN, UserRole.ADMIN].includes(target.role) && req.principal.role !== UserRole.SUPER_ADMIN) {
+      throw new ApiError(403, 'Only super admins can delete admin accounts.', 'super_admin_required');
+    }
+
+    const deleted = await repository.deleteUser(req.params.id);
+    if (!deleted) throw new ApiError(404, 'User not found.', 'not_found');
+
+    await repository.addAuditLog({
+      user_id: req.principal.userId,
+      user_name: req.principal.email,
+      action: 'user.deleted',
+      entity_type: 'user',
+      entity_id: req.params.id,
+      diff: { email: target.email, name: target.name },
+      ip_address: String(req.ip || ''),
+      user_agent: String(req.get('user-agent') || ''),
+    });
+
+    res.status(204).send();
+  }));
 
   app.get('/api/custom-fields', authenticate(config), asyncHandler(async (_req, res) => {
     const fields = await repository.listCustomFieldDefinitions();

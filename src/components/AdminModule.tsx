@@ -51,6 +51,7 @@ export default function AdminModule() {
     inviteUser,
     toggleUserStatus,
     updateUserRole,
+    deleteUser,
     customFields,
     addCustomFieldDefinition,
     deleteCustomFieldDefinition,
@@ -998,6 +999,20 @@ export default function AdminModule() {
                         title={u.is_active ? 'Deactivate User Session' : 'Reactivate User Session'}
                       >
                         {u.is_active ? <UserX className="w-4 h-4" /> : <UserCheck className="w-4 h-4" />}
+                      </button>
+                    )}
+                    {/* Delete user */}
+                    {!isSelf && (
+                      <button
+                        onClick={() => {
+                          if (confirm(`Permanently delete ${u.name} (${u.email})? This cannot be undone.`)) {
+                            deleteUser(u.id);
+                          }
+                        }}
+                        className="p-1.5 rounded-lg border border-theme-border text-theme-secondary/40 hover:text-danger hover:border-danger/30 hover:bg-danger/5 transition-colors cursor-pointer bg-transparent"
+                        title="Delete User Permanently"
+                      >
+                        <Trash2 className="w-4 h-4" />
                       </button>
                     )}
                   </div>

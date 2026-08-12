@@ -145,6 +145,12 @@ export default function ContactsModule() {
     custom_values: {} as Record<string, any>
   });
 
+  // Inline "quick create account" inside the create-contact modal
+  const [showQuickAccountForm, setShowQuickAccountForm] = useState(false);
+  const [quickAccountName, setQuickAccountName] = useState('');
+  const [quickAccountIndustry, setQuickAccountIndustry] = useState('');
+  const [isCreatingQuickAccount, setIsCreatingQuickAccount] = useState(false);
+
   // Merge states
   const [mergeSourceId, setMergeSourceId] = useState('');
   const [mergeTargetId, setMergeTargetId] = useState('');
@@ -315,25 +321,6 @@ export default function ContactsModule() {
   };
 
   // Edit Contact Handler
-  const handleEditContactSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!selectedContactId) return;
-    updateContact(selectedContactId, {
-      first_name: contactForm.first_name,
-      last_name: contactForm.last_name,
-      email: contactForm.email,
-      phone: contactForm.phone,
-      title: contactForm.title,
-      linkedin_url: contactForm.linkedin_url,
-      account_id: contactForm.account_id || '',
-      owner_id: contactForm.owner_id,
-      tags: contactForm.tags.split(',').map(t => t.trim()).filter(Boolean),
-      custom_fields: contactForm.custom_values,
-    });
-    setShowEditContact(false);
-    toast.success('Contact updated', `${contactForm.first_name} ${contactForm.last_name}`);
-  };
-
   const openEditContactModal = () => {
     if (!activeContact) return;
     setContactForm({
@@ -352,9 +339,34 @@ export default function ContactsModule() {
   };
 
   // Create Contact Handler
-  const handleCreateContactSubmit = (e: React.FormEvent) => {
+  const handleCreateContactSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    addContact({
+
+    // Client-side validation — surface specific field errors before API call
+    if (!contactForm.account_id) {
+      if (scopedAccounts.length === 0) {
+        setShowQuickAccountForm(true);
+        toast.error('Missing company account', 'No accounts yet — create one in the Company field to attach this contact.');
+      } else {
+        toast.error('Missing company account', 'Please select a company for this contact.');
+      }
+      return;
+    }
+    if (!contactForm.owner_id) {
+      toast.error('Missing owner', 'Please select an account manager.');
+      return;
+    }
+    if (!contactForm.first_name.trim() || !contactForm.last_name.trim()) {
+      toast.error('Missing name', 'First name and last name are required.');
+      return;
+    }
+    if (!contactForm.email.trim()) {
+      toast.error('Missing email', 'Email address is required.');
+      return;
+    }
+
+    try {
+      await addContact({
       first_name: contactForm.first_name,
       last_name: contactForm.last_name,
       email: contactForm.email,
@@ -367,40 +379,25 @@ export default function ContactsModule() {
       custom_fields: contactForm.custom_values,
       unsubscribed: false,
     });
-    setShowCreateContact(false);
-    // Reset
-    setContactForm({
-      first_name: '',
-      last_name: '',
-      email: '',
-      phone: '',
-      title: '',
-      linkedin_url: '',
-      account_id: '',
-      owner_id: currentUser?.id ?? '',
-      tags: '',
-      custom_values: {},
-    });
+      setShowCreateContact(false);
+      // Reset form only on success
+      setContactForm({
+        first_name: '',
+        last_name: '',
+        email: '',
+        phone: '',
+        title: '',
+        linkedin_url: '',
+        account_id: '',
+        owner_id: currentUser?.id ?? '',
+        tags: '',
+        custom_values: {},
+      });
+    } catch {
+      // Error toast already shown by store — keep modal open so user can fix
+    }
   };
 
-  // Edit Account Handler
-  const handleEditAccountSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!selectedAccountId) return;
-    updateAccount(selectedAccountId, {
-      name: accountForm.name,
-      domain: accountForm.domain,
-      industry: accountForm.industry,
-      size: accountForm.size,
-      website: accountForm.website,
-      arr: accountForm.arr,
-      owner_id: accountForm.owner_id,
-      tags: accountForm.tags.split(',').map(t => t.trim()).filter(Boolean),
-      custom_fields: accountForm.custom_values,
-    });
-    setShowEditAccount(false);
-    toast.success('Account updated', accountForm.name);
-  };
 
   const openEditAccountModal = () => {
     if (!activeAccount) return;
@@ -419,31 +416,75 @@ export default function ContactsModule() {
   };
 
   // Create Account Handler
-  const handleCreateAccountSubmit = (e: React.FormEvent) => {
+  const handleCreateAccountSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    addAccount({
-      name: accountForm.name,
-      domain: accountForm.domain,
-      industry: accountForm.industry,
-      size: accountForm.size,
-      website: accountForm.website,
-      arr: Number(accountForm.arr),
-      owner_id: accountForm.owner_id,
-      tags: accountForm.tags.split(',').map(t => t.trim()).filter(Boolean),
-      custom_fields: accountForm.custom_values,
-    });
-    setShowCreateAccount(false);
-    setAccountForm({
-      name: '',
-      domain: '',
-      industry: '',
-      size: '51-200',
-      website: '',
-      arr: 0,
-      owner_id: currentUser?.id ?? '',
-      tags: '',
-      custom_values: {},
-    });
+    try {
+      await addAccount({
+        name: accountForm.name,
+        domain: accountForm.domain,
+        industry: accountForm.industry,
+        size: accountForm.size,
+        website: accountForm.website,
+        arr: Number(accountForm.arr),
+        owner_id: accountForm.owner_id,
+        tags: accountForm.tags.split(',').map(t => t.trim()).filter(Boolean),
+        custom_fields: accountForm.custom_values,
+      });
+      setShowCreateAccount(false);
+      setAccountForm({
+        name: '',
+        domain: '',
+        industry: '',
+        size: '51-200',
+        website: '',
+        arr: 0,
+        owner_id: currentUser?.id ?? '',
+        tags: '',
+        custom_values: {},
+      });
+    } catch {
+      // Error toast already shown by store — keep modal open
+    }
+  };
+
+  // Quick-create an account inline while creating a contact, then select it.
+  // NOTE: this is deliberately NOT a <form> — it lives inside the contact form,
+  // and a nested form (or a type="submit" button) would trigger the outer form's
+  // native submission, reloading the whole SPA. We use buttons + keydown handling
+  // so creation is fully isolated from the parent form.
+  const handleQuickCreateAccount = async (e?: React.SyntheticEvent) => {
+    if (e) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
+    const name = quickAccountName.trim();
+    if (!name) {
+      toast.error('Missing company name', 'Please enter a company name to create the account.');
+      return;
+    }
+    setIsCreatingQuickAccount(true);
+    try {
+      const created = await addAccount({
+        name,
+        domain: '',
+        industry: quickAccountIndustry.trim(),
+        size: '51-200',
+        website: '',
+        arr: 0,
+        owner_id: currentUser?.id ?? '',
+        tags: [],
+        custom_fields: {},
+      });
+      setContactForm(prev => ({ ...prev, account_id: created.id }));
+      setQuickAccountName('');
+      setQuickAccountIndustry('');
+      setShowQuickAccountForm(false);
+      toast.success('Company created & selected', created.name);
+    } catch {
+      // Error toast already shown by store — keep the inline form open
+    } finally {
+      setIsCreatingQuickAccount(false);
+    }
   };
 
   // Bulk CSV Import (file-based via store)
@@ -1479,6 +1520,65 @@ export default function ContactsModule() {
                     <option value="">-- Select Company --</option>
                     {scopedAccounts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
                   </select>
+                  {scopedAccounts.length === 0 && !showQuickAccountForm && (
+                    <p className="text-xs text-theme-secondary leading-relaxed pt-1">
+                      No accounts yet. Create one below so you can attach this contact.
+                    </p>
+                  )}
+                  {!showQuickAccountForm && (
+                    <button
+                      type="button"
+                      onClick={() => setShowQuickAccountForm(true)}
+                      className="mt-1 text-xs font-semibold text-theme-accent hover:underline cursor-pointer bg-transparent border-none p-0"
+                    >
+                      + New Company
+                    </button>
+                  )}
+                  {showQuickAccountForm && (
+                    <div
+                      className="mt-2 space-y-2 border border-theme-border rounded-lg p-2.5 bg-theme-inset/60"
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          handleQuickCreateAccount(e);
+                        }
+                      }}
+                    >
+                      <input
+                        type="text"
+                        placeholder="Company name *"
+                        value={quickAccountName}
+                        onChange={(e) => setQuickAccountName(e.target.value)}
+                        autoFocus
+                        className="w-full bg-theme-base text-theme-primary rounded border border-theme-border px-2.5 py-1.5 focus:ring-1 focus:ring-theme-accent focus:outline-none"
+                      />
+                      <input
+                        type="text"
+                        placeholder="Industry (optional)"
+                        value={quickAccountIndustry}
+                        onChange={(e) => setQuickAccountIndustry(e.target.value)}
+                        className="w-full bg-theme-base text-theme-primary rounded border border-theme-border px-2.5 py-1.5 focus:ring-1 focus:ring-theme-accent focus:outline-none"
+                      />
+                      <div className="flex justify-end gap-2">
+                        <button
+                          type="button"
+                          onClick={() => { setShowQuickAccountForm(false); setQuickAccountName(''); setQuickAccountIndustry(''); }}
+                          className="px-2.5 py-1 border border-theme-border hover:bg-theme-base text-theme-primary rounded text-xs font-semibold cursor-pointer bg-transparent"
+                        >
+                          Cancel
+                        </button>
+                        <button
+                          type="button"
+                          disabled={isCreatingQuickAccount}
+                          onClick={(e) => handleQuickCreateAccount(e)}
+                          className="px-2.5 py-1 bg-theme-accent hover:opacity-90 text-white rounded text-xs font-semibold cursor-pointer disabled:opacity-50"
+                        >
+                          {isCreatingQuickAccount ? 'Creating…' : 'Create & Select'}
+                        </button>
+                      </div>
+                    </div>
+                  )}
                 </div>
                 <div className="space-y-1">
                   <label className="block font-semibold text-theme-secondary">Account Manager</label>
@@ -1504,7 +1604,7 @@ export default function ContactsModule() {
               </div>
 
               {/* Dynamic inputs for admin custom fields */}
-              {customFields.filter(f => f.entity_type === 'contact').map(f => (
+              {customFields.filter(f => f.entity_type === 'contact' && f.is_visible).map(f => (
                 <div key={f.id} className="space-y-1">
                   <label className="block font-semibold text-theme-secondary">{f.label}</label>
                   {f.field_type === 'number' ? (
@@ -1560,22 +1660,33 @@ export default function ContactsModule() {
           footer={
             <div className="flex gap-2">
               <Button variant="secondary" onClick={() => setShowEditContact(false)}>Cancel</Button>
-              <Button variant="primary" onClick={() => {
+              <Button variant="primary" onClick={async () => {
                 if (!selectedContactId) return;
-                updateContact(selectedContactId, {
-                  first_name: contactForm.first_name,
-                  last_name: contactForm.last_name,
-                  email: contactForm.email,
-                  phone: contactForm.phone,
-                  title: contactForm.title,
-                  linkedin_url: contactForm.linkedin_url,
-                  account_id: contactForm.account_id || '',
-                  owner_id: contactForm.owner_id,
-                  tags: contactForm.tags.split(',').map((t: string) => t.trim()).filter(Boolean),
-                  custom_fields: contactForm.custom_values,
-                });
-                setShowEditContact(false);
-                toast.success('Contact updated', `${contactForm.first_name} ${contactForm.last_name}`);
+                if (!contactForm.account_id) {
+                  toast.error('Missing company account', 'Please select a company for this contact.');
+                  return;
+                }
+                if (!contactForm.first_name.trim() || !contactForm.last_name.trim()) {
+                  toast.error('Missing name', 'First name and last name are required.');
+                  return;
+                }
+                try {
+                  await updateContact(selectedContactId, {
+                    first_name: contactForm.first_name,
+                    last_name: contactForm.last_name,
+                    email: contactForm.email,
+                    phone: contactForm.phone,
+                    title: contactForm.title,
+                    linkedin_url: contactForm.linkedin_url,
+                    account_id: contactForm.account_id || '',
+                    owner_id: contactForm.owner_id,
+                    tags: contactForm.tags.split(',').map((t: string) => t.trim()).filter(Boolean),
+                    custom_fields: contactForm.custom_values,
+                  });
+                  setShowEditContact(false);
+                } catch {
+                  // Error toast already shown by store — keep modal open
+                }
               }}>Save Changes</Button>
             </div>
           }
@@ -1605,8 +1716,8 @@ export default function ContactsModule() {
             <Input label="Tags (comma separated)" value={contactForm.tags} onChange={(e) => setContactForm({ ...contactForm, tags: e.target.value })} />
             {customFields.filter(f => f.entity_type === 'contact' && f.is_visible).map(f => (
               <Input key={f.id} label={f.label} type={f.field_type === 'number' ? 'number' : 'text'}
-                value={String(contactForm.custom_values[f.key] || '')}
-                onChange={(e) => setContactForm({ ...contactForm, custom_values: { ...contactForm.custom_values, [f.key]: f.field_type === 'number' ? Number(e.target.value) : e.target.value } })}
+                value={contactForm.custom_values[f.key] ?? ''}
+                onChange={(e) => setContactForm({ ...contactForm, custom_values: { ...contactForm.custom_values, [f.key]: f.field_type === 'number' ? (e.target.value === '' ? undefined : Number(e.target.value)) : e.target.value } })}
               />
             ))}
           </div>
@@ -1700,6 +1811,34 @@ export default function ContactsModule() {
                 />
               </div>
 
+              {/* Dynamic custom fields for accounts */}
+              {customFields.filter(f => f.entity_type === 'account' && f.is_visible).map(f => (
+                <div key={f.id} className="space-y-1">
+                  <label className="block font-semibold text-theme-secondary">{f.label}</label>
+                  {f.field_type === 'number' ? (
+                    <input
+                      type="number"
+                      value={accountForm.custom_values?.[f.key] ?? ''}
+                      onChange={(e) => setAccountForm({
+                        ...accountForm,
+                        custom_values: { ...accountForm.custom_values, [f.key]: e.target.value === '' ? undefined : Number(e.target.value) }
+                      })}
+                      className="w-full bg-theme-base text-theme-primary rounded border border-theme-border px-2.5 py-1.5 focus:ring-1 focus:ring-theme-accent focus:outline-none"
+                    />
+                  ) : (
+                    <input
+                      type="text"
+                      value={accountForm.custom_values?.[f.key] ?? ''}
+                      onChange={(e) => setAccountForm({
+                        ...accountForm,
+                        custom_values: { ...accountForm.custom_values, [f.key]: e.target.value }
+                      })}
+                      className="w-full bg-theme-base text-theme-primary rounded border border-theme-border px-2.5 py-1.5 focus:ring-1 focus:ring-theme-accent focus:outline-none"
+                    />
+                  )}
+                </div>
+              ))}
+
               <div className="pt-4 border-t border-theme-border flex justify-end gap-2">
                 <button
                   type="button"
@@ -1729,21 +1868,24 @@ export default function ContactsModule() {
           footer={
             <div className="flex gap-2">
               <Button variant="secondary" onClick={() => setShowEditAccount(false)}>Cancel</Button>
-              <Button variant="primary" onClick={() => {
+              <Button variant="primary" onClick={async () => {
                 if (!selectedAccountId) return;
-                updateAccount(selectedAccountId, {
-                  name: accountForm.name,
-                  domain: accountForm.domain,
-                  industry: accountForm.industry,
-                  size: accountForm.size,
-                  website: accountForm.website,
-                  arr: accountForm.arr,
-                  owner_id: accountForm.owner_id,
-                  tags: accountForm.tags.split(',').map((t: string) => t.trim()).filter(Boolean),
-                  custom_fields: accountForm.custom_values,
-                });
-                setShowEditAccount(false);
-                toast.success('Account updated', accountForm.name);
+                try {
+                  await updateAccount(selectedAccountId, {
+                    name: accountForm.name,
+                    domain: accountForm.domain,
+                    industry: accountForm.industry,
+                    size: accountForm.size,
+                    website: accountForm.website,
+                    arr: accountForm.arr,
+                    owner_id: accountForm.owner_id,
+                    tags: accountForm.tags.split(',').map((t: string) => t.trim()).filter(Boolean),
+                    custom_fields: accountForm.custom_values,
+                  });
+                  setShowEditAccount(false);
+                } catch {
+                  // Error toast already shown by store — keep modal open
+                }
               }}>Save Changes</Button>
             </div>
           }
@@ -1773,8 +1915,8 @@ export default function ContactsModule() {
             </Select>
             {customFields.filter(f => f.entity_type === 'account' && f.is_visible).map(f => (
               <Input key={f.id} label={f.label} type={f.field_type === 'number' ? 'number' : 'text'}
-                value={String(accountForm.custom_values[f.key] || '')}
-                onChange={(e) => setAccountForm({ ...accountForm, custom_values: { ...accountForm.custom_values, [f.key]: f.field_type === 'number' ? Number(e.target.value) : e.target.value } })}
+                value={accountForm.custom_values[f.key] ?? ''}
+                onChange={(e) => setAccountForm({ ...accountForm, custom_values: { ...accountForm.custom_values, [f.key]: f.field_type === 'number' ? (e.target.value === '' ? undefined : Number(e.target.value)) : e.target.value } })}
               />
             ))}
           </div>

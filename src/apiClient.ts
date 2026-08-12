@@ -290,6 +290,16 @@ export class ApiClient {
   // ─── Bootstrap ─────────────────────────────────────
 
   async bootstrapCrm(): Promise<CrmBootstrapResponse> {
+    // Admin-only endpoints — resolve gracefully for non-admin users.
+    const safeUsers = this.listUsers().catch((e: unknown) => {
+      if (e instanceof ApiError && e.status === 403) return [] as User[];
+      throw e;
+    });
+    const safeAuditLogs = this.listAuditLogs({ limit: 10000 }).catch((e: unknown) => {
+      if (e instanceof ApiError && e.status === 403) return { data: [] as AuditLog[], total: 0, page: 1, limit: 0 };
+      throw e;
+    });
+
     const [
       users,
       accountsRes,
@@ -305,7 +315,7 @@ export class ApiClient {
       emailCampaigns,
       auditLogsRes,
     ] = await Promise.all([
-      this.listUsers(),
+      safeUsers,
       this.listAccounts({ limit: 10000 }),
       this.listContacts({ limit: 10000 }),
       this.listPipelines(),
@@ -317,7 +327,7 @@ export class ApiClient {
       this.listCustomFields(),
       this.listEmailTemplates(),
       this.listEmailCampaigns(),
-      this.listAuditLogs({ limit: 10000 }),
+      safeAuditLogs,
     ]);
 
     return {
@@ -579,9 +589,9 @@ export class ApiClient {
     return res.users;
   }
 
-  async inviteUser(data: { name: string; email: string; role: UserRole }): Promise<User> {
-    const res = await this.request<{ user: User }>('/api/users/invite', { method: 'POST', body: JSON.stringify(data) });
-    return res.user;
+  async inviteUser(data: { name: string; email: string; role: UserRole }): Promise<{ user: User; temporary_password: string }> {
+    const res = await this.request<{ user: User; temporary_password: string }>('/api/users/invite', { method: 'POST', body: JSON.stringify(data) });
+    return res;
   }
 
   async updateUserRole(userId: string, role: UserRole): Promise<User> {
@@ -592,6 +602,10 @@ export class ApiClient {
   async toggleUserStatus(userId: string): Promise<User> {
     const res = await this.request<{ user: User }>(`/api/users/${userId}/toggle-status`, { method: 'POST' });
     return res.user;
+  }
+
+  async deleteUser(userId: string): Promise<void> {
+    await this.request<void>(`/api/users/${userId}`, { method: 'DELETE' });
   }
 
   async unlockAccount(email: string): Promise<User> {
