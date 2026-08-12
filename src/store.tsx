@@ -7,21 +7,6 @@ import React, { createContext, useContext, useState, useEffect, useCallback, use
 import type { User, UserRole, Account, Contact, Pipeline, Stage, Deal, Task, Activity, Notification, CustomFieldDefinition, EmailTemplate, EmailCampaign, AuditLog, FileRecord, ApprovalRequest } from './types';
 import { runtimeConfig } from './runtimeConfig';
 import { toast } from './components/ui/toast';
-import {
-  INITIAL_USERS,
-  INITIAL_ACCOUNTS,
-  INITIAL_CONTACTS,
-  INITIAL_PIPELINES,
-  INITIAL_STAGES,
-  INITIAL_DEALS,
-  INITIAL_TASKS,
-  INITIAL_ACTIVITIES,
-  INITIAL_NOTIFICATIONS,
-  INITIAL_CUSTOM_FIELDS,
-  INITIAL_TEMPLATES,
-  INITIAL_CAMPAIGNS,
-  INITIAL_AUDIT_LOGS,
-} from './initialData';
 import { apiClient, ApiError, type MfaRequiredResponse } from './apiClient';
 
 // ─── Context type ──────────────────────────────────────
@@ -130,7 +115,7 @@ interface CRMContextType {
   mergeContacts: (sourceId: string, targetId: string, finalValues: Partial<Contact>) => Promise<void>;
 
   // Account CRUD
-  addAccount: (account: Omit<Account, 'id' | 'created_at'>) => Promise<void>;
+  addAccount: (account: Omit<Account, 'id' | 'created_at'>) => Promise<Account>;
   updateAccount: (id: string, account: Partial<Account>) => Promise<void>;
   deleteAccount: (id: string) => Promise<void>;
 
@@ -162,6 +147,7 @@ interface CRMContextType {
   inviteUser: (name: string, email: string, role: UserRole) => Promise<void>;
   toggleUserStatus: (userId: string) => Promise<void>;
   updateUserRole: (userId: string, role: UserRole) => Promise<void>;
+  deleteUser: (userId: string) => Promise<void>;
 
   // Communication Module
   addEmailTemplate: (template: Omit<EmailTemplate, 'id'>) => Promise<void>;
@@ -237,30 +223,129 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return fallback;
   }
 
-  const [users, setUsers] = useState<User[]>(() => loadFromStorage('users', INITIAL_USERS));
-  const [accounts, setAccounts] = useState<Account[]>(() => loadFromStorage('accounts', INITIAL_ACCOUNTS));
-  const [contacts, setContacts] = useState<Contact[]>(() => loadFromStorage('contacts', INITIAL_CONTACTS));
-  const [pipelines, setPipelines] = useState<Pipeline[]>(INITIAL_PIPELINES);
+  const [users, setUsers] = useState<User[]>(() => loadFromStorage('users', []));
+  const [accounts, setAccounts] = useState<Account[]>(() => loadFromStorage('accounts', []));
+  const [contacts, setContacts] = useState<Contact[]>(() => loadFromStorage('contacts', []));
+  const [pipelines, setPipelines] = useState<Pipeline[]>([]);
   const pipelinesRef = useRef(pipelines);
   pipelinesRef.current = pipelines;
-  const [stages, setStages] = useState<Stage[]>(INITIAL_STAGES);
-  const [deals, setDeals] = useState<Deal[]>(() => loadFromStorage('deals', INITIAL_DEALS));
-  const [tasks, setTasks] = useState<Task[]>(() => loadFromStorage('tasks', INITIAL_TASKS));
-  const [activities, setActivities] = useState<Activity[]>(() => loadFromStorage('activities', INITIAL_ACTIVITIES));
-  const [notifications, setNotifications] = useState<Notification[]>(() => loadFromStorage('notifications', INITIAL_NOTIFICATIONS));
-  const [customFields, setCustomFields] = useState<CustomFieldDefinition[]>(() => loadFromStorage('custom_fields', INITIAL_CUSTOM_FIELDS));
-  const [emailTemplates, setEmailTemplates] = useState<EmailTemplate[]>(() => loadFromStorage('email_templates', INITIAL_TEMPLATES));
-  const [emailCampaigns, setEmailCampaigns] = useState<EmailCampaign[]>(() => loadFromStorage('email_campaigns', INITIAL_CAMPAIGNS));
-  const [auditLogs, setAuditLogs] = useState<AuditLog[]>(() => loadFromStorage('audit_logs', INITIAL_AUDIT_LOGS));
+  const [stages, setStages] = useState<Stage[]>([]);
+  const [deals, setDeals] = useState<Deal[]>(() => loadFromStorage('deals', []));
+  const [tasks, setTasks] = useState<Task[]>(() => loadFromStorage('tasks', []));
+  const [activities, setActivities] = useState<Activity[]>(() => loadFromStorage('activities', []));
+  const [notifications, setNotifications] = useState<Notification[]>(() => loadFromStorage('notifications', []));
+  const [customFields, setCustomFields] = useState<CustomFieldDefinition[]>(() => loadFromStorage('custom_fields', []));
+  const [emailTemplates, setEmailTemplates] = useState<EmailTemplate[]>(() => loadFromStorage('email_templates', []));
+  const [emailCampaigns, setEmailCampaigns] = useState<EmailCampaign[]>(() => loadFromStorage('email_campaigns', []));
+  const [auditLogs, setAuditLogs] = useState<AuditLog[]>(() => loadFromStorage('audit_logs', []));
   const [files, setFiles] = useState<FileRecord[]>([]);
   const [approvals, setApprovals] = useState<ApprovalRequest[]>([]);
   const [adminFlags, setAdminFlags] = useState<Array<{ key: string; description: string; defaultEnabled: boolean; enabled: boolean; source: string; overridden: boolean }>>([]);
   const [featureFlags, setFeatureFlags] = useState<Array<{ key: string; enabled: boolean }>>([]);
 
+<<<<<<< HEAD
   function persistToLocalStorage(
     snapshot: Awaited<ReturnType<typeof apiClient.bootstrapCrm>>,
     failed: Set<string> = new Set(),
   ) {
+=======
+  // ─── Bootstrap from API ────────────────────────────
+
+  useEffect(() => {
+    if (!isAuthenticated) return;
+
+    let cancelled = false;
+
+    async function bootstrap() {
+      try {
+        setInitialLoading(true);
+        setApiError(null);
+
+        // Refresh current user from server
+        const me = await apiClient.getMe();
+        if (cancelled) return;
+
+        userStoreSet(JSON.stringify(me));
+        setCurrentUserState(me);
+
+        // Load full CRM snapshot
+        const snapshot = await apiClient.bootstrapCrm();
+        if (cancelled) return;
+
+        // Replace all state with server data (always sync, even if empty)
+        setUsers(snapshot.users);
+        setAccounts(snapshot.accounts);
+        setContacts(snapshot.contacts);
+        if (snapshot.pipelines.length > 0) setPipelines(snapshot.pipelines);
+        if (snapshot.stages.length > 0) setStages(snapshot.stages);
+        // Auto-select the default pipeline on first bootstrap
+        if (snapshot.pipelines.length > 0 && !initialPipelineSelectedRef.current) {
+          const defaultPipeline = snapshot.pipelines.find(p => p.is_default) || snapshot.pipelines[0];
+          setActivePipelineId(defaultPipeline.id);
+          initialPipelineSelectedRef.current = true;
+        }
+        setDeals(snapshot.deals);
+        setTasks(snapshot.tasks);
+        setActivities(snapshot.activities);
+        setNotifications(snapshot.notifications);
+        setCustomFields(snapshot.customFields);
+        setEmailTemplates(snapshot.emailTemplates);
+        setEmailCampaigns(snapshot.emailCampaigns);
+        setAuditLogs(snapshot.auditLogs);
+
+        // Fetch feature flags (separate endpoint)
+        try {
+          const flags = await apiClient.getFlags();
+          if (!cancelled) setFeatureFlags(flags.map(f => ({ key: f.key, enabled: f.enabled })));
+        } catch { /* flags optional — keep defaults */ }
+
+        // Fetch admin flags at startup
+        try {
+          const af = await apiClient.getAdminFlags();
+          if (!cancelled) setAdminFlags(af);
+        } catch { /* admin flags optional */ }
+
+        // Fetch file list so shared context is populated
+        try {
+          const fl = await apiClient.listFiles();
+          if (!cancelled) setFiles(fl as FileRecord[]);
+        } catch { /* files optional */ }
+
+        // Update localStorage as cache
+        persistToLocalStorage(snapshot);
+      } catch (err) {
+        if (cancelled) return;
+        // Auth errors — token expired/invalid or user deleted — force re-login
+        if (err instanceof ApiError && (err.status === 401 || err.status === 404)) {
+          logout();
+          return;
+        }
+        // Permission errors — bootstrap rescued admin-only endpoints gracefully,
+        // so a 403 here means something else is wrong. Show it.
+        console.error('Bootstrap failed, using localStorage fallback:', err);
+        // Keep localStorage/initial data as fallback
+        if (err instanceof ApiError) {
+          setApiError(err.message);
+        } else {
+          setApiError('Failed to connect to API server. Using offline data.');
+        }
+        // Offline fallback: auto-select the default pipeline so the board renders
+        if (pipelinesRef.current.length > 0 && !initialPipelineSelectedRef.current) {
+          const defaultPipeline = pipelinesRef.current.find(p => p.is_default) || pipelinesRef.current[0];
+          setActivePipelineId(defaultPipeline.id);
+          initialPipelineSelectedRef.current = true;
+        }
+      } finally {
+        if (!cancelled) setInitialLoading(false);
+      }
+    }
+
+    bootstrap();
+    return () => { cancelled = true; };
+  }, [isAuthenticated]);
+
+  function persistToLocalStorage(snapshot: Awaited<ReturnType<typeof apiClient.bootstrapCrm>>) {
+>>>>>>> 3b30668954fd98f21869a81b42c464b052acb7e7
     const set = safeSetItem;
     const write = (key: string, resourceKey: string, value: unknown) => {
       if (failed.has(resourceKey)) return; // don't cache data that failed to load — keep prior cache
@@ -551,8 +636,9 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       const created = await apiClient.createContact(contactData as Record<string, unknown>);
       setContacts(prev => [created, ...prev]);
       toast.success('Contact created', `${contactData.first_name} ${contactData.last_name}`);
-    } catch {
-      toast.error('Failed to create contact', 'Please try again.');
+    } catch (err) {
+      console.error('createContact failed:', err);
+      toast.error('Failed to create contact', err instanceof ApiError ? err.message : 'Please try again.');
     }
   }, []);
 
@@ -561,8 +647,9 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       const updated = await apiClient.updateContact(id, updatedData as Record<string, unknown>);
       setContacts(prev => prev.map(c => c.id === id ? updated : c));
       toast.success('Contact updated');
-    } catch {
-      toast.error('Failed to update contact', 'Please try again.');
+    } catch (err) {
+      console.error('updateContact failed:', err);
+      toast.error('Failed to update contact', err instanceof ApiError ? err.message : 'Please try again.');
     }
   }, []);
 
@@ -571,8 +658,9 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       await apiClient.deleteContact(id);
       setContacts(prev => prev.filter(c => c.id !== id));
       toast.success('Contact deleted');
-    } catch {
-      toast.error('Failed to delete contact', 'Please try again.');
+    } catch (err) {
+      console.error('deleteContact failed:', err);
+      toast.error('Failed to delete contact', err instanceof ApiError ? err.message : 'Please try again.');
     }
   }, []);
 
@@ -586,20 +674,24 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         prev.filter(c => c.id !== sourceId).map(c => c.id === targetId ? { ...c, ...finalValues } : c),
       );
       toast.success('Contacts merged');
-    } catch {
-      toast.error('Failed to merge contacts', 'Please try again.');
+    } catch (err) {
+      console.error('mergeContacts failed:', err);
+      toast.error('Failed to merge contacts', err instanceof ApiError ? err.message : 'Please try again.');
     }
   }, []);
 
   // ─── Account CRUD ──────────────────────────────────
 
-  const addAccount = useCallback(async (accountData: Omit<Account, 'id' | 'created_at'>) => {
+  const addAccount = useCallback(async (accountData: Omit<Account, 'id' | 'created_at'>): Promise<Account> => {
     try {
       const created = await apiClient.createAccount(accountData as Record<string, unknown>);
       setAccounts(prev => [created, ...prev]);
       toast.success('Account created', accountData.name);
-    } catch {
-      toast.error('Failed to create account', 'Please try again.');
+      return created;
+    } catch (err) {
+      console.error('create account failed:', err);
+      toast.error('Failed to create account', err instanceof ApiError ? err.message : 'Please try again.');
+      throw err;
     }
   }, []);
 
@@ -608,8 +700,9 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       const updated = await apiClient.updateAccount(id, updatedData as Record<string, unknown>);
       setAccounts(prev => prev.map(a => a.id === id ? updated : a));
       toast.success('Account updated');
-    } catch {
-      toast.error('Failed to update account', 'Please try again.');
+    } catch (err) {
+      console.error('update account failed:', err);
+      toast.error('Failed to update account', err instanceof ApiError ? err.message : 'Please try again.');
     }
   }, []);
 
@@ -618,8 +711,9 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       await apiClient.deleteAccount(id);
       setAccounts(prev => prev.filter(a => a.id !== id));
       toast.success('Account deleted');
-    } catch {
-      toast.error('Failed to delete account', 'Please try again.');
+    } catch (err) {
+      console.error('delete account failed:', err);
+      toast.error('Failed to delete account', err instanceof ApiError ? err.message : 'Please try again.');
     }
   }, []);
 
@@ -630,8 +724,9 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       const created = await apiClient.createDeal(dealData as Record<string, unknown>);
       setDeals(prev => [created, ...prev]);
       toast.success('Deal created', `${dealData.name} — $${dealData.value.toLocaleString()}`);
-    } catch {
-      toast.error('Failed to create deal', 'The deal was not saved. Please try again.');
+    } catch (err) {
+      console.error('create deal failed:', err);
+      toast.error('Failed to create deal', err instanceof ApiError ? err.message : 'The deal was not saved. Please try again.');
     }
   }, []);
 
@@ -639,8 +734,9 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     try {
       const updated = await apiClient.updateDeal(id, updatedData as Record<string, unknown>);
       setDeals(prev => prev.map(d => d.id === id ? updated : d));
-    } catch {
-      toast.error('Failed to update deal', 'Your changes were not saved. Please try again.');
+    } catch (err) {
+      console.error('update deal failed:', err);
+      toast.error('Failed to update deal', err instanceof ApiError ? err.message : 'Your changes were not saved. Please try again.');
     }
   }, []);
 
@@ -649,8 +745,9 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       await apiClient.deleteDeal(id);
       setDeals(prev => prev.filter(d => d.id !== id));
       toast.success('Deal deleted');
-    } catch {
-      toast.error('Failed to delete deal', 'Please try again.');
+    } catch (err) {
+      console.error('delete deal failed:', err);
+      toast.error('Failed to delete deal', err instanceof ApiError ? err.message : 'Please try again.');
     }
   }, []);
 
@@ -660,8 +757,9 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       setDeals(prev => prev.map(d => d.id === id ? moved : d));
       toast.success('Deal moved', 'Stage updated successfully.');
       return true;
-    } catch {
-      toast.error('Failed to move deal', 'The stage change was not saved. Please try again.');
+    } catch (err) {
+      console.error('move deal failed:', err);
+      toast.error('Failed to move deal', err instanceof ApiError ? err.message : 'The stage change was not saved. Please try again.');
       return false;
     }
   }, []);
@@ -672,8 +770,9 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       setDeals(prev => prev.map(d => d.id === id ? closed : d));
       toast.success(`Deal ${outcome === 'won' ? 'won' : 'lost'}`, `Deal has been closed as ${outcome}.`);
       return true;
-    } catch {
-      toast.error('Failed to close deal', 'The deal status was not updated. Please try again.');
+    } catch (err) {
+      console.error('close deal failed:', err);
+      toast.error('Failed to close deal', err instanceof ApiError ? err.message : 'The deal status was not updated. Please try again.');
       return false;
     }
   }, []);
@@ -688,8 +787,9 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       } as Record<string, unknown>);
       setTasks(prev => [created, ...prev]);
       toast.success('Task created', taskData.title);
-    } catch {
-      toast.error('Failed to create task', 'Please try again.');
+    } catch (err) {
+      console.error('create task failed:', err);
+      toast.error('Failed to create task', err instanceof ApiError ? err.message : 'Please try again.');
     }
   }, [currentUser]);
 
@@ -697,8 +797,9 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     try {
       const updated = await apiClient.updateTask(id, updatedData as Record<string, unknown>);
       setTasks(prev => prev.map(t => t.id === id ? updated : t));
-    } catch {
-      toast.error('Failed to update task', 'Please try again.');
+    } catch (err) {
+      console.error('update task failed:', err);
+      toast.error('Failed to update task', err instanceof ApiError ? err.message : 'Please try again.');
     }
   }, []);
 
@@ -706,8 +807,9 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     try {
       const completed = await apiClient.completeTask(id, note);
       setTasks(prev => prev.map(t => t.id === id ? completed : t));
-    } catch {
-      toast.error('Failed to complete task', 'Please try again.');
+    } catch (err) {
+      console.error('complete task failed:', err);
+      toast.error('Failed to complete task', err instanceof ApiError ? err.message : 'Please try again.');
     }
   }, []);
 
@@ -716,8 +818,9 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       await apiClient.deleteTask(id);
       setTasks(prev => prev.filter(t => t.id !== id));
       toast.success('Task deleted');
-    } catch {
-      toast.error('Failed to delete task', 'Please try again.');
+    } catch (err) {
+      console.error('delete task failed:', err);
+      toast.error('Failed to delete task', err instanceof ApiError ? err.message : 'Please try again.');
     }
   }, []);
 
@@ -727,8 +830,9 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     try {
       const created = await apiClient.createActivity(activityData as Record<string, unknown>);
       setActivities(prev => [created, ...prev]);
-    } catch {
-      toast.error('Failed to log activity');
+    } catch (err) {
+      console.error('log activity failed:', err);
+      toast.error('Failed to log activity', err instanceof ApiError ? err.message : undefined);
     }
   }, []);
 
@@ -739,8 +843,9 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       const created = await apiClient.createCustomField(cfdData as Record<string, unknown>);
       setCustomFields(prev => [...prev, created]);
       toast.success('Custom field created', cfdData.label);
-    } catch {
-      toast.error('Failed to create custom field', 'Please try again.');
+    } catch (err) {
+      console.error('create custom field failed:', err);
+      toast.error('Failed to create custom field', err instanceof ApiError ? err.message : 'Please try again.');
     }
   }, []);
 
@@ -749,8 +854,9 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       await apiClient.deleteCustomField(id);
       setCustomFields(prev => prev.filter(c => c.id !== id));
       toast.success('Custom field deleted');
-    } catch {
-      toast.error('Failed to delete custom field', 'Please try again.');
+    } catch (err) {
+      console.error('delete custom field failed:', err);
+      toast.error('Failed to delete custom field', err instanceof ApiError ? err.message : 'Please try again.');
     }
   }, []);
 
@@ -760,8 +866,9 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     try {
       await apiClient.markNotificationRead(id);
       setNotifications(prev => prev.map(n => n.id === id ? { ...n, read_at: new Date().toISOString() } : n));
-    } catch {
-      toast.error('Failed to mark notification as read');
+    } catch (err) {
+      console.error('markNotificationRead failed:', err);
+      toast.error('Failed to mark notification as read', err instanceof ApiError ? err.message : undefined);
     }
   }, []);
 
@@ -771,8 +878,9 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       setNotifications(prev =>
         prev.map(n => n.user_id === currentUser?.id && !n.read_at ? { ...n, read_at: new Date().toISOString() } : n),
       );
-    } catch {
-      toast.error('Failed to clear notifications');
+    } catch (err) {
+      console.error('clearNotifications failed:', err);
+      toast.error('Failed to clear notifications', err instanceof ApiError ? err.message : undefined);
     }
   }, [currentUser]);
 
@@ -781,10 +889,11 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const inviteUser = useCallback(async (name: string, email: string, role: UserRole) => {
     try {
       const created = await apiClient.inviteUser({ name, email, role });
-      setUsers(prev => [...prev, created]);
-      toast.success('User invited', name);
-    } catch {
-      toast.error('Failed to invite user', 'Please try again.');
+      setUsers(prev => [...prev, created.user]);
+      toast.success('User invited', `Temporary password: ${created.temporary_password}`);
+    } catch (err) {
+      console.error('invite user failed:', err);
+      toast.error('Failed to invite user', err instanceof ApiError ? err.message : 'Please try again.');
     }
   }, []);
 
@@ -792,8 +901,8 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     try {
       const updated = await apiClient.toggleUserStatus(userId);
       setUsers(prev => prev.map(u => u.id === userId ? updated : u));
-    } catch {
-      toast.error('Failed to update user status', 'Please try again.');
+    } catch (err) {
+      toast.error('Failed to update user status', err instanceof ApiError ? err.message : 'Please try again.');
     }
   }, []);
 
@@ -801,8 +910,19 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     try {
       const updated = await apiClient.updateUserRole(userId, role);
       setUsers(prev => prev.map(u => u.id === userId ? updated : u));
-    } catch {
-      toast.error('Failed to update user role', 'Please try again.');
+      toast.success('Role updated', `User role changed to ${role}`);
+    } catch (err) {
+      toast.error('Failed to update user role', err instanceof ApiError ? err.message : 'Please try again.');
+    }
+  }, []);
+
+  const deleteUser = useCallback(async (userId: string) => {
+    try {
+      await apiClient.deleteUser(userId);
+      setUsers(prev => prev.filter(u => u.id !== userId));
+      toast.success('User deleted', 'The user account has been removed.');
+    } catch (err) {
+      toast.error('Failed to delete user', err instanceof ApiError ? err.message : 'Please try again.');
     }
   }, []);
 
@@ -813,8 +933,9 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       const created = await apiClient.createEmailTemplate(templateData as Record<string, unknown>);
       setEmailTemplates(prev => [...prev, created]);
       toast.success('Template created', templateData.name);
-    } catch {
-      toast.error('Failed to create template', 'Please try again.');
+    } catch (err) {
+      console.error('create template failed:', err);
+      toast.error('Failed to create template', err instanceof ApiError ? err.message : 'Please try again.');
     }
   }, []);
 
@@ -823,8 +944,9 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       const created = await apiClient.createEmailCampaign({ name, template_id: templateId, recipient_ids: recipientIds });
       setEmailCampaigns(prev => [created, ...prev]);
       toast.success('Campaign sent', name);
-    } catch {
-      toast.error('Failed to send campaign', 'Please try again.');
+    } catch (err) {
+      console.error('send campaign failed:', err);
+      toast.error('Failed to send campaign', err instanceof ApiError ? err.message : 'Please try again.');
     }
   }, []);
 
@@ -840,8 +962,9 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         user_id: currentUser?.id || '',
         contact_id: contactId,
       });
-    } catch {
-      toast.error('Failed to send email', 'Please try again.');
+    } catch (err) {
+      console.error('send email failed:', err);
+      toast.error('Failed to send email', err instanceof ApiError ? err.message : 'Please try again.');
     }
   }, [currentUser, addActivity]);
 
@@ -878,8 +1001,9 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       a.click();
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
-    } catch {
-      toast.error('Download failed');
+    } catch (err) {
+      console.error('downloadFile failed:', err);
+      toast.error('Download failed', err instanceof Error ? err.message : undefined);
     }
   }, []);
 
@@ -898,8 +1022,9 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       await apiClient.deleteFile(id);
       setFiles(prev => prev.filter(f => f.id !== id));
       toast.success('File deleted');
-    } catch {
-      toast.error('Failed to delete file', 'Please try again.');
+    } catch (err) {
+      console.error('delete file failed:', err);
+      toast.error('Failed to delete file', err instanceof ApiError ? err.message : 'Please try again.');
     }
   }, []);
 
@@ -910,8 +1035,9 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       const result = await apiClient.connectCalendar(provider);
       toast.success(`${provider === 'google' ? 'Google' : 'Microsoft'} calendar`, 'Connection initiated — complete authorization in your browser.');
       return result;
-    } catch {
-      toast.error('Failed to connect calendar', 'Please try again.');
+    } catch (err) {
+      console.error('connect calendar failed:', err);
+      toast.error('Failed to connect calendar', err instanceof ApiError ? err.message : 'Please try again.');
     }
   }, []);
 
@@ -927,8 +1053,9 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     try {
       await apiClient.disconnectCalendar(provider);
       toast.success(`${provider === 'google' ? 'Google' : 'Microsoft'} calendar disconnected`);
-    } catch {
-      toast.error('Failed to disconnect calendar', 'Please try again.');
+    } catch (err) {
+      console.error('disconnect calendar failed:', err);
+      toast.error('Failed to disconnect calendar', err instanceof ApiError ? err.message : 'Please try again.');
     }
   }, []);
 
@@ -936,8 +1063,9 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     try {
       const result = await apiClient.syncCalendar();
       toast.success('Calendar synced', `Synced ${result.events_synced} events, created ${result.tasks_created} tasks`);
-    } catch {
-      toast.error('Calendar sync failed', 'Please try again.');
+    } catch (err) {
+      console.error('calendar sync failed failed:', err);
+      toast.error('Calendar sync failed', err instanceof ApiError ? err.message : 'Please try again.');
     }
   }, []);
 
@@ -946,8 +1074,9 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const getDealScore = useCallback(async (dealId: string) => {
     try {
       return await apiClient.getDealScore(dealId);
-    } catch {
-      toast.error('Failed to load deal score', 'Scoring is temporarily unavailable.');
+    } catch (err) {
+      console.error('load deal score failed:', err);
+      toast.error('Failed to load deal score', err instanceof ApiError ? err.message : 'Scoring is temporarily unavailable.');
       return { score: 0, factors: [], confidence: 0 };
     }
   }, []);
@@ -1011,8 +1140,9 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       toast.success('Pipeline created', data.name);
       // If default, auto-select it
       if (created.is_default) setActivePipelineId(created.id);
-    } catch {
-      toast.error('Failed to create pipeline', 'Please try again.');
+    } catch (err) {
+      console.error('create pipeline failed:', err);
+      toast.error('Failed to create pipeline', err instanceof ApiError ? err.message : 'Please try again.');
     }
   }, []);
 
@@ -1021,8 +1151,9 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       const updated = await apiClient.updatePipeline(id, data);
       setPipelines(prev => prev.map(p => p.id === id ? updated : p));
       if (updated.is_default) setActivePipelineId(updated.id);
-    } catch {
-      toast.error('Failed to update pipeline', 'Please try again.');
+    } catch (err) {
+      console.error('update pipeline failed:', err);
+      toast.error('Failed to update pipeline', err instanceof ApiError ? err.message : 'Please try again.');
     }
   }, []);
 
@@ -1031,8 +1162,9 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       await apiClient.deletePipeline(id);
       setPipelines(prev => prev.filter(p => p.id !== id));
       toast.success('Pipeline deleted');
-    } catch {
-      toast.error('Failed to delete pipeline', 'Please try again.');
+    } catch (err) {
+      console.error('delete pipeline failed:', err);
+      toast.error('Failed to delete pipeline', err instanceof ApiError ? err.message : 'Please try again.');
     }
   }, []);
 
@@ -1041,8 +1173,9 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       const created = await apiClient.createStage(data);
       setStages(prev => [...prev, created]);
       toast.success('Stage created', data.name);
-    } catch {
-      toast.error('Failed to create stage', 'Please try again.');
+    } catch (err) {
+      console.error('create stage failed:', err);
+      toast.error('Failed to create stage', err instanceof ApiError ? err.message : 'Please try again.');
     }
   }, []);
 
@@ -1050,8 +1183,9 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     try {
       const updated = await apiClient.updateStage(id, data);
       setStages(prev => prev.map(s => s.id === id ? updated : s));
-    } catch {
-      toast.error('Failed to update stage', 'Please try again.');
+    } catch (err) {
+      console.error('update stage failed:', err);
+      toast.error('Failed to update stage', err instanceof ApiError ? err.message : 'Please try again.');
     }
   }, []);
 
@@ -1060,8 +1194,9 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       await apiClient.deleteStage(id);
       setStages(prev => prev.filter(s => s.id !== id));
       toast.success('Stage deleted');
-    } catch {
-      toast.error('Failed to delete stage', 'Please try again.');
+    } catch (err) {
+      console.error('delete stage failed:', err);
+      toast.error('Failed to delete stage', err instanceof ApiError ? err.message : 'Please try again.');
     }
   }, []);
 
@@ -1074,8 +1209,9 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       // Refresh contacts from API
       const result = await apiClient.listContacts();
       setContacts(result.data);
-    } catch {
-      toast.error('Failed to update contacts', 'Please try again.');
+    } catch (err) {
+      console.error('update contacts failed:', err);
+      toast.error('Failed to update contacts', err instanceof ApiError ? err.message : 'Please try again.');
     }
   }, []);
 
@@ -1085,8 +1221,9 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       toast.success(`${ids.length} deals updated`);
       const result = await apiClient.listDeals();
       setDeals(result.data);
-    } catch {
-      toast.error('Failed to update deals', 'Please try again.');
+    } catch (err) {
+      console.error('update deals failed:', err);
+      toast.error('Failed to update deals', err instanceof ApiError ? err.message : 'Please try again.');
     }
   }, []);
 
@@ -1098,8 +1235,9 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       toast.success('Import complete', `Imported ${result.imported}, skipped ${result.skipped}`);
       const refreshed = await apiClient.listContacts();
       setContacts(refreshed.data);
-    } catch {
-      toast.error('Failed to import contacts', 'Please try again.');
+    } catch (err) {
+      console.error('import contacts failed:', err);
+      toast.error('Failed to import contacts', err instanceof ApiError ? err.message : 'Please try again.');
     }
   }, []);
 
@@ -1140,8 +1278,9 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       const user = await apiClient.unlockAccount(userId);
       setUsers(prev => prev.map(u => u.id === userId ? user : u));
       toast.success('Account unlocked', user.name);
-    } catch {
-      toast.error('Failed to unlock account', 'Please try again.');
+    } catch (err) {
+      console.error('unlock account failed:', err);
+      toast.error('Failed to unlock account', err instanceof ApiError ? err.message : 'Please try again.');
     }
   }, []);
 
@@ -1149,8 +1288,9 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     try {
       await apiClient.revokeUserTokens(userId);
       toast.success('Tokens revoked');
-    } catch {
-      toast.error('Failed to revoke tokens', 'Please try again.');
+    } catch (err) {
+      console.error('revoke tokens failed:', err);
+      toast.error('Failed to revoke tokens', err instanceof ApiError ? err.message : 'Please try again.');
     }
   }, []);
 
@@ -1161,8 +1301,9 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       const created = await apiClient.createApproval(data);
       setApprovals(prev => [...prev, created]);
       toast.success('Approval requested', data.title);
-    } catch {
-      toast.error('Failed to create approval', 'Please try again.');
+    } catch (err) {
+      console.error('create approval failed:', err);
+      toast.error('Failed to create approval', err instanceof ApiError ? err.message : 'Please try again.');
     }
   }, []);
 
@@ -1181,8 +1322,9 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           verified: raw.verification_status === 'verified',
         })),
       };
-    } catch {
-      toast.error('Failed to load domain verification status', 'Could not reach the SES backend.');
+    } catch (err) {
+      console.error('load domain verification status failed:', err);
+      toast.error('Failed to load domain verification status', err instanceof ApiError ? err.message : 'Could not reach the SES backend.');
       throw new Error('SES backend unavailable');
     }
   }, []);
@@ -1191,8 +1333,9 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     try {
       const result = await apiClient.verifySesDomain();
       toast.success(result.verified ? 'Domain verified' : 'Verification pending', result.message);
-    } catch {
-      toast.error('Domain verification failed', 'Please try again.');
+    } catch (err) {
+      console.error('domain verification failed failed:', err);
+      toast.error('Domain verification failed', err instanceof ApiError ? err.message : 'Please try again.');
     }
   }, []);
 
@@ -1203,8 +1346,9 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       const flags = await apiClient.getAdminFlags();
       setAdminFlags(flags);
       return flags;
-    } catch {
-      toast.error('Failed to load admin flags');
+    } catch (err) {
+      console.error('loadAdminFlags failed:', err);
+      toast.error('Failed to load admin flags', err instanceof ApiError ? err.message : undefined);
       return [];
     }
   }, []);
@@ -1213,8 +1357,9 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     try {
       await apiClient.updateAdminFlag(key, enabled);
       setAdminFlags(prev => prev.map(f => f.key === key ? { ...f, enabled } : f));
-    } catch {
-      toast.error('Failed to update setting', 'Please try again.');
+    } catch (err) {
+      console.error('update setting failed:', err);
+      toast.error('Failed to update setting', err instanceof ApiError ? err.message : 'Please try again.');
     }
   }, []);
 
@@ -1224,8 +1369,9 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       setAdminFlags(prev =>
         prev.map(f => f.key === key ? { ...f, enabled: f.defaultEnabled, overridden: false } : f),
       );
-    } catch {
-      toast.error('Failed to reset setting', 'Please try again.');
+    } catch (err) {
+      console.error('reset setting failed:', err);
+      toast.error('Failed to reset setting', err instanceof ApiError ? err.message : 'Please try again.');
     }
   }, []);
 
@@ -1289,6 +1435,7 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     inviteUser,
     toggleUserStatus,
     updateUserRole,
+    deleteUser,
     addEmailTemplate,
     sendEmailCampaign,
     sendSingleEmail,

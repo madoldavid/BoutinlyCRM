@@ -4,15 +4,15 @@ import { UserRole } from '../../types.js';
 // ─── Auth ──────────────────────────────────────────────────────
 
 export const loginSchema = z.object({
-  email: z.string().email(),
+  email: z.string().trim().email(),
   password: z.string().min(8),
 });
 
 export const signupSchema = z.object({
-  name: z.string().min(1).max(100),
-  email: z.string().email(),
+  name: z.string().trim().min(1).max(100),
+  email: z.string().trim().email(),
   password: z.string().min(8).max(128),
-  company_name: z.string().min(1).max(200),
+  company_name: z.string().trim().min(1).max(200),
 });
 
 export const refreshTokenSchema = z.object({
@@ -20,7 +20,7 @@ export const refreshTokenSchema = z.object({
 });
 
 export const forgotPasswordSchema = z.object({
-  email: z.string().email(),
+  email: z.string().trim().email(),
 });
 
 export const resetPasswordSchema = z.object({
@@ -28,23 +28,53 @@ export const resetPasswordSchema = z.object({
   password: z.string().min(8).max(128),
 });
 
+// ─── Helpers ──────────────────────────────────────────────────
+
+/**
+ * Normalize URL input: trim whitespace, auto-prepend https:// to URLs
+ * missing a protocol, reject dangerous schemes (javascript:, data:, file:).
+ */
+function normalizeUrl(val: unknown): unknown {
+  if (typeof val !== 'string') return val;
+  const trimmed = val.trim();
+  if (trimmed === '') return ''; // preserve empty string so users can clear the field
+  // Block dangerous URL schemes
+  if (/^(javascript|data|file|vbscript):/i.test(trimmed)) return '';
+  // Already has a safe protocol
+  if (/^https?:\/\//i.test(trimmed)) return trimmed;
+  // Looks like a domain — prepend https://
+  if (/^[\w.-]+\.[a-z]{2,}/i.test(trimmed)) return `https://${trimmed}`;
+  return trimmed;
+}
+
 // ─── Contacts ──────────────────────────────────────────────────
 
-export const createContactSchema = z.object({
-  first_name: z.string().min(1).max(100),
-  last_name: z.string().min(1).max(100),
-  email: z.string().email(),
-  phone: z.string().max(50).default(''),
-  title: z.string().max(150).default(''),
-  linkedin_url: z.string().url().optional().or(z.literal('')),
+// Core fields WITHOUT defaults — used as basis for both create and update
+const contactCore = {
+  first_name: z.string().trim().min(1).max(100),
+  last_name: z.string().trim().min(1).max(100),
+  email: z.string().trim().email(),
+  phone: z.string().trim().max(50),
+  title: z.string().trim().max(150),
+  linkedin_url: z.preprocess(normalizeUrl, z.string().url().optional().or(z.literal('')).or(z.literal(null)).transform(v => v === null ? undefined : v)),
   account_id: z.string().min(1),
   owner_id: z.string().min(1),
-  tags: z.array(z.string().min(1)).default([]),
-  custom_fields: z.record(z.string(), z.unknown()).default({}),
-  unsubscribed: z.boolean().default(false),
+  tags: z.array(z.string().min(1)),
+  custom_fields: z.record(z.string(), z.unknown()),
+  unsubscribed: z.boolean(),
+};
+
+export const createContactSchema = z.object({
+  ...contactCore,
+  phone: contactCore.phone.default(''),
+  title: contactCore.title.default(''),
+  tags: contactCore.tags.default([]),
+  custom_fields: contactCore.custom_fields.default({}),
+  unsubscribed: contactCore.unsubscribed.default(false),
 });
 
-export const updateContactSchema = createContactSchema.partial();
+/** Update schema — all fields optional, NO defaults injected (unlike .partial() on createContactSchema which would leak defaults). */
+export const updateContactSchema = z.object(contactCore).partial();
 
 export const mergeContactsSchema = z.object({
   sourceId: z.string().min(1),
@@ -54,19 +84,30 @@ export const mergeContactsSchema = z.object({
 
 // ─── Accounts ──────────────────────────────────────────────────
 
-export const createAccountSchema = z.object({
-  name: z.string().min(1).max(200),
-  domain: z.string().max(255).default(''),
-  industry: z.string().max(100).default(''),
-  size: z.enum(['1-10', '11-50', '51-200', '201-1000', '1000+']).default('1-10'),
-  website: z.string().max(500).default(''),
-  arr: z.number().min(0).default(0),
+const accountCore = {
+  name: z.string().trim().min(1).max(200),
+  domain: z.string().trim().max(255),
+  industry: z.string().trim().max(100),
+  size: z.enum(['1-10', '11-50', '51-200', '201-1000', '1000+']),
+  website: z.string().trim().max(500),
+  arr: z.number().min(0),
   owner_id: z.string().min(1),
-  tags: z.array(z.string().min(1)).default([]),
-  custom_fields: z.record(z.string(), z.unknown()).default({}),
+  tags: z.array(z.string().min(1)),
+  custom_fields: z.record(z.string(), z.unknown()),
+};
+
+export const createAccountSchema = z.object({
+  ...accountCore,
+  domain: accountCore.domain.default(''),
+  industry: accountCore.industry.default(''),
+  size: accountCore.size.default('1-10'),
+  website: accountCore.website.default(''),
+  arr: accountCore.arr.default(0),
+  tags: accountCore.tags.default([]),
+  custom_fields: accountCore.custom_fields.default({}),
 });
 
-export const updateAccountSchema = createAccountSchema.partial();
+export const updateAccountSchema = z.object(accountCore).partial();
 
 // ─── Deals ─────────────────────────────────────────────────────
 
@@ -79,21 +120,29 @@ const dealLineItemSchema = z.object({
   total: z.number().min(0),
 });
 
-export const createDealSchema = z.object({
-  name: z.string().min(1).max(200),
+const dealCore = {
+  name: z.string().trim().min(1).max(200),
   pipeline_id: z.string().min(1),
   stage_id: z.string().min(1),
   account_id: z.string().min(1),
   owner_id: z.string().min(1),
-  value: z.number().min(0).default(0),
-  currency: z.string().length(3).default('USD'),
+  value: z.number().min(0),
+  currency: z.string().length(3),
   probability: z.number().min(0).max(100).optional(),
   close_date: z.string().min(1),
-  custom_fields: z.record(z.string(), z.unknown()).default({}),
-  line_items: z.array(dealLineItemSchema).default([]),
+  custom_fields: z.record(z.string(), z.unknown()),
+  line_items: z.array(dealLineItemSchema),
+};
+
+export const createDealSchema = z.object({
+  ...dealCore,
+  value: dealCore.value.default(0),
+  currency: dealCore.currency.default('USD'),
+  custom_fields: dealCore.custom_fields.default({}),
+  line_items: dealCore.line_items.default([]),
 });
 
-export const updateDealSchema = createDealSchema.partial();
+export const updateDealSchema = z.object(dealCore).partial();
 
 export const moveDealStageSchema = z.object({
   target_stage_id: z.string().min(1),
@@ -106,18 +155,23 @@ export const closeDealSchema = z.object({
 
 // ─── Tasks ─────────────────────────────────────────────────────
 
-export const createTaskSchema = z.object({
-  title: z.string().min(1).max(300),
+const taskCore = {
+  title: z.string().trim().min(1).max(300),
   type: z.enum(['call', 'email', 'meeting', 'todo']),
-  priority: z.enum(['low', 'medium', 'high']).default('medium'),
+  priority: z.enum(['low', 'medium', 'high']),
   due_at: z.string().min(1),
   assigned_to_id: z.string().min(1),
   contact_id: z.string().optional(),
   deal_id: z.string().optional(),
   recurrence_rule: z.string().optional(),
+};
+
+export const createTaskSchema = z.object({
+  ...taskCore,
+  priority: taskCore.priority.default('medium'),
 });
 
-export const updateTaskSchema = createTaskSchema.partial();
+export const updateTaskSchema = z.object(taskCore).partial();
 
 // ─── Activities ────────────────────────────────────────────────
 
@@ -176,8 +230,8 @@ export const sendSingleEmailSchema = z.object({
 // ─── Admin ─────────────────────────────────────────────────────
 
 export const inviteUserSchema = z.object({
-  name: z.string().min(1).max(100),
-  email: z.string().email(),
+  name: z.string().trim().min(1).max(100),
+  email: z.string().trim().email(),
   role: z.nativeEnum(UserRole),
 });
 
@@ -200,7 +254,7 @@ export const createCustomFieldSchema = z.object({
 
 export const paginationSchema = z.object({
   page: z.coerce.number().int().min(1).default(1),
-  limit: z.coerce.number().int().min(1).max(100).default(50),
+  limit: z.coerce.number().int().min(1).max(10000).default(50),
   search: z.string().optional(),
 });
 

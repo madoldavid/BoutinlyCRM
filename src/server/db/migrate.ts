@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { query, getClient } from './connection.js';
+import { pathToFileURL } from 'node:url';
+import { query, getClient, setDbConfig } from './connection.js';
 import type { DbRow } from './types.js';
 
 export class MigrationRunner {
@@ -126,4 +127,33 @@ export class MigrationRunner {
       client.release();
     }
   }
+}
+
+// CLI entry point — run with: npm run db:migrate
+const runningDirectly = process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
+if (runningDirectly) {
+  import('dotenv/config').then(() => {
+    const dbConfig = {
+      databaseUrl: process.env.DATABASE_URL,
+      databaseSsl: process.env.DATABASE_SSL === 'true',
+    };
+
+    if (!dbConfig.databaseUrl) {
+      console.error('DATABASE_URL is required for db:migrate.');
+      process.exit(1);
+    }
+
+    setDbConfig(dbConfig);
+
+    const runner = new MigrationRunner();
+    runner.run()
+      .then((count) => {
+        console.log(`Migration complete. ${count} migration(s) applied.`);
+        process.exit(0);
+      })
+      .catch((err) => {
+        console.error('Migration failed:', err);
+        process.exit(1);
+      });
+  });
 }

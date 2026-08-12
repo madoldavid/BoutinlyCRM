@@ -15,14 +15,12 @@ const envSchema = z.object({
   PORT: z.coerce.number().int().positive().default(8080),
   APP_URL: z.string().url().default('http://localhost:3000'),
   API_URL: z.string().url().default('http://localhost:8080'),
-  JWT_SECRET: z.string().min(32).default('development-only-secret-change-before-prod'),
-  PASSWORD_PEPPER: z.string().min(16).default('development-password-pepper'),
+  JWT_SECRET: z.string().min(32),
+  PASSWORD_PEPPER: z.string().min(16),
   DATABASE_URL: z.string().optional(),
   DATABASE_SSL: boolString.default(true),
   DATABASE_SSL_REJECT_UNAUTHORIZED: boolString.default(true),
   ALLOWED_ORIGINS: z.string().default('http://localhost:3000,http://localhost:3001,http://localhost:3002'),
-  DEMO_LOGIN_ENABLED: z.coerce.boolean().default(true),
-  DEMO_PASSWORD: z.string().min(8).default('ChangeMe123!'),
   EMAIL_PROVIDER: z.enum(['smtp', 'ses', 'console']).default('console'),
   EMAIL_FROM: z.string().default('noreply@boutinly.com'),
   EMAIL_FROM_NAME: z.string().default('Boutinly CRM'),
@@ -55,17 +53,8 @@ export function loadConfig() {
   const config = envSchema.parse(process.env);
 
   if (config.NODE_ENV === 'production') {
-    if (config.DEMO_LOGIN_ENABLED) {
-      throw new Error('DEMO_LOGIN_ENABLED must be false in production.');
-    }
     if (!config.DATABASE_URL) {
       throw new Error('DATABASE_URL is required in production.');
-    }
-    if (config.JWT_SECRET === 'development-only-secret-change-before-prod') {
-      throw new Error('JWT_SECRET must be replaced in production.');
-    }
-    if (config.PASSWORD_PEPPER === 'development-password-pepper') {
-      throw new Error('PASSWORD_PEPPER must be replaced in production.');
     }
     if (config.DATABASE_SSL === false) {
       throw new Error('DATABASE_SSL must be enabled in production.');

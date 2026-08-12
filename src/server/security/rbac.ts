@@ -73,8 +73,12 @@ export function requireWriteAccess(req: AuthenticatedRequest) {
 }
 
 export function canAccessOwner(principal: Principal, ownerId: string, ownerTeamId?: string) {
-  if ([UserRole.SUPER_ADMIN, UserRole.ADMIN, UserRole.VIEWER].includes(principal.role)) {
+  if ([UserRole.SUPER_ADMIN, UserRole.ADMIN].includes(principal.role)) {
     return true;
+  }
+  if (principal.role === UserRole.VIEWER) {
+    // Viewers can only see records — never modify ownership
+    return false;
   }
   if (principal.role === UserRole.MANAGER) {
     return Boolean(principal.teamId && ownerTeamId && principal.teamId === ownerTeamId);

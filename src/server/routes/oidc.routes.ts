@@ -87,39 +87,32 @@ export function registerOidcRoutes(
       let user = await repository.getUserByEmail(profile.email);
 
       if (!user) {
-        // Auto-provision user if this is the first user (check via countUsers for accuracy)
-        const userCount = await repository.countUsers();
-        if (userCount === 0) {
-          // First user — create organization + super admin
-          const { runWithTenant } = await import('../db/connection.js');
-          // Create org and user inline
-          const orgEntity = await repository.createOrganization(profile.name || 'My Company', profile.email.split('@')[1] || 'company');
-          const passwordHash = await hashPassword(randomId(), config.PASSWORD_PEPPER);
+        // Open registration: any new OIDC user is provisioned with their own
+        // org and becomes its System Admin (Salesforce-style org provisioning).
+        const { runWithTenant } = await import('../db/connection.js');
+        const orgEntity = await repository.createOrganization(profile.name || 'My Company', profile.email.split('@')[1] || 'company');
+        const passwordHash = await hashPassword(randomId(), config.PASSWORD_PEPPER);
 
-          // Wrap org-scoped operations in tenant context for Postgres RLS
-          await runWithTenant(orgEntity.id, async () => {
-            user = await repository.addUserWithPassword({
-              name: profile.name || profile.email,
-              email: profile.email,
-              passwordHash,
-              role: UserRole.SUPER_ADMIN,
-              organization_id: orgEntity.id,
-            });
-
-            await repository.addAuditLog({
-              action: 'user.oidc_signup',
-              entity_type: 'user',
-              entity_id: user.id,
-              user_name: profile.name || profile.email,
-              diff: { provider, email: profile.email },
-              ip_address: String(req.ip || ''),
-              user_agent: String(req.get('user-agent') || ''),
-            });
+        // Wrap org-scoped operations in tenant context for Postgres RLS
+        await runWithTenant(orgEntity.id, async () => {
+          user = await repository.addUserWithPassword({
+            name: profile.name || profile.email,
+            email: profile.email,
+            passwordHash,
+            role: UserRole.SUPER_ADMIN,
+            organization_id: orgEntity.id,
           });
-        } else {
-          res.redirect(`${config.APP_URL}/login?oidc_error=no_account&email=${encodeURIComponent(profile.email)}`);
-          return;
-        }
+
+          await repository.addAuditLog({
+            action: 'user.oidc_signup',
+            entity_type: 'user',
+            entity_id: user.id,
+            user_name: profile.name || profile.email,
+            diff: { provider, email: profile.email },
+            ip_address: String(req.ip || ''),
+            user_agent: String(req.get('user-agent') || ''),
+          });
+        });
       }
 
       if (!user.is_active) {

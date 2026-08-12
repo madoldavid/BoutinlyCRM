@@ -1,14 +1,14 @@
+import 'dotenv/config';
+import { pathToFileURL } from 'node:url';
 import { getClient, type DbConfig } from './connection.js';
-import { seedDatabase } from './seed.js';
 
 export interface ResetOptions {
   passwordPepper: string;
-  demoPassword: string;
 }
 
 export async function resetDatabase(
   dbConfig: DbConfig,
-  options: ResetOptions,
+  _options: ResetOptions,
 ): Promise<void> {
   const client = await getClient();
 
@@ -33,13 +33,11 @@ export async function resetDatabase(
     await client.query('DELETE FROM users');
     await client.query('DELETE FROM teams');
     await client.query('DELETE FROM organizations');
-    await client.query('DELETE FROM _migrations');
+    // NOTE: _migrations is intentionally preserved — reset wipes data but keeps
+    // the schema, so migration tracking must stay in sync with the existing tables.
 
     await client.query('COMMIT');
-    console.log('All data cleared.');
-
-    // Re-seed
-    await seedDatabase(dbConfig, options);
+    console.log('All data cleared. Fresh start — sign up to bootstrap the system.');
   } catch (error) {
     await client.query('ROLLBACK');
     throw error;
@@ -49,7 +47,7 @@ export async function resetDatabase(
 }
 
 // CLI entry point — run with: npm run db:reset
-const runningDirectly = process.argv[1] && import.meta.url.endsWith(process.argv[1].replace(/^\.?\//, ''));
+const runningDirectly = process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
 if (runningDirectly) {
   const { setDbConfig } = await import('./connection.js');
 
@@ -66,8 +64,7 @@ if (runningDirectly) {
   setDbConfig(dbConfig);
 
   resetDatabase(dbConfig, {
-    passwordPepper: process.env.PASSWORD_PEPPER || 'development-password-pepper',
-    demoPassword: process.env.DEMO_PASSWORD || 'ChangeMe123!',
+    passwordPepper: process.env.PASSWORD_PEPPER || '',
   }).then(() => {
     console.log('Database reset complete.');
     process.exit(0);

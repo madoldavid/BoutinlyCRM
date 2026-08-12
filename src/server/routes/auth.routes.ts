@@ -55,16 +55,15 @@ export function registerAuthRoutes(
   tokenBlocklist: TokenBlocklist,
 ) {
   app.post('/api/auth/signup', asyncHandler(async (req, res) => {
-    // Allow signup when no users exist (first-user self-registration),
-    // or in demo mode (where seed users exist but we still allow new accounts)
-    if (!config.DEMO_LOGIN_ENABLED) {
-      const userCount = await repository.countUsers();
-      if (userCount > 0) {
-        throw new ApiError(403, 'Signup is disabled. Contact your administrator.', 'signup_disabled');
-      }
-    }
-
     const body = signupSchema.parse(req.body);
+
+    // Role assignment (Salesforce-style org provisioning):
+    // - Every signup provisions a NEW organization and the signup user is that
+    //   org's System Administrator (super_admin) by default — the founder owns it.
+    // - Team members never self-select a role at signup. An existing admin adds
+    //   them to the org and assigns their role from the Admin panel.
+    const assignedRole = UserRole.SUPER_ADMIN;
+
     const policyError = validatePasswordPolicy(body.password, {
       minLength: config.PASSWORD_MIN_LENGTH,
       requireComplexity: config.PASSWORD_REQUIRE_COMPLEXITY,
@@ -79,7 +78,7 @@ export function registerAuthRoutes(
         name: body.name,
         email: body.email,
         passwordHash,
-        role: UserRole.SUPER_ADMIN,
+        role: assignedRole,
         organization_id: org.id,
       });
 
@@ -115,7 +114,7 @@ export function registerAuthRoutes(
         user_name: body.name,
         ip_address: req.ip || 'unknown',
         user_agent: req.headers['user-agent'] || 'unknown',
-        diff: { email: body.email, role: UserRole.SUPER_ADMIN },
+        diff: { email: body.email, role: assignedRole },
       });
 
       const principal = makePrincipal(user);
@@ -129,10 +128,6 @@ export function registerAuthRoutes(
   }));
 
   app.post('/api/auth/login', asyncHandler(async (req, res) => {
-    if (!config.DEMO_LOGIN_ENABLED && config.NODE_ENV !== 'test') {
-      throw new ApiError(403, 'Password login is disabled until the identity provider is configured.', 'login_disabled');
-    }
-
     const body = loginSchema.parse(req.body);
 
     // Check account lockout

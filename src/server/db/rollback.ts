@@ -6,6 +6,7 @@
  * Usage: npm run db:rollback [steps]
  */
 
+import 'dotenv/config';
 import { MigrationRunner } from './migrate.js';
 import { setDbConfig } from './connection.js';
 

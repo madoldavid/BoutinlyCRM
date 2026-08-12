@@ -601,6 +601,9 @@ export default function LoginPage({ onLoginSuccess }: LoginPageProps) {
                     <Input label="Company Name" id="signup-company" type="text" autoComplete="organization" value={signupForm.company_name} onChange={e => setSignupForm(p => ({ ...p, company_name: e.target.value }))} disabled={loading} placeholder="Your company" />
                     <Input label="Work Email" id="signup-email" type="email" autoComplete="email" value={signupForm.email} onChange={e => setSignupForm(p => ({ ...p, email: e.target.value }))} disabled={loading} placeholder="admin@company.com" />
                     <Input label="Password" id="signup-password" type="password" autoComplete="new-password" value={signupForm.password} onChange={e => setSignupForm(p => ({ ...p, password: e.target.value }))} disabled={loading} placeholder="Min. 8 characters" />
+                    <p className="text-xs text-theme-secondary/80 leading-relaxed">
+                      Your account is created as the <span className="font-semibold text-theme-accent">System Administrator</span> of your organization. Add teammates later from the Admin panel and assign their role there.
+                    </p>
                     <Button type="submit" loading={loading} className="w-full h-11 text-sm font-bold rounded-lg">{loading ? 'Creating Account…' : 'Create Free Account'}</Button>
                   </form>
                   <p className="text-center text-xs text-theme-secondary mt-5">
