@@ -11,6 +11,7 @@ import CommandPalette from './components/CommandPalette';
 import GlobalShortcuts, { dispatchNewRecord } from './components/GlobalShortcuts';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { ToastViewport, Skeleton, AppLauncher, getDefaultApps } from './components/ui';
+import ThemeSwitcher, { getStoredTheme, applyTheme } from './components/ThemeSwitcher';
 import {
   ShieldAlert, Loader2, WifiOff, Search, Menu, Plus, HelpCircle,
   LayoutDashboard, Users, Briefcase, CheckSquare, Mail, Sliders,
@@ -331,6 +332,7 @@ function DashboardLayout() {
               >
                 <HelpCircle className="w-4 h-4" />
               </button>
+              <ThemeSwitcher />
               <AppLauncher
                 apps={apps}
                 activeAppId={activeModule}
@@ -380,6 +382,12 @@ function AppContent() {
 }
 
 export default function App() {
+  // Apply stored theme (or default slate) before first paint to avoid flash
+  useEffect(() => {
+    const stored = getStoredTheme();
+    applyTheme(stored ?? 'gold');
+  }, []);
+
   return (
     <CRMProvider>
       <AppContent />

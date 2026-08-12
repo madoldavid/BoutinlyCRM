@@ -1,76 +1,87 @@
 @import "tailwindcss";
 
 /* ================================================================
-   Boutinly Design System — "Atelier" theme
-   Warm paper surfaces, deep evergreen accent, ink sidebar,
-   editorial typography (Hanken Grotesk + Fraunces).
+   Boutinly Design System — Multi-Theme
+   Three distinct personalities, switchable via data-theme on <html>:
+     data-theme="forest"  — Deep emerald sidebar, teal accent, slate workspace
+     data-theme="steel"   — Midnight navy sidebar, steel-blue accent, cool-gray workspace
+     data-theme="gold"    — Forest sidebar kept, warm gold accent, clean slate workspace
+   Default (no attribute): forest
    ================================================================ */
 
 @theme {
-  /* ── Surface & text slots ── */
-  --color-theme-base: var(--bg-base);
-  --color-theme-card: var(--bg-card);
-  --color-theme-inset: var(--bg-inset);
-  --color-theme-hover: var(--bg-hover);
-  --color-theme-primary: var(--text-primary);
-  --color-theme-secondary: var(--text-secondary);
-  --color-theme-accent: var(--accent);
+  /* ── Surface & text slots (referenced via var() in each theme block) ── */
+  --color-theme-base:         var(--bg-base);
+  --color-theme-card:         var(--bg-card);
+  --color-theme-inset:         var(--bg-inset);
+  --color-theme-hover:         var(--bg-hover);
+  --color-theme-primary:      var(--text-primary);
+  --color-theme-secondary:     var(--text-secondary);
+  --color-theme-accent:       var(--accent);
   --color-theme-accent-strong: var(--accent-strong);
-  --color-theme-pulse: var(--accent-pulse);
+  --color-theme-pulse:        var(--accent-pulse);
   --color-theme-accent-soft: var(--accent-soft);
-  --color-theme-border: var(--border);
+  --color-theme-border:       var(--border);
 
-  /* ── Sidebar (dark ink) slots ── */
-  --color-sidebar-bg: var(--sidebar-bg);
-  --color-sidebar-text: var(--sidebar-text);
-  --color-sidebar-muted: var(--sidebar-muted);
-  --color-sidebar-hover: var(--sidebar-hover);
-  --color-sidebar-active: var(--sidebar-active);
-  --color-sidebar-border: var(--sidebar-border);
+  /* ── Sidebar slots ── */
+  --color-sidebar-bg:         var(--sidebar-bg);
+  --color-sidebar-text:       var(--sidebar-text);
+  --color-sidebar-muted:      var(--sidebar-muted);
+  --color-sidebar-hover:       var(--sidebar-hover);
+  --color-sidebar-active:     var(--sidebar-active);
+  --color-sidebar-border:     var(--sidebar-border);
 
   /* ── Semantic status colors ── */
-  --color-success: var(--success);
+  --color-success:      var(--success);
   --color-success-soft: var(--success-soft);
-  --color-warning: var(--warning);
+  --color-warning:      var(--warning);
   --color-warning-soft: var(--warning-soft);
-  --color-danger: var(--danger);
-  --color-danger-soft: var(--danger-soft);
-  --color-info: var(--info);
-  --color-info-soft: var(--info-soft);
+  --color-danger:       var(--danger);
+  --color-danger-soft:  var(--danger-soft);
+  --color-info:         var(--info);
+  --color-info-soft:    var(--info-soft);
+
+  /* ── Chart color palette ── */
+  --chart-teal:    #00C896;
+  --chart-indigo:  #5B6BC0;
+  --chart-amber:   #F59E0B;
+  --chart-rose:    #F43F5E;
+  --chart-violet:  #8B5CF6;
+  --chart-sky:     #0EA5E9;
 
   /* ── Typography ── */
-  --font-sans: "Hanken Grotesk", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-sans:    "Hanken Grotesk", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   --font-display: "Fraunces", Georgia, "Times New Roman", serif;
-  --font-mono: "SF Mono", "Monaco", "Menlo", "Consolas", monospace;
+  --font-mono:    "SF Mono", "Monaco", "Menlo", "Consolas", "DejaVu Sans Mono", monospace;
 
   /* ── Type scale ── */
-  --text-2xs: 0.6875rem;    /* 11px — fine print */
+  --text-2xs:           0.6875rem;
   --text-2xs--line-height: 1.4;
-  --text-xs: 0.75rem;       /* 12px — field labels */
+  --text-xs:            0.75rem;
   --text-xs--line-height: 1.45;
-  --text-sm: 0.8125rem;     /* 13px */
+  --text-sm:            0.8125rem;
   --text-sm--line-height: 1.5;
-  --text-base: 0.875rem;    /* 14px — body text */
+  --text-base:          0.875rem;
   --text-base--line-height: 1.55;
-  --text-lg: 1rem;          /* 16px — section headers */
+  --text-lg:            1rem;
   --text-lg--line-height: 1.45;
-  --text-xl: 1.25rem;       /* 20px */
+  --text-xl:            1.25rem;
   --text-xl--line-height: 1.3;
-  --text-2xl: 1.5rem;       /* 24px */
+  --text-2xl:           1.5rem;
   --text-2xl--line-height: 1.2;
 
-  /* ── Radius — soft, modern, restrained ── */
-  --radius-xs: 3px;
-  --radius-sm: 6px;
-  --radius-md: 8px;
-  --radius-lg: 10px;
-  --radius-xl: 12px;
-  --radius-2xl: 16px;
-  --radius-3xl: 20px;
+  /* ── Radius ── */
+  --radius-xs:   3px;
+  --radius-sm:   5px;
+  --radius-md:   7px;
+  --radius-lg:   9px;
+  --radius-xl:   12px;
+  --radius-2xl:  16px;
+  --radius-3xl:  20px;
 
-  /* ── Elevation (layered, warm-tinted) ── */
-  --shadow-card: var(--elev-card);
-  --shadow-raised: var(--elev-raised);
+  /* ── Elevation ── */
+  --shadow-card:    var(--elev-card);
+  --shadow-raised:  var(--elev-raised);
   --shadow-overlay: var(--elev-overlay);
 
   /* ── Motion ── */
@@ -78,114 +89,253 @@
 }
 
 /* ================================================================
-   Theme Tokens
+   Theme: Forest & Slate  (default — deep emerald sidebar, teal accent)
    ================================================================ */
 
-:root {
-  /* ── Surface palette — warm paper ── */
-  --bg-base: #F6F5F1;         /* Page background */
-  --bg-card: #FFFFFF;         /* Cards, tables, modals */
-  --bg-inset: #FAF9F5;        /* Inset areas, table headers */
-  --bg-hover: #EFEDE6;        /* Row hover, button hover */
+:root,
+[data-theme="forest"] {
+  /* Surface */
+  --bg-base:   #F1F5F9;
+  --bg-card:   #FFFFFF;
+  --bg-inset:  #F8FAFC;
+  --bg-hover:  #E8EDF4;
 
-  /* ── Text palette — warm ink ── */
-  --text-primary: #1D1B16;    /* Near-black, warm */
-  --text-secondary: #6E6A5E;  /* Muted warm gray */
+  /* Text */
+  --text-primary:   #0F172A;
+  --text-secondary: #64748B;
 
-  /* ── Brand accent — deep evergreen ── */
-  --accent: #0D5F4A;
-  --accent-strong: #094A3A;   /* Hover / pressed */
-  --accent-pulse: #0D5F4A;
-  --accent-soft: rgba(13, 95, 74, 0.08);
+  /* Accent — deep emerald + electric teal interactive */
+  --accent:        #0B5343;
+  --accent-strong: #094A38;
+  --accent-pulse:  #00C896;
+  --accent-soft:  rgba(11, 83, 67, 0.09);
 
-  /* ── Borders ── */
-  --border: #E4E1D8;          /* Warm hairline */
+  /* Borders */
+  --border: #CBD5E1;
 
-  /* ── Semantic status colors ── */
-  --success: #2E8B57;
-  --success-soft: #EAF4EE;
-  --warning: #B07C14;
-  --warning-soft: #FBF4E2;
-  --danger: #C24343;
-  --danger-soft: #FAEEEE;
-  --info: #3E6B9E;
-  --info-soft: #EDF2F9;
+  /* Status */
+  --success:      #059669;
+  --success-soft: #ECFDF5;
+  --warning:      #D97706;
+  --warning-soft: #FFFBEB;
+  --danger:       #DC2626;
+  --danger-soft:  #FEF2F2;
+  --info:         #2563EB;
+  --info-soft:    #EFF6FF;
 
-  /* ── Dark ink sidebar ── */
-  --sidebar-bg: #0E1B16;
-  --sidebar-text: #ECEAE2;
-  --sidebar-muted: #8CA398;
-  --sidebar-hover: rgba(255, 255, 255, 0.055);
-  --sidebar-active: rgba(255, 255, 255, 0.10);
-  --sidebar-border: rgba(255, 255, 255, 0.07);
+  /* Sidebar — forest green */
+  --sidebar-bg:      #0B1F17;
+  --sidebar-text:    #E4EEE8;
+  --sidebar-muted:   #7BA697;
+  --sidebar-hover:   rgba(255, 255, 255, 0.055);
+  --sidebar-active:  rgba(255, 255, 255, 0.11);
+  --sidebar-border:  rgba(255, 255, 255, 0.07);
 
-  /* ── Elevation ── */
-  --elev-card: 0 1px 2px rgba(29, 27, 22, 0.04), 0 1px 3px rgba(29, 27, 22, 0.03);
-  --elev-raised: 0 2px 6px rgba(29, 27, 22, 0.06), 0 4px 14px rgba(29, 27, 22, 0.05);
-  --elev-overlay: 0 8px 24px rgba(29, 27, 22, 0.10), 0 16px 48px rgba(29, 27, 22, 0.10);
+  /* Elevation */
+  --elev-card:    0 1px 2px rgba(15, 23, 42, 0.06), 0 1px 3px rgba(15, 23, 42, 0.04);
+  --elev-raised:  0 2px 6px rgba(15, 23, 42, 0.08), 0 4px 14px rgba(15, 23, 42, 0.06);
+  --elev-overlay: 0 8px 24px rgba(15, 23, 42, 0.11), 0 16px 48px rgba(15, 23, 42, 0.09);
 
   color-scheme: light;
 }
 
-/* ── Dark theme — warm charcoal ── */
-.theme-dark {
-  --bg-base: #161513;
-  --bg-card: #1F1D1A;
-  --bg-inset: #1A1815;
-  --bg-hover: #28251F;
-  --text-primary: #F0EEE7;
-  --text-secondary: #A29D90;
-  --accent: #45B993;
-  --accent-strong: #5FCBA6;
-  --accent-pulse: #45B993;
-  --accent-soft: rgba(69, 185, 147, 0.14);
-  --border: rgba(255, 255, 255, 0.09);
-
-  --success: #4CAF7D;
-  --success-soft: rgba(76, 175, 125, 0.14);
-  --warning: #D9A62E;
-  --warning-soft: rgba(217, 166, 46, 0.14);
-  --danger: #DE6B6B;
-  --danger-soft: rgba(222, 107, 107, 0.14);
-  --info: #6FA0D4;
-  --info-soft: rgba(111, 160, 212, 0.14);
-
-  --sidebar-bg: #100E0C;
-  --sidebar-text: #ECEAE2;
-  --sidebar-muted: #8F8A7D;
-  --sidebar-hover: rgba(255, 255, 255, 0.05);
-  --sidebar-active: rgba(255, 255, 255, 0.09);
-  --sidebar-border: rgba(255, 255, 255, 0.07);
-
-  --elev-card: 0 1px 2px rgba(0, 0, 0, 0.24), 0 1px 3px rgba(0, 0, 0, 0.20);
-  --elev-raised: 0 2px 6px rgba(0, 0, 0, 0.28), 0 4px 14px rgba(0, 0, 0, 0.24);
-  --elev-overlay: 0 8px 24px rgba(0, 0, 0, 0.36), 0 16px 48px rgba(0, 0, 0, 0.32);
-
+/* ── Forest dark ── */
+:root.theme-dark,
+[data-theme="forest"].theme-dark {
+  --bg-base:   #0C1520;
+  --bg-card:   #111C2B;
+  --bg-inset:  #0F1825;
+  --bg-hover:  #1A2938;
+  --text-primary:   #F0F4F8;
+  --text-secondary: #8899AA;
+  --accent:        #00C896;
+  --accent-strong: #00E0AA;
+  --accent-pulse:  #00C896;
+  --accent-soft:  rgba(0, 200, 150, 0.13);
+  --border: rgba(255, 255, 255, 0.08);
+  --success:      #10B981;
+  --success-soft: rgba(16, 185, 129, 0.12);
+  --warning:      #F59E0B;
+  --warning-soft: rgba(245, 158, 11, 0.12);
+  --danger:       #EF4444;
+  --danger-soft:  rgba(239, 68, 68, 0.12);
+  --info:         #60A5FA;
+  --info-soft:    rgba(96, 165, 250, 0.12);
+  --sidebar-bg:      #081510;
+  --sidebar-text:    #D8E8E0;
+  --sidebar-muted:   #6B9E87;
+  --sidebar-hover:   rgba(255, 255, 255, 0.05);
+  --sidebar-active:  rgba(255, 255, 255, 0.10);
+  --sidebar-border:  rgba(255, 255, 255, 0.06);
+  --elev-card:    0 1px 2px rgba(0, 0, 0, 0.30), 0 1px 3px rgba(0, 0, 0, 0.24);
+  --elev-raised:  0 2px 6px rgba(0, 0, 0, 0.34), 0 4px 14px rgba(0, 0, 0, 0.28);
+  --elev-overlay: 0 8px 24px rgba(0, 0, 0, 0.42), 0 16px 48px rgba(0, 0, 0, 0.36);
   color-scheme: dark;
 }
 
-/* ── Legacy theme aliases (all map to the Atelier light palette) ── */
-.theme-light,
-.theme-artisan,
-.theme-operator,
-.theme-heritage {
-  --bg-base: #F6F5F1;
-  --bg-card: #FFFFFF;
-  --bg-inset: #FAF9F5;
-  --bg-hover: #EFEDE6;
-  --text-primary: #1D1B16;
-  --text-secondary: #6E6A5E;
-  --accent: #0D5F4A;
-  --accent-strong: #094A3A;
-  --accent-soft: rgba(13, 95, 74, 0.08);
-  --border: #E4E1D8;
+/* ================================================================
+   Theme: Midnight & Steel  (midnight navy sidebar, steel-blue accent)
+   ================================================================ */
 
-  --sidebar-bg: #0E1B16;
-  --sidebar-text: #ECEAE2;
-  --sidebar-muted: #8CA398;
-  --sidebar-hover: rgba(255, 255, 255, 0.055);
-  --sidebar-active: rgba(255, 255, 255, 0.10);
-  --sidebar-border: rgba(255, 255, 255, 0.07);
+[data-theme="steel"] {
+  /* Surface */
+  --bg-base:   #EEF2F7;
+  --bg-card:   #FFFFFF;
+  --bg-inset:  #F4F7FB;
+  --bg-hover:  #E4ECF5;
+
+  /* Text */
+  --text-primary:   #0D1B2A;
+  --text-secondary: #5A6B7C;
+
+  /* Accent — steel blue, authoritative navy */
+  --accent:        #1D4ED8;
+  --accent-strong: #1E40AF;
+  --accent-pulse:  #3B82F6;
+  --accent-soft:  rgba(29, 78, 216, 0.09);
+
+  /* Borders */
+  --border: #C8D5E3;
+
+  /* Status */
+  --success:      #15803D;
+  --success-soft: #F0FDF4;
+  --warning:      #B45309;
+  --warning-soft: #FFFBEB;
+  --danger:       #B91C1C;
+  --danger-soft:  #FEF2F2;
+  --info:         #1D4ED8;
+  --info-soft:    #EFF6FF;
+
+  /* Sidebar — deep midnight navy */
+  --sidebar-bg:      #0A1628;
+  --sidebar-text:    #E2E8F0;
+  --sidebar-muted:   #7B92AD;
+  --sidebar-hover:   rgba(255, 255, 255, 0.055);
+  --sidebar-active:  rgba(255, 255, 255, 0.11);
+  --sidebar-border:  rgba(255, 255, 255, 0.07);
+
+  /* Elevation — blue-tinted */
+  --elev-card:    0 1px 2px rgba(10, 22, 40, 0.07), 0 1px 3px rgba(10, 22, 40, 0.05);
+  --elev-raised:  0 2px 6px rgba(10, 22, 40, 0.09), 0 4px 14px rgba(10, 22, 40, 0.07);
+  --elev-overlay: 0 8px 24px rgba(10, 22, 40, 0.12), 0 16px 48px rgba(10, 22, 40, 0.10);
+
+  color-scheme: light;
+}
+
+[data-theme="steel"].theme-dark,
+[data-theme="steel"].theme-dark {
+  --bg-base:   #070E1A;
+  --bg-card:   #0D1825;
+  --bg-inset:  #0A1420;
+  --bg-hover:  #152035;
+  --text-primary:   #E8EEF5;
+  --text-secondary: #7B8FA8;
+  --accent:        #60A5FA;
+  --accent-strong: #93C5FD;
+  --accent-pulse:  #60A5FA;
+  --accent-soft:  rgba(96, 165, 250, 0.13);
+  --border: rgba(255, 255, 255, 0.07);
+  --success:      #34D399;
+  --success-soft: rgba(52, 211, 153, 0.12);
+  --warning:      #FBBF24;
+  --warning-soft: rgba(251, 191, 36, 0.12);
+  --danger:       #F87171;
+  --danger-soft:  rgba(248, 113, 113, 0.12);
+  --info:         #60A5FA;
+  --info-soft:    rgba(96, 165, 250, 0.12);
+  --sidebar-bg:      #050B15;
+  --sidebar-text:    #D8E4F0;
+  --sidebar-muted:   #5A7290;
+  --sidebar-hover:   rgba(255, 255, 255, 0.045);
+  --sidebar-active:  rgba(255, 255, 255, 0.09);
+  --sidebar-border:  rgba(255, 255, 255, 0.06);
+  --elev-card:    0 1px 2px rgba(0, 0, 0, 0.35), 0 1px 3px rgba(0, 0, 0, 0.28);
+  --elev-raised:  0 2px 6px rgba(0, 0, 0, 0.38), 0 4px 14px rgba(0, 0, 0, 0.30);
+  --elev-overlay: 0 8px 24px rgba(0, 0, 0, 0.45), 0 16px 48px rgba(0, 0, 0, 0.38);
+  color-scheme: dark;
+}
+
+/* ================================================================
+   Theme: Slate & Gold  (warm gold accent, forest sidebar retained)
+   ================================================================ */
+
+[data-theme="gold"] {
+  /* Surface */
+  --bg-base:   #F8F9FB;
+  --bg-card:   #FFFFFF;
+  --bg-inset:  #F4F5F9;
+  --bg-hover:  #ECEEF3;
+
+  /* Text */
+  --text-primary:   #1A1D23;
+  --text-secondary: #5C6270;
+
+  /* Accent — warm amber gold, premium and distinctive */
+  --accent:        #92701A;
+  --accent-strong: #7A5C10;
+  --accent-pulse:  #D4A017;
+  --accent-soft:  rgba(146, 112, 26, 0.09);
+
+  /* Borders */
+  --border: #D8DCE6;
+
+  /* Status */
+  --success:      #15803D;
+  --success-soft: #F0FDF4;
+  --warning:      #B45309;
+  --warning-soft: #FFFBEB;
+  --danger:       #B91C1C;
+  --danger-soft:  #FEF2F2;
+  --info:         #1D4ED8;
+  --info-soft:    #EFF6FF;
+
+  /* Sidebar — forest green retained */
+  --sidebar-bg:      #0B1F17;
+  --sidebar-text:    #E4EEE8;
+  --sidebar-muted:   #7BA697;
+  --sidebar-hover:   rgba(255, 255, 255, 0.055);
+  --sidebar-active:  rgba(255, 255, 255, 0.11);
+  --sidebar-border:  rgba(255, 255, 255, 0.07);
+
+  /* Elevation — warm-tinted */
+  --elev-card:    0 1px 2px rgba(26, 29, 35, 0.06), 0 1px 3px rgba(26, 29, 35, 0.04);
+  --elev-raised:  0 2px 6px rgba(26, 29, 35, 0.08), 0 4px 14px rgba(26, 29, 35, 0.06);
+  --elev-overlay: 0 8px 24px rgba(26, 29, 35, 0.11), 0 16px 48px rgba(26, 29, 35, 0.09);
+
+  color-scheme: light;
+}
+
+[data-theme="gold"].theme-dark {
+  --bg-base:   #16181F;
+  --bg-card:   #1D2028;
+  --bg-inset:  #191B22;
+  --bg-hover:  #252830;
+  --text-primary:   #EFEFE8;
+  --text-secondary: #9094A0;
+  --accent:        #E8B84B;
+  --accent-strong: #F0C85A;
+  --accent-pulse:  #E8B84B;
+  --accent-soft:  rgba(232, 184, 75, 0.12);
+  --border: rgba(255, 255, 255, 0.08);
+  --success:      #4ADE80;
+  --success-soft: rgba(74, 222, 128, 0.12);
+  --warning:      #FBBF24;
+  --warning-soft: rgba(251, 191, 36, 0.12);
+  --danger:       #F87171;
+  --danger-soft:  rgba(248, 113, 113, 0.12);
+  --info:         #60A5FA;
+  --info-soft:    rgba(96, 165, 250, 0.12);
+  --sidebar-bg:      #0B1A12;
+  --sidebar-text:    #DDE8E2;
+  --sidebar-muted:   #6B9E87;
+  --sidebar-hover:   rgba(255, 255, 255, 0.05);
+  --sidebar-active:  rgba(255, 255, 255, 0.10);
+  --sidebar-border:  rgba(255, 255, 255, 0.06);
+  --elev-card:    0 1px 2px rgba(0, 0, 0, 0.30), 0 1px 3px rgba(0, 0, 0, 0.24);
+  --elev-raised:  0 2px 6px rgba(0, 0, 0, 0.34), 0 4px 14px rgba(0, 0, 0, 0.28);
+  --elev-overlay: 0 8px 24px rgba(0, 0, 0, 0.42), 0 16px 48px rgba(0, 0, 0, 0.36);
+  color-scheme: dark;
 }
 
 /* ================================================================
@@ -206,60 +356,56 @@ html, body {
   color: var(--text-primary);
 }
 
-/* ── Headings — confident grotesk, tight tracking ── */
 h1, h2, h3 {
   font-family: var(--font-sans);
   font-weight: 650;
-  letter-spacing: -0.015em;
+  letter-spacing: -0.018em;
 }
 
-/* ── Serif display moments (brand, hero, empty states) ── */
 .font-display {
   font-family: var(--font-display);
   font-optical-sizing: auto;
   letter-spacing: -0.01em;
 }
 
-/* ── Theme transitions ── */
 body,
-aside, header, nav, main, section, div[class*="bg-theme"], button, a, input, select, textarea {
-  transition: background-color 150ms var(--ease-out-quart),
-              border-color 150ms var(--ease-out-quart),
-              color 150ms var(--ease-out-quart),
-              box-shadow 150ms var(--ease-out-quart);
+aside, header, nav, main, section,
+div[class*="bg-theme"],
+button, a, input, select, textarea {
+  transition:
+    background-color 120ms var(--ease-out-quart),
+    border-color    120ms var(--ease-out-quart),
+    color           120ms var(--ease-out-quart),
+    box-shadow      120ms var(--ease-out-quart);
 }
 
-/* ── Screen reader ── */
 .sr-only {
   position: absolute;
-  width: 1px;
-  height: 1px;
-  padding: 0;
-  margin: -1px;
+  width: 1px; height: 1px;
+  padding: 0; margin: -1px;
   overflow: hidden;
   clip: rect(0, 0, 0, 0);
   white-space: nowrap;
   border-width: 0;
 }
 
-/* ── Accessible focus rings ── */
 :focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 1px;
-  border-radius: 6px;
+  outline: 2px solid var(--accent-pulse);
+  outline-offset: 2px;
+  border-radius: 5px;
 }
 
-input:focus-visible, select:focus-visible, textarea:focus-visible {
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
   outline-offset: -1px;
   outline-width: 1px;
 }
 
-/* ── Tabular numerals for metrics ── */
 .tnum, table, [data-metric] {
   font-variant-numeric: tabular-nums;
 }
 
-/* ── Keyboard hint chips ── */
 kbd {
   font-family: var(--font-sans);
   font-size: 10px;
@@ -273,10 +419,13 @@ kbd {
   line-height: 1.4;
 }
 
-/* ── Overlay entrance ── */
+/* ================================================================
+   Animations
+   ================================================================ */
+
 @keyframes overlay-in {
-  from { opacity: 0; transform: translateY(3px) scale(0.99); }
-  to   { opacity: 1; transform: translateY(0) scale(1); }
+  from { opacity: 0; transform: translateY(4px) scale(0.99); }
+  to   { opacity: 1; transform: translateY(0)    scale(1); }
 }
 
 @keyframes fade-in {
@@ -284,13 +433,8 @@ kbd {
   to   { opacity: 1; }
 }
 
-.animate-overlay-in {
-  animation: overlay-in 160ms var(--ease-out-quart);
-}
-
-.animate-fade-in {
-  animation: fade-in 140ms ease-out;
-}
+.animate-overlay-in { animation: overlay-in 150ms var(--ease-out-quart); }
+.animate-fade-in    { animation: fade-in 130ms ease-out; }
 
 /* ================================================================
    Responsive Sidebar
@@ -299,24 +443,13 @@ kbd {
 @media (max-width: 1023px) {
   .sidebar-mobile-overlay {
     position: fixed !important;
-    top: 0;
-    left: 0;
-    bottom: 0;
+    top: 0; left: 0; bottom: 0;
     z-index: 80;
     transition: transform 220ms var(--ease-out-quart);
   }
-  .sidebar-mobile-hidden {
-    transform: translateX(-100%);
-  }
-  .sidebar-mobile-visible {
-    transform: translateX(0);
-  }
+  .sidebar-mobile-hidden  { transform: translateX(-100%); }
+  .sidebar-mobile-visible { transform: translateX(0); }
 }
-
-
-/* ================================================================
-   Responsive Tables → Cards on Mobile
-   ================================================================ */
 
 @media (max-width: 640px) {
   .responsive-card-list > * {
@@ -336,22 +469,14 @@ kbd {
    Scrollbars
    ================================================================ */
 
-::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
-}
-
-::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-::-webkit-scrollbar-thumb {
+::-webkit-scrollbar        { width: 7px; height: 7px; }
+::-webkit-scrollbar-track  { background: transparent; }
+::-webkit-scrollbar-thumb  {
   background: color-mix(in srgb, var(--text-secondary) 28%, transparent);
   border-radius: 9999px;
   border: 2px solid transparent;
   background-clip: padding-box;
 }
-
 ::-webkit-scrollbar-thumb:hover {
   background: color-mix(in srgb, var(--text-secondary) 48%, transparent);
   background-clip: padding-box;
@@ -362,19 +487,12 @@ kbd {
    Print / PDF Export
    ================================================================ */
 
-html.printing body * {
-  visibility: hidden !important;
-}
-
+html.printing body *                     { visibility: hidden !important; }
 html.printing .print-area,
-html.printing .print-area * {
-  visibility: visible !important;
-}
-
-html.printing .print-area {
+html.printing .print-area *             { visibility: visible !important; }
+html.printing .print-area              {
   position: absolute !important;
-  left: 0;
-  top: 0;
+  left: 0; top: 0;
   width: 100%;
   height: auto !important;
   max-height: none !important;
@@ -385,9 +503,10 @@ html.printing .print-area {
 }
 
 @media print {
-  html.printing body * { visibility: hidden !important; }
-  html.printing .print-area, html.printing .print-area * { visibility: visible !important; }
-  html.printing .print-area {
+  html.printing body *                     { visibility: hidden !important; }
+  html.printing .print-area,
+  html.printing .print-area *             { visibility: visible !important; }
+  html.printing .print-area              {
     position: absolute !important;
     left: 0; top: 0;
     width: 100%;
@@ -414,7 +533,7 @@ select,
 textarea {
   height: 34px;
   min-height: 34px;
-  border-radius: 7px;
+  border-radius: 6px;
   border: 1px solid var(--border);
   padding-left: 10px;
   padding-right: 10px;
@@ -437,7 +556,7 @@ input[type="date"]:hover:not(:focus):not(:disabled),
 input:not([type]):hover:not(:focus):not(:disabled),
 select:hover:not(:focus):not(:disabled),
 textarea:hover:not(:focus):not(:disabled) {
-  border-color: color-mix(in srgb, var(--text-secondary) 45%, var(--border));
+  border-color: color-mix(in srgb, var(--text-secondary) 50%, var(--border));
 }
 
 textarea {
@@ -449,7 +568,6 @@ textarea {
   resize: vertical;
 }
 
-/* Focus — evergreen border with soft halo */
 input[type="text"]:focus,
 input[type="email"]:focus,
 input[type="password"]:focus,
@@ -467,11 +585,10 @@ textarea:focus {
 }
 
 ::placeholder {
-  color: color-mix(in srgb, var(--text-secondary) 62%, transparent);
+  color: color-mix(in srgb, var(--text-secondary) 58%, transparent);
   font-size: 0.8125rem;
 }
 
-/* Checkbox / radio sizing */
 input[type="checkbox"],
 input[type="radio"] {
   width: 14px;
@@ -480,39 +597,23 @@ input[type="radio"] {
   cursor: pointer;
 }
 
-/* Select dropdown arrow */
 select {
   appearance: none;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%236E6A5E' d='M6 8L1 3h10z'/%3E%3C/svg%3E");
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%2364748B' d='M6 8L1 3h10z'/%3E%3C/svg%3E");
   background-repeat: no-repeat;
   background-position: right 10px center;
   padding-right: 30px;
   cursor: pointer;
 }
 
-/* ================================================================
-   Button Normalization
-   ================================================================ */
-
 button, [role="button"] {
-  border-radius: 7px;
+  border-radius: 6px;
   font-family: var(--font-sans);
 }
 
-/* ================================================================
-   Table Baseline
-   ================================================================ */
+table th, table td { border-bottom: 1px solid var(--border); }
+table th { font-weight: 600; }
 
-table th,
-table td {
-  border-bottom: 1px solid var(--border);
-}
-
-table th {
-  font-weight: 600;
-}
-
-/* Field labels */
 label {
   font-size: 0.75rem;
   font-weight: 500;
