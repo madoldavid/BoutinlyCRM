@@ -753,7 +753,7 @@ export class ApiClient {
   async exportAuditLogs(format: 'json' | 'csv'): Promise<Blob> {
     const headers: Record<string, string> = {};
     if (this.token) headers['Authorization'] = `Bearer ${this.token}`;
-    const response = await fetch(`${this.baseUrl}/api/audit-logs/export?format=${format}`, { headers });
+    const response = await fetch(`${this.baseUrl}/api/audit-logs/export?format=${format}`, { headers, credentials: 'include' });
     if (!response.ok) {
       const payload = await response.json().catch(() => null);
       throw new ApiError(response.status, payload?.error?.message || 'Export failed', payload?.error?.code);
@@ -901,13 +901,13 @@ export class ApiClient {
     const headers: Record<string, string> = {};
     if (this.token) headers['Authorization'] = `Bearer ${this.token}`;
 
-    let response = await fetch(`${this.baseUrl}/api/files/${id}`, { headers });
+    let response = await fetch(`${this.baseUrl}/api/files/${id}`, { headers, credentials: 'include' });
 
     if (response.status === 401 && this.refreshToken) {
       try {
         await this.refresh();
         headers['Authorization'] = `Bearer ${this.token}`;
-        response = await fetch(`${this.baseUrl}/api/files/${id}`, { headers });
+        response = await fetch(`${this.baseUrl}/api/files/${id}`, { headers, credentials: 'include' });
       } catch (e) {
         if (e instanceof ApiError && e.status === 401) {
           this.setToken(null);
@@ -1084,6 +1084,7 @@ export class ApiClient {
 
     const response = await fetch(`${this.baseUrl}${path}`, {
       ...init,
+      credentials: 'include',
       headers: { ...headers, ...(init.headers as Record<string, string> | undefined) },
     });
 

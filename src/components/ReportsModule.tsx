@@ -885,7 +885,7 @@ export default function ReportsModule() {
                       const maxVal = pipelineHealthData.stageBreakdown[0]?.value || 1;
                       const widthPct = Math.max(16, (stg.value / maxVal) * 100 - index * 10);
                       return (
-                        <div key={stg.stageName} className="flex items-center gap-4">
+                        <div key={`${stg.stageName}-${index}`} className="flex items-center gap-4">
                           <div className="w-36 text-right shrink-0">
                             <p className="text-xs font-semibold text-theme-primary">{stg.stageName}</p>
                             <p className="text-2xs text-theme-secondary font-semibold">{stg.count} deal{stg.count !== 1 ? 's' : ''}</p>

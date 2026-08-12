@@ -151,6 +151,95 @@ export default function ContactsModule() {
   const [quickAccountIndustry, setQuickAccountIndustry] = useState('');
   const [isCreatingQuickAccount, setIsCreatingQuickAccount] = useState(false);
 
+  // Pending-close confirmations (unsaved-input guard for create modals)
+  const [pendingCloseCreateContact, setPendingCloseCreateContact] = useState(false);
+  const [pendingCloseCreateAccount, setPendingCloseCreateAccount] = useState(false);
+
+  // ─── Form helpers (reset / dirty-check / validation) ───────────
+  const blankContactForm = () => ({
+    first_name: '',
+    last_name: '',
+    email: '',
+    phone: '',
+    title: '',
+    linkedin_url: '',
+    account_id: '',
+    owner_id: currentUser?.id ?? '',
+    tags: '',
+    custom_values: {} as Record<string, any>,
+  });
+
+  const blankAccountForm = () => ({
+    name: '',
+    domain: '',
+    industry: '',
+    size: '51-200' as Account['size'],
+    website: '',
+    arr: 0,
+    owner_id: currentUser?.id ?? '',
+    tags: '',
+    custom_values: {} as Record<string, any>,
+  });
+
+  const resetContactForm = () => setContactForm(blankContactForm());
+  const resetAccountForm = () => setAccountForm(blankAccountForm());
+
+  const isContactFormDirty = () => {
+    const f = contactForm;
+    return Boolean(
+      f.first_name.trim() || f.last_name.trim() || f.email.trim() || f.phone.trim() ||
+      f.title.trim() || f.linkedin_url.trim() || f.account_id || f.tags.trim() ||
+      (f.owner_id && f.owner_id !== (currentUser?.id ?? '')) ||
+      Object.values(f.custom_values).some(v => v !== undefined && v !== ''),
+    );
+  };
+
+  const isAccountFormDirty = () => {
+    const f = accountForm;
+    return Boolean(
+      f.name.trim() || f.domain.trim() || f.industry.trim() || f.website.trim() ||
+      Number(f.arr) !== 0 || f.tags.trim() ||
+      (f.owner_id && f.owner_id !== (currentUser?.id ?? '')) ||
+      Object.values(f.custom_values).some(v => v !== undefined && v !== ''),
+    );
+  };
+
+  const closeCreateContact = () => {
+    if (isContactFormDirty()) setPendingCloseCreateContact(true);
+    else resetAndCloseCreateContact();
+  };
+  const resetAndCloseCreateContact = () => {
+    setShowCreateContact(false);
+    resetContactForm();
+    setShowQuickAccountForm(false);
+    setQuickAccountName('');
+    setQuickAccountIndustry('');
+  };
+
+  const closeCreateAccount = () => {
+    if (isAccountFormDirty()) setPendingCloseCreateAccount(true);
+    else resetAndCloseCreateAccount();
+  };
+  const resetAndCloseCreateAccount = () => {
+    setShowCreateAccount(false);
+    resetAccountForm();
+  };
+
+  // Phone format: optional leading +, then 7-20 digits/spaces/dashes/parens
+  const PHONE_PATTERN = '^[+]?[0-9\\s\\-()]{7,20}$';
+  const isValidPhone = (v: string) => !v.trim() || new RegExp(PHONE_PATTERN).test(v.trim());
+  // URL validation (http/https) for optional URL fields like LinkedIn
+  const isValidUrl = (v: string) => {
+    const t = v.trim();
+    if (!t) return true;
+    try {
+      const u = new URL(t);
+      return u.protocol === 'http:' || u.protocol === 'https:';
+    } catch {
+      return false;
+    }
+  };
+
   // Merge states
   const [mergeSourceId, setMergeSourceId] = useState('');
   const [mergeTargetId, setMergeTargetId] = useState('');
@@ -364,6 +453,14 @@ export default function ContactsModule() {
       toast.error('Missing email', 'Email address is required.');
       return;
     }
+    if (!isValidPhone(contactForm.phone)) {
+      toast.error('Invalid phone number', 'Enter a valid phone number (7-20 digits; +, spaces, dashes and parentheses allowed).');
+      return;
+    }
+    if (!isValidUrl(contactForm.linkedin_url)) {
+      toast.error('Invalid LinkedIn URL', 'Enter a full http:// or https:// URL, or leave it blank.');
+      return;
+    }
 
     try {
       await addContact({
@@ -379,20 +476,8 @@ export default function ContactsModule() {
       custom_fields: contactForm.custom_values,
       unsubscribed: false,
     });
-      setShowCreateContact(false);
-      // Reset form only on success
-      setContactForm({
-        first_name: '',
-        last_name: '',
-        email: '',
-        phone: '',
-        title: '',
-        linkedin_url: '',
-        account_id: '',
-        owner_id: currentUser?.id ?? '',
-        tags: '',
-        custom_values: {},
-      });
+      // Reset form and close only on success
+      resetAndCloseCreateContact();
     } catch {
       // Error toast already shown by store — keep modal open so user can fix
     }
@@ -418,6 +503,10 @@ export default function ContactsModule() {
   // Create Account Handler
   const handleCreateAccountSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!isValidUrl(accountForm.website)) {
+      toast.error('Invalid website URL', 'Enter a full http:// or https:// URL, or leave it blank.');
+      return;
+    }
     try {
       await addAccount({
         name: accountForm.name,
@@ -430,18 +519,8 @@ export default function ContactsModule() {
         tags: accountForm.tags.split(',').map(t => t.trim()).filter(Boolean),
         custom_fields: accountForm.custom_values,
       });
-      setShowCreateAccount(false);
-      setAccountForm({
-        name: '',
-        domain: '',
-        industry: '',
-        size: '51-200',
-        website: '',
-        arr: 0,
-        owner_id: currentUser?.id ?? '',
-        tags: '',
-        custom_values: {},
-      });
+      // Reset form and close only on success
+      resetAndCloseCreateAccount();
     } catch {
       // Error toast already shown by store — keep modal open
     }
@@ -743,20 +822,20 @@ export default function ContactsModule() {
           <div className="flex items-center justify-between gap-2">
             <div className="flex items-center gap-0.5 bg-theme-base p-0.5 rounded-lg border border-theme-border text-xs font-semibold min-w-0 overflow-x-auto scrollbar-none">
               <button
-                onClick={() => { setActiveTab('contacts'); setSelectedTag('All'); }}
-                className={`px-2.5 sm:px-3 py-1.5 rounded-md cursor-pointer transition-all flex items-center gap-1.5 shrink-0 whitespace-nowrap ${
-                  activeTab === 'contacts' ? 'bg-theme-card text-theme-primary shadow-card border border-theme-border/50' : 'text-theme-secondary hover:text-theme-primary'
-                }`}
-              >
-                <User className="w-3.5 h-3.5 text-theme-accent" /> Contacts <span className="text-theme-secondary font-medium">({filteredContacts.length})</span>
-              </button>
-              <button
                 onClick={() => { setActiveTab('accounts'); setSelectedTag('All'); }}
-                className={`px-2.5 sm:px-3 py-1.5 rounded-md cursor-pointer transition-all flex items-center gap-1.5 shrink-0 whitespace-nowrap ${
-                  activeTab === 'accounts' ? 'bg-theme-card text-theme-primary shadow-card border border-theme-border/50' : 'text-theme-secondary hover:text-theme-primary'
+                className={`px-2.5 sm:px-3 py-1.5 rounded-md cursor-pointer transition-all flex items-center gap-1.5 shrink-0 whitespace-nowrap border ${
+                  activeTab === 'accounts' ? 'bg-theme-card text-theme-primary shadow-card border-theme-border/50' : 'border-transparent text-theme-secondary hover:text-theme-primary hover:bg-theme-hover hover:border-theme-border/30'
                 }`}
               >
                 <Building2 className="w-3.5 h-3.5 text-theme-accent" /> Accounts <span className="text-theme-secondary font-medium">({filteredAccounts.length})</span>
+              </button>
+              <button
+                onClick={() => { setActiveTab('contacts'); setSelectedTag('All'); }}
+                className={`px-2.5 sm:px-3 py-1.5 rounded-md cursor-pointer transition-all flex items-center gap-1.5 shrink-0 whitespace-nowrap border ${
+                  activeTab === 'contacts' ? 'bg-theme-card text-theme-primary shadow-card border-theme-border/50' : 'border-transparent text-theme-secondary hover:text-theme-primary hover:bg-theme-hover hover:border-theme-border/30'
+                }`}
+              >
+                <User className="w-3.5 h-3.5 text-theme-accent" /> Contacts <span className="text-theme-secondary font-medium">({filteredContacts.length})</span>
               </button>
             </div>
 
@@ -942,7 +1021,9 @@ export default function ContactsModule() {
           {activeTab === 'contacts' ? (
             filteredContacts.length === 0 ? (
               <div className="p-8 text-center text-xs text-theme-secondary font-sans">
-                No matching contacts scoped to your account role.
+                {scopedContacts.length === 0
+                  ? 'No contacts yet — add your first one to get started.'
+                  : 'No contacts match your search.'}
               </div>
             ) : viewMode === 'table' ? (
               <DataTable
@@ -996,7 +1077,9 @@ export default function ContactsModule() {
           ) : (
             filteredAccounts.length === 0 ? (
               <div className="p-8 text-center text-xs text-theme-secondary font-sans">
-                No matching accounts scoped to your account role.
+                {scopedAccounts.length === 0
+                  ? 'No accounts yet — add your first one to get started.'
+                  : 'No accounts match your search.'}
               </div>
             ) : (
               filteredAccounts.map(a => {
@@ -1438,218 +1521,213 @@ export default function ContactsModule() {
 
 
       {/* MODAL: CREATE CONTACT */}
-      {showCreateContact && (
-        <div className="fixed inset-0 z-[90] flex items-center justify-center p-4 bg-theme-primary/60 backdrop-blur-[2px] animate-fade-in">
-          <div className="bg-theme-card rounded-xl shadow-overlay border border-theme-border w-full max-w-lg overflow-hidden flex flex-col max-h-[85vh] animate-overlay-in">
-            <header className="bg-theme-inset px-5 py-4 border-b border-theme-border flex justify-between items-center shrink-0">
-              <h3 className="text-sm font-bold text-theme-primary">Provision New B2B Contact</h3>
-              <button onClick={() => setShowCreateContact(false)} className="text-theme-secondary hover:text-theme-primary font-bold text-xs cursor-pointer bg-transparent border-none">✕</button>
-            </header>
-            <form onSubmit={handleCreateContactSubmit} className="p-5 space-y-4 text-xs text-left overflow-y-auto">
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-1">
-                  <label className="block font-semibold text-theme-secondary">First Name *</label>
-                  <input
-                    type="text" required
-                    value={contactForm.first_name}
-                    onChange={(e) => setContactForm({ ...contactForm, first_name: e.target.value })}
-                    className="w-full bg-theme-base text-theme-primary rounded border border-theme-border px-2.5 py-1.5 focus:ring-1 focus:ring-theme-accent focus:outline-none"
-                  />
-                </div>
-                <div className="space-y-1">
-                  <label className="block font-semibold text-theme-secondary">Last Name *</label>
-                  <input
-                    type="text" required
-                    value={contactForm.last_name}
-                    onChange={(e) => setContactForm({ ...contactForm, last_name: e.target.value })}
-                    className="w-full bg-theme-base text-theme-primary rounded border border-theme-border px-2.5 py-1.5 focus:ring-1 focus:ring-theme-accent focus:outline-none"
-                  />
-                </div>
-              </div>
+      <Modal
+        open={showCreateContact}
+        onClose={closeCreateContact}
+        title="Provision New B2B Contact"
+        footer={
+          <div className="flex gap-2">
+            <Button variant="secondary" type="button" onClick={closeCreateContact}>Cancel</Button>
+            <Button variant="primary" type="submit" form="create-contact-form">Save Contact</Button>
+          </div>
+        }
+      >
+        <form id="create-contact-form" onSubmit={handleCreateContactSubmit} className="space-y-4 text-xs text-left">
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-1">
+              <label htmlFor="contact-first-name" className="block font-semibold text-theme-secondary">First Name *</label>
+              <input
+                id="contact-first-name" name="first_name" type="text" required
+                value={contactForm.first_name}
+                onChange={(e) => setContactForm({ ...contactForm, first_name: e.target.value })}
+                className="w-full bg-theme-base text-theme-primary rounded border border-theme-border px-2.5 py-1.5 focus:ring-1 focus:ring-theme-accent focus:outline-none"
+              />
+            </div>
+            <div className="space-y-1">
+              <label htmlFor="contact-last-name" className="block font-semibold text-theme-secondary">Last Name *</label>
+              <input
+                id="contact-last-name" name="last_name" type="text" required
+                value={contactForm.last_name}
+                onChange={(e) => setContactForm({ ...contactForm, last_name: e.target.value })}
+                className="w-full bg-theme-base text-theme-primary rounded border border-theme-border px-2.5 py-1.5 focus:ring-1 focus:ring-theme-accent focus:outline-none"
+              />
+            </div>
+          </div>
 
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-1">
-                  <label className="block font-semibold text-theme-secondary">Email Address *</label>
-                  <input
-                    type="email" required
-                    value={contactForm.email}
-                    onChange={(e) => setContactForm({ ...contactForm, email: e.target.value })}
-                    className="w-full bg-theme-base text-theme-primary rounded border border-theme-border px-2.5 py-1.5 focus:ring-1 focus:ring-theme-accent focus:outline-none"
-                  />
-                </div>
-                <div className="space-y-1">
-                  <label className="block font-semibold text-theme-secondary">Phone Number *</label>
-                  <input
-                    type="text" required
-                    value={contactForm.phone}
-                    onChange={(e) => setContactForm({ ...contactForm, phone: e.target.value })}
-                    className="w-full bg-theme-base text-theme-primary rounded border border-theme-border px-2.5 py-1.5 focus:ring-1 focus:ring-theme-accent focus:outline-none"
-                  />
-                </div>
-              </div>
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-1">
+              <label htmlFor="contact-email" className="block font-semibold text-theme-secondary">Email Address *</label>
+              <input
+                id="contact-email" name="email" type="email" required
+                value={contactForm.email}
+                onChange={(e) => setContactForm({ ...contactForm, email: e.target.value })}
+                className="w-full bg-theme-base text-theme-primary rounded border border-theme-border px-2.5 py-1.5 focus:ring-1 focus:ring-theme-accent focus:outline-none"
+              />
+            </div>
+            <div className="space-y-1">
+              <label htmlFor="contact-phone" className="block font-semibold text-theme-secondary">Phone Number *</label>
+              <input
+                id="contact-phone" name="phone" type="tel" required
+                pattern={PHONE_PATTERN}
+                title="Enter a valid phone number (7-20 digits; +, spaces, dashes and parentheses allowed)."
+                value={contactForm.phone}
+                onChange={(e) => setContactForm({ ...contactForm, phone: e.target.value })}
+                className="w-full bg-theme-base text-theme-primary rounded border border-theme-border px-2.5 py-1.5 focus:ring-1 focus:ring-theme-accent focus:outline-none"
+              />
+            </div>
+          </div>
 
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-1">
-                  <label className="block font-semibold text-theme-secondary">Job Title</label>
-                  <input
-                    type="text"
-                    value={contactForm.title}
-                    onChange={(e) => setContactForm({ ...contactForm, title: e.target.value })}
-                    className="w-full bg-theme-base text-theme-primary rounded border border-theme-border px-2.5 py-1.5 focus:ring-1 focus:ring-theme-accent focus:outline-none"
-                  />
-                </div>
-                <div className="space-y-1">
-                  <label className="block font-semibold text-theme-secondary">LinkedIn URL</label>
-                  <input
-                    type="text"
-                    value={contactForm.linkedin_url}
-                    onChange={(e) => setContactForm({ ...contactForm, linkedin_url: e.target.value })}
-                    className="w-full bg-theme-base text-theme-primary rounded border border-theme-border px-2.5 py-1.5 focus:ring-1 focus:ring-theme-accent focus:outline-none"
-                  />
-                </div>
-              </div>
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-1">
+              <label htmlFor="contact-title" className="block font-semibold text-theme-secondary">Job Title</label>
+              <input
+                id="contact-title" name="title" type="text"
+                value={contactForm.title}
+                onChange={(e) => setContactForm({ ...contactForm, title: e.target.value })}
+                className="w-full bg-theme-base text-theme-primary rounded border border-theme-border px-2.5 py-1.5 focus:ring-1 focus:ring-theme-accent focus:outline-none"
+              />
+            </div>
+            <div className="space-y-1">
+              <label htmlFor="contact-linkedin" className="block font-semibold text-theme-secondary">LinkedIn URL</label>
+              <input
+                id="contact-linkedin" name="linkedin_url" type="url"
+                placeholder="https://www.linkedin.com/in/..."
+                value={contactForm.linkedin_url}
+                onChange={(e) => setContactForm({ ...contactForm, linkedin_url: e.target.value })}
+                className="w-full bg-theme-base text-theme-primary rounded border border-theme-border px-2.5 py-1.5 focus:ring-1 focus:ring-theme-accent focus:outline-none"
+              />
+            </div>
+          </div>
 
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-1">
-                  <label className="block font-semibold text-theme-secondary">Associated Company Account</label>
-                  <select
-                    value={contactForm.account_id}
-                    onChange={(e) => setContactForm({ ...contactForm, account_id: e.target.value })}
-                    className="w-full bg-theme-base text-theme-primary rounded border border-theme-border px-2.5 py-1.5 focus:ring-1 focus:ring-theme-accent focus:outline-none"
-                  >
-                    <option value="">-- Select Company --</option>
-                    {scopedAccounts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
-                  </select>
-                  {scopedAccounts.length === 0 && !showQuickAccountForm && (
-                    <p className="text-xs text-theme-secondary leading-relaxed pt-1">
-                      No accounts yet. Create one below so you can attach this contact.
-                    </p>
-                  )}
-                  {!showQuickAccountForm && (
-                    <button
-                      type="button"
-                      onClick={() => setShowQuickAccountForm(true)}
-                      className="mt-1 text-xs font-semibold text-theme-accent hover:underline cursor-pointer bg-transparent border-none p-0"
-                    >
-                      + New Company
-                    </button>
-                  )}
-                  {showQuickAccountForm && (
-                    <div
-                      className="mt-2 space-y-2 border border-theme-border rounded-lg p-2.5 bg-theme-inset/60"
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter') {
-                          e.preventDefault();
-                          e.stopPropagation();
-                          handleQuickCreateAccount(e);
-                        }
-                      }}
-                    >
-                      <input
-                        type="text"
-                        placeholder="Company name *"
-                        value={quickAccountName}
-                        onChange={(e) => setQuickAccountName(e.target.value)}
-                        autoFocus
-                        className="w-full bg-theme-base text-theme-primary rounded border border-theme-border px-2.5 py-1.5 focus:ring-1 focus:ring-theme-accent focus:outline-none"
-                      />
-                      <input
-                        type="text"
-                        placeholder="Industry (optional)"
-                        value={quickAccountIndustry}
-                        onChange={(e) => setQuickAccountIndustry(e.target.value)}
-                        className="w-full bg-theme-base text-theme-primary rounded border border-theme-border px-2.5 py-1.5 focus:ring-1 focus:ring-theme-accent focus:outline-none"
-                      />
-                      <div className="flex justify-end gap-2">
-                        <button
-                          type="button"
-                          onClick={() => { setShowQuickAccountForm(false); setQuickAccountName(''); setQuickAccountIndustry(''); }}
-                          className="px-2.5 py-1 border border-theme-border hover:bg-theme-base text-theme-primary rounded text-xs font-semibold cursor-pointer bg-transparent"
-                        >
-                          Cancel
-                        </button>
-                        <button
-                          type="button"
-                          disabled={isCreatingQuickAccount}
-                          onClick={(e) => handleQuickCreateAccount(e)}
-                          className="px-2.5 py-1 bg-theme-accent hover:opacity-90 text-white rounded text-xs font-semibold cursor-pointer disabled:opacity-50"
-                        >
-                          {isCreatingQuickAccount ? 'Creating…' : 'Create & Select'}
-                        </button>
-                      </div>
-                    </div>
-                  )}
-                </div>
-                <div className="space-y-1">
-                  <label className="block font-semibold text-theme-secondary">Account Manager</label>
-                  <select
-                    value={contactForm.owner_id}
-                    onChange={(e) => setContactForm({ ...contactForm, owner_id: e.target.value })}
-                    className="w-full bg-theme-base text-theme-primary rounded border border-theme-border px-2.5 py-1.5 focus:ring-1 focus:ring-theme-accent focus:outline-none"
-                  >
-                    {users.map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
-                  </select>
-                </div>
-              </div>
-
-              <div className="space-y-1">
-                <label className="block font-semibold text-theme-secondary">Segment Tags (comma separated)</label>
-                <input
-                  type="text"
-                  placeholder="Champion, Technical, Mid-Market"
-                  value={contactForm.tags}
-                  onChange={(e) => setContactForm({ ...contactForm, tags: e.target.value })}
-                  className="w-full bg-theme-base text-theme-primary rounded border border-theme-border px-2.5 py-1.5 focus:ring-1 focus:ring-theme-accent focus:outline-none"
-                />
-              </div>
-
-              {/* Dynamic inputs for admin custom fields */}
-              {customFields.filter(f => f.entity_type === 'contact' && f.is_visible).map(f => (
-                <div key={f.id} className="space-y-1">
-                  <label className="block font-semibold text-theme-secondary">{f.label}</label>
-                  {f.field_type === 'number' ? (
-                    <input
-                      type="number"
-                      value={contactForm.custom_values?.[f.key] ?? ''}
-                      onChange={(e) => setContactForm({
-                        ...contactForm,
-                        custom_values: { ...contactForm.custom_values, [f.key]: e.target.value === '' ? undefined : Number(e.target.value) }
-                      })}
-                      className="w-full bg-theme-base text-theme-primary rounded border border-theme-border px-2.5 py-1.5 focus:ring-1 focus:ring-theme-accent focus:outline-none"
-                    />
-                  ) : (
-                    <input
-                      type="text"
-                      value={contactForm.custom_values?.[f.key] ?? ''}
-                      onChange={(e) => setContactForm({
-                        ...contactForm,
-                        custom_values: { ...contactForm.custom_values, [f.key]: e.target.value }
-                      })}
-                      className="w-full bg-theme-base text-theme-primary rounded border border-theme-border px-2.5 py-1.5 focus:ring-1 focus:ring-theme-accent focus:outline-none"
-                    />
-                  )}
-                </div>
-              ))}
-
-              <div className="pt-4 border-t border-theme-border flex justify-end gap-2">
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-1">
+              <label htmlFor="contact-account-id" className="block font-semibold text-theme-secondary">Associated Company Account *</label>
+              <select
+                id="contact-account-id" name="account_id"
+                value={contactForm.account_id}
+                onChange={(e) => setContactForm({ ...contactForm, account_id: e.target.value })}
+                className="w-full bg-theme-base text-theme-primary rounded border border-theme-border px-2.5 py-1.5 focus:ring-1 focus:ring-theme-accent focus:outline-none"
+              >
+                <option value="">-- Select Company --</option>
+                {scopedAccounts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+              </select>
+              {scopedAccounts.length === 0 && !showQuickAccountForm && (
+                <p className="text-xs text-theme-secondary leading-relaxed pt-1">
+                  No accounts yet. Create one below so you can attach this contact.
+                </p>
+              )}
+              {!showQuickAccountForm && (
                 <button
                   type="button"
-                  onClick={() => setShowCreateContact(false)}
-                  className="px-4 py-2 border border-theme-border hover:bg-theme-base text-theme-primary rounded-lg font-semibold cursor-pointer"
+                  onClick={() => setShowQuickAccountForm(true)}
+                  className="mt-1 text-xs font-semibold text-theme-accent hover:underline cursor-pointer bg-transparent border-none p-0"
                 >
-                  Cancel
+                  + New Company
                 </button>
-                <button
-                  type="submit"
-                  className="px-4 py-2 bg-theme-accent hover:opacity-90 text-white rounded-lg font-semibold cursor-pointer"
+              )}
+              {showQuickAccountForm && (
+                <div
+                  className="mt-2 space-y-2 border border-theme-border rounded-lg p-2.5 bg-theme-inset/60"
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      handleQuickCreateAccount(e);
+                    }
+                  }}
                 >
-                  Save Contact
-                </button>
-              </div>
-            </form>
+                  <input
+                    type="text"
+                    name="quick_company_name"
+                    placeholder="Company name *"
+                    aria-label="New company name"
+                    value={quickAccountName}
+                    onChange={(e) => setQuickAccountName(e.target.value)}
+                    autoFocus
+                    className="w-full bg-theme-base text-theme-primary rounded border border-theme-border px-2.5 py-1.5 focus:ring-1 focus:ring-theme-accent focus:outline-none"
+                  />
+                  <input
+                    type="text"
+                    name="quick_company_industry"
+                    placeholder="Industry (optional)"
+                    aria-label="New company industry"
+                    value={quickAccountIndustry}
+                    onChange={(e) => setQuickAccountIndustry(e.target.value)}
+                    className="w-full bg-theme-base text-theme-primary rounded border border-theme-border px-2.5 py-1.5 focus:ring-1 focus:ring-theme-accent focus:outline-none"
+                  />
+                  <div className="flex justify-end gap-2">
+                    <button
+                      type="button"
+                      onClick={() => { setShowQuickAccountForm(false); setQuickAccountName(''); setQuickAccountIndustry(''); }}
+                      className="px-2.5 py-1 border border-theme-border hover:bg-theme-base text-theme-primary rounded text-xs font-semibold cursor-pointer bg-transparent"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="button"
+                      disabled={isCreatingQuickAccount}
+                      onClick={(e) => handleQuickCreateAccount(e)}
+                      className="px-2.5 py-1 bg-theme-accent hover:opacity-90 text-white rounded text-xs font-semibold cursor-pointer disabled:opacity-50"
+                    >
+                      {isCreatingQuickAccount ? 'Creating…' : 'Create & Select'}
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+            <div className="space-y-1">
+              <label htmlFor="contact-owner-id" className="block font-semibold text-theme-secondary">Account Manager</label>
+              <select
+                id="contact-owner-id" name="owner_id"
+                value={contactForm.owner_id}
+                onChange={(e) => setContactForm({ ...contactForm, owner_id: e.target.value })}
+                className="w-full bg-theme-base text-theme-primary rounded border border-theme-border px-2.5 py-1.5 focus:ring-1 focus:ring-theme-accent focus:outline-none"
+              >
+                {users.map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
+              </select>
+            </div>
           </div>
-        </div>
-      )}
+
+          <div className="space-y-1">
+            <label htmlFor="contact-tags" className="block font-semibold text-theme-secondary">Segment Tags (comma separated)</label>
+            <input
+              id="contact-tags" name="tags" type="text"
+              placeholder="Champion, Technical, Mid-Market"
+              value={contactForm.tags}
+              onChange={(e) => setContactForm({ ...contactForm, tags: e.target.value })}
+              className="w-full bg-theme-base text-theme-primary rounded border border-theme-border px-2.5 py-1.5 focus:ring-1 focus:ring-theme-accent focus:outline-none"
+            />
+          </div>
+
+          {/* Dynamic inputs for admin custom fields */}
+          {customFields.filter(f => f.entity_type === 'contact' && f.is_visible).map(f => (
+            <div key={f.id} className="space-y-1">
+              <label htmlFor={`contact-custom-${f.key}`} className="block font-semibold text-theme-secondary">{f.label}</label>
+              {f.field_type === 'number' ? (
+                <input
+                  id={`contact-custom-${f.key}`} name={`custom_${f.key}`} type="number"
+                  value={contactForm.custom_values?.[f.key] ?? ''}
+                  onChange={(e) => setContactForm({
+                    ...contactForm,
+                    custom_values: { ...contactForm.custom_values, [f.key]: e.target.value === '' ? undefined : Number(e.target.value) }
+                  })}
+                  className="w-full bg-theme-base text-theme-primary rounded border border-theme-border px-2.5 py-1.5 focus:ring-1 focus:ring-theme-accent focus:outline-none"
+                />
+              ) : (
+                <input
+                  id={`contact-custom-${f.key}`} name={`custom_${f.key}`} type="text"
+                  value={contactForm.custom_values?.[f.key] ?? ''}
+                  onChange={(e) => setContactForm({
+                    ...contactForm,
+                    custom_values: { ...contactForm.custom_values, [f.key]: e.target.value }
+                  })}
+                  className="w-full bg-theme-base text-theme-primary rounded border border-theme-border px-2.5 py-1.5 focus:ring-1 focus:ring-theme-accent focus:outline-none"
+                />
+              )}
+            </div>
+          ))}
+        </form>
+      </Modal>
 
       {/* MODAL: EDIT CONTACT */}
       {showEditContact && (
@@ -1725,139 +1803,127 @@ export default function ContactsModule() {
       )}
 
       {/* MODAL: CREATE ACCOUNT */}
-      {showCreateAccount && (
-        <div className="fixed inset-0 z-[90] flex items-center justify-center p-4 bg-theme-primary/60 backdrop-blur-[2px] animate-fade-in">
-          <div className="bg-theme-card rounded-xl shadow-overlay border border-theme-border w-full max-w-lg overflow-hidden flex flex-col max-h-[85vh] animate-overlay-in">
-            <header className="bg-theme-inset px-5 py-4 border-b border-theme-border flex justify-between items-center shrink-0">
-              <h3 className="text-sm font-bold text-theme-primary">Provision New B2B Account</h3>
-              <button onClick={() => setShowCreateAccount(false)} className="text-theme-secondary hover:text-theme-primary font-bold text-xs cursor-pointer bg-transparent border-none">✕</button>
-            </header>
-            <form onSubmit={handleCreateAccountSubmit} className="p-5 space-y-4 text-xs text-left overflow-y-auto">
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-1">
-                  <label className="block font-semibold text-theme-secondary">Company Name *</label>
-                  <input
-                    type="text" required
-                    value={accountForm.name}
-                    onChange={(e) => setAccountForm({ ...accountForm, name: e.target.value })}
-                    className="w-full bg-theme-base text-theme-primary rounded border border-theme-border px-2.5 py-1.5 focus:ring-1 focus:ring-theme-accent focus:outline-none"
-                  />
-                </div>
-                <div className="space-y-1">
-                  <label className="block font-semibold text-theme-secondary">Domain *</label>
-                  <input
-                    type="text" required placeholder="e.g. company.com"
-                    value={accountForm.domain}
-                    onChange={(e) => setAccountForm({ ...accountForm, domain: e.target.value })}
-                    className="w-full bg-theme-base text-theme-primary rounded border border-theme-border px-2.5 py-1.5 focus:ring-1 focus:ring-theme-accent focus:outline-none"
-                  />
-                </div>
-              </div>
+      <Modal
+        open={showCreateAccount}
+        onClose={closeCreateAccount}
+        title="Provision New B2B Account"
+        footer={
+          <div className="flex gap-2">
+            <Button variant="secondary" type="button" onClick={closeCreateAccount}>Cancel</Button>
+            <Button variant="primary" type="submit" form="create-account-form">Save Account</Button>
+          </div>
+        }
+      >
+        <form id="create-account-form" onSubmit={handleCreateAccountSubmit} className="space-y-4 text-xs text-left">
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-1">
+              <label htmlFor="account-name" className="block font-semibold text-theme-secondary">Company Name *</label>
+              <input
+                id="account-name" name="name" type="text" required
+                value={accountForm.name}
+                onChange={(e) => setAccountForm({ ...accountForm, name: e.target.value })}
+                className="w-full bg-theme-base text-theme-primary rounded border border-theme-border px-2.5 py-1.5 focus:ring-1 focus:ring-theme-accent focus:outline-none"
+              />
+            </div>
+            <div className="space-y-1">
+              <label htmlFor="account-domain" className="block font-semibold text-theme-secondary">Domain *</label>
+              <input
+                id="account-domain" name="domain" type="text" required placeholder="e.g. company.com"
+                value={accountForm.domain}
+                onChange={(e) => setAccountForm({ ...accountForm, domain: e.target.value })}
+                className="w-full bg-theme-base text-theme-primary rounded border border-theme-border px-2.5 py-1.5 focus:ring-1 focus:ring-theme-accent focus:outline-none"
+              />
+            </div>
+          </div>
 
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-1">
-                  <label className="block font-semibold text-theme-secondary">Industry</label>
-                  <input
-                    type="text"
-                    value={accountForm.industry}
-                    onChange={(e) => setAccountForm({ ...accountForm, industry: e.target.value })}
-                    className="w-full bg-theme-base text-theme-primary rounded border border-theme-border px-2.5 py-1.5 focus:ring-1 focus:ring-theme-accent focus:outline-none"
-                  />
-                </div>
-                <div className="space-y-1">
-                  <label className="block font-semibold text-theme-secondary">Annual Recurring Revenue (ARR)</label>
-                  <input
-                    type="number"
-                    value={accountForm.arr}
-                    onChange={(e) => setAccountForm({ ...accountForm, arr: Number(e.target.value) })}
-                    className="w-full bg-theme-base text-theme-primary rounded border border-theme-border px-2.5 py-1.5 focus:ring-1 focus:ring-theme-accent focus:outline-none"
-                  />
-                </div>
-              </div>
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-1">
+              <label htmlFor="account-industry" className="block font-semibold text-theme-secondary">Industry</label>
+              <input
+                id="account-industry" name="industry" type="text"
+                value={accountForm.industry}
+                onChange={(e) => setAccountForm({ ...accountForm, industry: e.target.value })}
+                className="w-full bg-theme-base text-theme-primary rounded border border-theme-border px-2.5 py-1.5 focus:ring-1 focus:ring-theme-accent focus:outline-none"
+              />
+            </div>
+            <div className="space-y-1">
+              <label htmlFor="account-arr" className="block font-semibold text-theme-secondary">Annual Recurring Revenue (ARR)</label>
+              <input
+                id="account-arr" name="arr" type="number"
+                value={accountForm.arr}
+                onChange={(e) => setAccountForm({ ...accountForm, arr: Number(e.target.value) })}
+                className="w-full bg-theme-base text-theme-primary rounded border border-theme-border px-2.5 py-1.5 focus:ring-1 focus:ring-theme-accent focus:outline-none"
+              />
+            </div>
+          </div>
 
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-1">
-                  <label className="block font-semibold text-theme-secondary">Company Size</label>
-                  <select
-                    value={accountForm.size}
-                    onChange={(e) => setAccountForm({ ...accountForm, size: e.target.value as any })}
-                    className="w-full bg-theme-base text-theme-primary rounded border border-theme-border px-2.5 py-1.5 focus:ring-1 focus:ring-theme-accent focus:outline-none"
-                  >
-                    <option value="1-10">1-10 employees</option>
-                    <option value="11-50">11-50 employees</option>
-                    <option value="51-200">51-200 employees</option>
-                    <option value="201-1000">201-1000 employees</option>
-                    <option value="1000+">1000+ employees</option>
-                  </select>
-                </div>
-                <div className="space-y-1">
-                  <label className="block font-semibold text-theme-secondary">Corporate Website</label>
-                  <input
-                    type="text"
-                    value={accountForm.website}
-                    onChange={(e) => setAccountForm({ ...accountForm, website: e.target.value })}
-                    className="w-full bg-theme-base text-theme-primary rounded border border-theme-border px-2.5 py-1.5 focus:ring-1 focus:ring-theme-accent focus:outline-none"
-                  />
-                </div>
-              </div>
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-1">
+              <label htmlFor="account-size" className="block font-semibold text-theme-secondary">Company Size</label>
+              <select
+                id="account-size" name="size"
+                value={accountForm.size}
+                onChange={(e) => setAccountForm({ ...accountForm, size: e.target.value as any })}
+                className="w-full bg-theme-base text-theme-primary rounded border border-theme-border px-2.5 py-1.5 focus:ring-1 focus:ring-theme-accent focus:outline-none"
+              >
+                <option value="1-10">1-10 employees</option>
+                <option value="11-50">11-50 employees</option>
+                <option value="51-200">51-200 employees</option>
+                <option value="201-1000">201-1000 employees</option>
+                <option value="1000+">1000+ employees</option>
+              </select>
+            </div>
+            <div className="space-y-1">
+              <label htmlFor="account-website" className="block font-semibold text-theme-secondary">Corporate Website</label>
+              <input
+                id="account-website" name="website" type="url"
+                placeholder="https://www.example.com"
+                value={accountForm.website}
+                onChange={(e) => setAccountForm({ ...accountForm, website: e.target.value })}
+                className="w-full bg-theme-base text-theme-primary rounded border border-theme-border px-2.5 py-1.5 focus:ring-1 focus:ring-theme-accent focus:outline-none"
+              />
+            </div>
+          </div>
 
-              <div className="space-y-1">
-                <label className="block font-semibold text-theme-secondary">Segment Tags</label>
+          <div className="space-y-1">
+            <label htmlFor="account-tags" className="block font-semibold text-theme-secondary">Segment Tags</label>
+            <input
+              id="account-tags" name="tags" type="text" placeholder="Strategic, US-East"
+              value={accountForm.tags}
+              onChange={(e) => setAccountForm({ ...accountForm, tags: e.target.value })}
+              className="w-full bg-theme-base text-theme-primary rounded border border-theme-border px-2.5 py-1.5 focus:ring-1 focus:ring-theme-accent focus:outline-none"
+            />
+          </div>
+
+          {/* Dynamic custom fields for accounts */}
+          {customFields.filter(f => f.entity_type === 'account' && f.is_visible).map(f => (
+            <div key={f.id} className="space-y-1">
+              <label htmlFor={`account-custom-${f.key}`} className="block font-semibold text-theme-secondary">{f.label}</label>
+              {f.field_type === 'number' ? (
                 <input
-                  type="text" placeholder="Strategic, US-East"
-                  value={accountForm.tags}
-                  onChange={(e) => setAccountForm({ ...accountForm, tags: e.target.value })}
+                  id={`account-custom-${f.key}`} name={`custom_${f.key}`} type="number"
+                  value={accountForm.custom_values?.[f.key] ?? ''}
+                  onChange={(e) => setAccountForm({
+                    ...accountForm,
+                    custom_values: { ...accountForm.custom_values, [f.key]: e.target.value === '' ? undefined : Number(e.target.value) }
+                  })}
                   className="w-full bg-theme-base text-theme-primary rounded border border-theme-border px-2.5 py-1.5 focus:ring-1 focus:ring-theme-accent focus:outline-none"
                 />
-              </div>
-
-              {/* Dynamic custom fields for accounts */}
-              {customFields.filter(f => f.entity_type === 'account' && f.is_visible).map(f => (
-                <div key={f.id} className="space-y-1">
-                  <label className="block font-semibold text-theme-secondary">{f.label}</label>
-                  {f.field_type === 'number' ? (
-                    <input
-                      type="number"
-                      value={accountForm.custom_values?.[f.key] ?? ''}
-                      onChange={(e) => setAccountForm({
-                        ...accountForm,
-                        custom_values: { ...accountForm.custom_values, [f.key]: e.target.value === '' ? undefined : Number(e.target.value) }
-                      })}
-                      className="w-full bg-theme-base text-theme-primary rounded border border-theme-border px-2.5 py-1.5 focus:ring-1 focus:ring-theme-accent focus:outline-none"
-                    />
-                  ) : (
-                    <input
-                      type="text"
-                      value={accountForm.custom_values?.[f.key] ?? ''}
-                      onChange={(e) => setAccountForm({
-                        ...accountForm,
-                        custom_values: { ...accountForm.custom_values, [f.key]: e.target.value }
-                      })}
-                      className="w-full bg-theme-base text-theme-primary rounded border border-theme-border px-2.5 py-1.5 focus:ring-1 focus:ring-theme-accent focus:outline-none"
-                    />
-                  )}
-                </div>
-              ))}
-
-              <div className="pt-4 border-t border-theme-border flex justify-end gap-2">
-                <button
-                  type="button"
-                  onClick={() => setShowCreateAccount(false)}
-                  className="px-4 py-2 border border-theme-border hover:bg-theme-base text-theme-primary rounded-lg font-semibold cursor-pointer"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  className="px-4 py-2 bg-theme-accent hover:opacity-90 text-white rounded-lg font-semibold cursor-pointer"
-                >
-                  Save Account
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
+              ) : (
+                <input
+                  id={`account-custom-${f.key}`} name={`custom_${f.key}`} type="text"
+                  value={accountForm.custom_values?.[f.key] ?? ''}
+                  onChange={(e) => setAccountForm({
+                    ...accountForm,
+                    custom_values: { ...accountForm.custom_values, [f.key]: e.target.value }
+                  })}
+                  className="w-full bg-theme-base text-theme-primary rounded border border-theme-border px-2.5 py-1.5 focus:ring-1 focus:ring-theme-accent focus:outline-none"
+                />
+              )}
+            </div>
+          ))}
+        </form>
+      </Modal>
 
       {/* MODAL: EDIT ACCOUNT */}
       {showEditAccount && (
@@ -2270,6 +2336,26 @@ export default function ContactsModule() {
         title={`Delete ${selectedRowKeys.size} contact${selectedRowKeys.size === 1 ? '' : 's'}?`}
         body="The selected contacts and their timelines will be permanently removed. This action cannot be undone."
         confirmLabel="Delete selected"
+      />
+
+      {/* Discard unsaved contact form on close */}
+      <ConfirmDialog
+        open={pendingCloseCreateContact}
+        onCancel={() => setPendingCloseCreateContact(false)}
+        onConfirm={resetAndCloseCreateContact}
+        title="Discard new contact?"
+        body="You have unsaved input. Closing will discard it."
+        confirmLabel="Discard"
+      />
+
+      {/* Discard unsaved account form on close */}
+      <ConfirmDialog
+        open={pendingCloseCreateAccount}
+        onCancel={() => setPendingCloseCreateAccount(false)}
+        onConfirm={resetAndCloseCreateAccount}
+        title="Discard new account?"
+        body="You have unsaved input. Closing will discard it."
+        confirmLabel="Discard"
       />
 
     </div>

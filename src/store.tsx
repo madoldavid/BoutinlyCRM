@@ -635,6 +635,8 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     } catch (err) {
       console.error('createContact failed:', err);
       toast.error('Failed to create contact', err instanceof ApiError ? err.message : 'Please try again.');
+      // Re-throw so the caller can keep the form open and preserve the user's input on failure.
+      throw err;
     }
   }, []);
 
