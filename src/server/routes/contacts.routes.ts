@@ -29,7 +29,7 @@ export function registerContactsRoutes(
     const scoped = scopeSnapshot({
       users, accounts,
       contacts,
-      deals: [], pipelines: [], stages: [], tasks: [], activities: [],
+      leads: [], deals: [], pipelines: [], stages: [], tasks: [], activities: [],
       notifications: [], customFields: [], emailTemplates: [], emailCampaigns: [], auditLogs: [],
     }, req.principal);
 

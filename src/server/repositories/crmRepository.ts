@@ -9,8 +9,11 @@ import {
   INITIAL_CONTACTS,
   INITIAL_CUSTOM_FIELDS,
   INITIAL_DEALS,
+  INITIAL_LEADS,
   INITIAL_NOTIFICATIONS,
   INITIAL_PIPELINES,
+  INITIAL_RECORD_TASKS,
+  INITIAL_CALL_LOGS,
   INITIAL_STAGES,
   INITIAL_TASKS,
   INITIAL_TEMPLATES,
@@ -31,11 +34,14 @@ import type {
   FieldPermission,
   FileRecord,
   ForecastCategory,
+  Lead,
   Notification,
   Organization,
   OrgSecurityPolicy,
   Pipeline,
   Quota,
+  RecordTask,
+  CallLog,
   Stage,
   Task,
   User,
@@ -50,11 +56,14 @@ export interface CrmSnapshot {
   users: User[];
   accounts: Account[];
   contacts: Contact[];
+  leads: Lead[];
   pipelines: Pipeline[];
   stages: Stage[];
   deals: Deal[];
   tasks: Task[];
   activities: Activity[];
+  recordTasks?: RecordTask[];
+  callLogs?: CallLog[];
   notifications: Notification[];
   customFields: CustomFieldDefinition[];
   emailTemplates: EmailTemplate[];
@@ -74,9 +83,49 @@ export interface CreateAccountInput extends Omit<Account, 'id' | 'created_at'> {
 export interface UpdateAccountInput extends Partial<Omit<Account, 'id' | 'created_at'>> {}
 export interface CreateDealInput extends Omit<Deal, 'id' | 'created_at' | 'stage_entered_at'> {}
 export interface UpdateDealInput extends Partial<Omit<Deal, 'id' | 'created_at' | 'stage_entered_at'>> {}
+export interface CreateLeadInput extends Omit<Lead, 'id' | 'created_at' | 'status' | 'is_converted' | 'converted_account_id' | 'converted_contact_id' | 'converted_at'> {
+  status?: Lead['status'];
+}
+export interface UpdateLeadInput extends Partial<Omit<Lead, 'id' | 'created_at' | 'converted_account_id' | 'converted_contact_id' | 'converted_at'>> {}
+export interface ConvertLeadInput {
+  /** Existing account to attach the lead's contact to. If omitted, an account is created from the lead's company. */
+  account_id?: string;
+  /** If true, create "[Company] - Default Opportunity" linked to the account. */
+  create_opportunity?: boolean;
+  /** Account fields used when creating a new account from the lead. */
+  account?: Partial<Omit<Account, 'id' | 'created_at'>>;
+  /** Contact fields (first_name/last_name/title/etc.) used when creating the contact. */
+  contact?: Partial<Omit<Contact, 'id' | 'created_at' | 'account_id' | 'owner_id'>>;
+}
+export interface LeadConversionResult {
+  lead: Lead;
+  account: Account;
+  contact: Contact;
+  opportunity?: Deal;
+}
 export interface CreateTaskInput extends Omit<Task, 'id'> {}
 export interface UpdateTaskInput extends Partial<Omit<Task, 'id' | 'created_by_id'>> {}
 export interface CreateActivityInput extends Omit<Activity, 'id' | 'created_at'> {}
+export interface CreateRecordTaskInput {
+  user_id: string;
+  subject: string;
+  description?: string;
+  due_date?: string;
+  associated_to_id: string;
+}
+export interface UpdateRecordTaskInput {
+  subject?: string;
+  description?: string;
+  due_date?: string | null;
+  completed_at?: string | null;
+}
+export interface CreateCallLogInput {
+  user_id: string;
+  subject: string;
+  description?: string;
+  due_date?: string;
+  associated_to_id: string;
+}
 export interface CreateNotificationInput extends Omit<Notification, 'id' | 'created_at'> {}
 export interface CreateEmailTemplateInput extends Omit<EmailTemplate, 'id'> {}
 export interface CreateEmailCampaignInput extends Omit<EmailCampaign, 'id'> { id?: string; }
@@ -147,6 +196,14 @@ export interface CrmRepository {
   updateAccount(id: string, input: UpdateAccountInput): Promise<Account | null>;
   deleteAccount(id: string): Promise<boolean>;
 
+  // Leads
+  listLeads(params?: { status?: string; owner_id?: string } & PaginationParams): Promise<Lead[]>;
+  getLeadById(id: string): Promise<Lead | null>;
+  addLead(input: CreateLeadInput): Promise<Lead>;
+  updateLead(id: string, input: UpdateLeadInput): Promise<Lead | null>;
+  deleteLead(id: string): Promise<boolean>;
+  convertLead(id: string, input: ConvertLeadInput, converterUserId: string): Promise<LeadConversionResult | null>;
+
   // Deals
   listDeals(params?: { pipeline_id?: string; stage_id?: string; owner_id?: string } & PaginationParams): Promise<Deal[]>;
   getDealById(id: string): Promise<Deal | null>;
@@ -165,8 +222,18 @@ export interface CrmRepository {
   deleteTask(id: string): Promise<boolean>;
 
   // Activities
-  listActivities(params?: { contact_id?: string; deal_id?: string; user_id?: string } & PaginationParams): Promise<Activity[]>;
+  listActivities(params?: { contact_id?: string; deal_id?: string; lead_id?: string; user_id?: string } & PaginationParams): Promise<Activity[]>;
   addActivity(input: CreateActivityInput): Promise<Activity>;
+
+  // Activity Timeline sub-system (record-linked to-dos + historical call notes)
+  listRecordTasks(params?: { associated_to_id?: string } & PaginationParams): Promise<RecordTask[]>;
+  getRecordTaskById(id: string): Promise<RecordTask | null>;
+  addRecordTask(input: CreateRecordTaskInput): Promise<RecordTask>;
+  updateRecordTask(id: string, input: UpdateRecordTaskInput): Promise<RecordTask | null>;
+  deleteRecordTask(id: string): Promise<boolean>;
+  listCallLogs(params?: { associated_to_id?: string } & PaginationParams): Promise<CallLog[]>;
+  getCallLogById(id: string): Promise<CallLog | null>;
+  addCallLog(input: CreateCallLogInput): Promise<CallLog>;
 
   // Notifications
   listNotifications(userId: string): Promise<Notification[]>;
@@ -271,11 +338,14 @@ export class InMemoryCrmRepository implements CrmRepository {
   private users = clone(INITIAL_USERS);
   private accounts = clone(INITIAL_ACCOUNTS);
   private contacts = clone(INITIAL_CONTACTS);
+  private leads = clone(INITIAL_LEADS);
   private pipelines = clone(INITIAL_PIPELINES);
   private stages = clone(INITIAL_STAGES);
   private deals = clone(INITIAL_DEALS);
   private tasks = clone(INITIAL_TASKS);
   private activities = clone(INITIAL_ACTIVITIES);
+  private recordTasks = clone(INITIAL_RECORD_TASKS);
+  private callLogs = clone(INITIAL_CALL_LOGS);
   private notifications = clone(INITIAL_NOTIFICATIONS);
   private customFields = clone(INITIAL_CUSTOM_FIELDS);
   private emailTemplates = clone(INITIAL_TEMPLATES);
@@ -340,6 +410,7 @@ export class InMemoryCrmRepository implements CrmRepository {
       users: this.users,
       accounts: this.accounts,
       contacts: this.contacts,
+      leads: this.leads,
       pipelines: this.pipelines,
       stages: this.stages,
       deals: this.deals,
@@ -377,6 +448,7 @@ export class InMemoryCrmRepository implements CrmRepository {
       this.users = data.users ?? [];
       this.accounts = data.accounts ?? [];
       this.contacts = data.contacts ?? [];
+      this.leads = data.leads ?? [];
       this.pipelines = data.pipelines ?? [];
       this.stages = data.stages ?? [];
       this.deals = data.deals ?? [];
@@ -623,6 +695,7 @@ export class InMemoryCrmRepository implements CrmRepository {
       ...input,
       id: `con-${randomUUID()}`,
       created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
     };
     this.contacts.unshift(contact);
     return clone(contact);
@@ -631,7 +704,7 @@ export class InMemoryCrmRepository implements CrmRepository {
   async updateContact(id: string, input: UpdateContactInput) {
     const idx = this.contacts.findIndex(item => item.id === id);
     if (idx === -1) return null;
-    this.contacts[idx] = { ...this.contacts[idx], ...input };
+    this.contacts[idx] = { ...this.contacts[idx], ...input, updated_at: new Date().toISOString() };
     return clone(this.contacts[idx]);
   }
 
@@ -690,6 +763,7 @@ export class InMemoryCrmRepository implements CrmRepository {
       ...input,
       id: `acc-${randomUUID()}`,
       created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
     };
     this.accounts.unshift(account);
     return clone(account);
@@ -698,7 +772,7 @@ export class InMemoryCrmRepository implements CrmRepository {
   async updateAccount(id: string, input: UpdateAccountInput) {
     const idx = this.accounts.findIndex(item => item.id === id);
     if (idx === -1) return null;
-    this.accounts[idx] = { ...this.accounts[idx], ...input };
+    this.accounts[idx] = { ...this.accounts[idx], ...input, updated_at: new Date().toISOString() };
     return clone(this.accounts[idx]);
   }
 
@@ -707,6 +781,235 @@ export class InMemoryCrmRepository implements CrmRepository {
     if (idx === -1) return false;
     this.accounts.splice(idx, 1);
     return true;
+  }
+
+  // ─── Leads (staging area) ────────────────────────────
+
+  async listLeads(params?: { status?: string; owner_id?: string } & PaginationParams) {
+    let result = clone(this.leads);
+    if (params?.status) {
+      result = result.filter(l => l.status === params.status);
+    }
+    if (params?.owner_id) {
+      result = result.filter(l => l.owner_id === params.owner_id);
+    }
+    if (params?.search) {
+      const q = params.search.toLowerCase();
+      result = result.filter(l =>
+        l.first_name.toLowerCase().includes(q) ||
+        l.last_name.toLowerCase().includes(q) ||
+        `${l.first_name} ${l.last_name}`.toLowerCase().includes(q) ||
+        l.company_name.toLowerCase().includes(q) ||
+        l.email.toLowerCase().includes(q)
+      );
+    }
+    if (params?.page && params?.limit) {
+      const offset = (params.page - 1) * params.limit;
+      result = result.slice(offset, offset + params.limit);
+    }
+    return this.filterByOrg(result);
+  }
+
+  async getLeadById(id: string) {
+    const lead = this.leads.find(item => item.id === id);
+    if (!lead || !this.checkOrg(lead)) return null;
+    return clone(lead);
+  }
+
+  async addLead(input: CreateLeadInput) {
+    const now = new Date().toISOString();
+    const lead: Lead = {
+      id: `lead-${randomUUID()}`,
+      organization_id: getCurrentOrgId() || undefined,
+      first_name: input.first_name,
+      last_name: input.last_name,
+      company_name: input.company_name,
+      email: input.email,
+      phone: input.phone,
+      source: input.source,
+      status: input.status || 'new',
+      owner_id: input.owner_id,
+      is_converted: false,
+      created_at: now,
+      updated_at: now,
+    };
+    this.leads.unshift(lead);
+    return clone(lead);
+  }
+
+  async updateLead(id: string, input: UpdateLeadInput) {
+    const idx = this.leads.findIndex(item => item.id === id);
+    if (idx === -1) return null;
+    this.leads[idx] = { ...this.leads[idx], ...input, updated_at: new Date().toISOString() };
+    return clone(this.leads[idx]);
+  }
+
+  async deleteLead(id: string) {
+    const idx = this.leads.findIndex(item => item.id === id);
+    if (idx === -1) return false;
+    this.leads.splice(idx, 1);
+    // Detach lead-linked activities and tasks (they stay in the timeline as history)
+    this.activities = this.activities.map(a => a.lead_id === id ? { ...a, lead_id: undefined } : a);
+    this.tasks = this.tasks.map(t => t.lead_id === id ? { ...t, lead_id: undefined } : t);
+    return true;
+  }
+
+  /**
+   * Step 4 — Lead Conversion Engine.
+   * Atomically splits the flat Lead row into structured relational data:
+   *   1. Resolve or create the Account (matched by company name).
+   *   2. Create the Contact (human layer) linked to that account.
+   *   3. Optionally create "[Company] - Default Opportunity" (deal) on the account.
+   *   4. Archive the Lead (is_converted = true, status = converted) — never deleted.
+   * The whole operation is wrapped in a transaction: if any step fails, every
+   * mutation is rolled back so the lead stays untouched.
+   */
+  async convertLead(id: string, input: ConvertLeadInput, converterUserId: string) {
+    const leadIdx = this.leads.findIndex(item => item.id === id);
+    if (leadIdx === -1) return null;
+    const lead = this.leads[leadIdx];
+    if (lead.is_converted || lead.status === 'converted') return null;
+    // Only qualified leads are ready to convert — the UI disables Convert
+    // until the lead is Qualified, and the API enforces the same rule.
+    if (lead.status !== 'qualified') return null;
+
+    // ── Open transaction (in-memory rollback snapshot) ──
+    const tx = {
+      leads: [...this.leads],
+      accounts: [...this.accounts],
+      contacts: [...this.contacts],
+      deals: [...this.deals],
+      activities: [...this.activities],
+    };
+    const rollback = () => {
+      this.leads = tx.leads;
+      this.accounts = tx.accounts;
+      this.contacts = tx.contacts;
+      this.deals = tx.deals;
+      this.activities = tx.activities;
+    };
+
+    try {
+      // Step 1: resolve or create the Account (master foundation)
+      let account: Account | null = null;
+      if (input.account_id) {
+        const accIdx = this.accounts.findIndex(a => a.id === input.account_id);
+        if (accIdx === -1) { rollback(); return null; }
+        account = this.accounts[accIdx];
+      } else {
+        const companyName = (input.account?.name || lead.company_name).trim();
+        const existing = this.accounts.find(a => a.name.toLowerCase() === companyName.toLowerCase());
+        if (existing) {
+          account = existing;
+        } else {
+          account = {
+            id: `acc-${randomUUID()}`,
+            organization_id: getCurrentOrgId() || undefined,
+            name: companyName,
+            domain: input.account?.domain ?? '',
+            industry: input.account?.industry ?? '',
+            size: input.account?.size ?? '1-10',
+            website: input.account?.website ?? '',
+            arr: input.account?.arr ?? 0,
+            owner_id: input.account?.owner_id ?? lead.owner_id,
+            parent_account_id: null,
+            tags: input.account?.tags ?? [],
+            custom_fields: input.account?.custom_fields ?? {},
+            created_at: new Date().toISOString(),
+          };
+          this.accounts.unshift(account);
+        }
+      }
+
+      // Step 2: create the Contact (human layer) mapped to the account
+      const firstName = input.contact?.first_name || lead.first_name || 'Lead';
+      const lastName = input.contact?.last_name || lead.last_name || '';
+      const contact: Contact = {
+        id: `con-${randomUUID()}`,
+        organization_id: getCurrentOrgId() || undefined,
+        first_name: firstName,
+        last_name: lastName,
+        email: input.contact?.email || lead.email,
+        phone: input.contact?.phone || lead.phone || '',
+        title: input.contact?.title || '',
+        linkedin_url: input.contact?.linkedin_url,
+        account_id: account.id,
+        owner_id: account.owner_id || lead.owner_id,
+        tags: input.contact?.tags || [],
+        custom_fields: input.contact?.custom_fields ?? {},
+        unsubscribed: false,
+        created_at: new Date().toISOString(),
+      };
+      this.contacts.unshift(contact);
+
+      // Step 3 (optional): create "[Company] - Default Opportunity"
+      let opportunity: Deal | undefined;
+      if (input.create_opportunity) {
+        const pipeline = this.pipelines.find(p => p.is_default) ?? this.pipelines[0];
+        const firstStage = pipeline
+          ? this.stages
+              .filter(s => s.pipeline_id === pipeline.id && s.type === 'open')
+              .sort((a, b) => a.order - b.order)[0]
+          : undefined;
+        if (pipeline && firstStage) {
+          const deal: Deal = {
+            id: `deal-${randomUUID()}`,
+            organization_id: getCurrentOrgId() || undefined,
+            name: `${account.name} - Default Opportunity`,
+            pipeline_id: pipeline.id,
+            stage_id: firstStage.id,
+            account_id: account.id,
+            owner_id: lead.owner_id,
+            value: 0,
+            currency: 'USD',
+            probability: firstStage.probability,
+            close_date: new Date(Date.now() + 90 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10),
+            stage_entered_at: new Date().toISOString(),
+            custom_fields: {},
+            line_items: [],
+            created_at: new Date().toISOString(),
+          };
+          this.deals.unshift(deal);
+          opportunity = deal;
+        }
+      }
+
+      // Step 4: archive the lead — flag it, never delete it
+      const now = new Date().toISOString();
+      this.leads[leadIdx] = {
+        ...lead,
+        status: 'converted',
+        is_converted: true,
+        converted_account_id: account.id,
+        converted_contact_id: contact.id,
+        converted_at: now,
+        updated_at: now,
+      };
+
+      // Leave a breadcrumb on the Activity Timeline so the conversion is traceable
+      this.activities.unshift({
+        id: `act-${randomUUID()}`,
+        organization_id: getCurrentOrgId() || undefined,
+        type: 'lead_converted',
+        title: 'Lead converted',
+        body: `Lead "${lead.first_name} ${lead.last_name}" converted into account "${account.name}" and contact "${firstName} ${lastName}".`,
+        user_id: converterUserId,
+        lead_id: lead.id,
+        contact_id: contact.id,
+        metadata: { account_id: account.id, contact_id: contact.id },
+        created_at: now,
+      });
+
+      return {
+        lead: clone(this.leads[leadIdx]),
+        account: clone(account),
+        contact: clone(contact),
+        opportunity: opportunity ? clone(opportunity) : undefined,
+      };
+    } catch (err) {
+      rollback();
+      throw err;
+    }
   }
 
   // ─── Deals ──────────────────────────────────────────
@@ -873,13 +1176,16 @@ export class InMemoryCrmRepository implements CrmRepository {
 
   // ─── Activities ─────────────────────────────────────
 
-  async listActivities(params?: { contact_id?: string; deal_id?: string; user_id?: string } & PaginationParams) {
+  async listActivities(params?: { contact_id?: string; deal_id?: string; lead_id?: string; user_id?: string } & PaginationParams) {
     let result = clone(this.activities);
     if (params?.contact_id) {
       result = result.filter(a => a.contact_id === params.contact_id);
     }
     if (params?.deal_id) {
       result = result.filter(a => a.deal_id === params.deal_id);
+    }
+    if (params?.lead_id) {
+      result = result.filter(a => a.lead_id === params.lead_id);
     }
     if (params?.user_id) {
       result = result.filter(a => a.user_id === params.user_id);
@@ -899,6 +1205,108 @@ export class InMemoryCrmRepository implements CrmRepository {
     };
     this.activities.unshift(activity);
     return clone(activity);
+  }
+
+  // ─── Record Tasks (timeline sub-system) ─────────────
+
+  async listRecordTasks(params?: { associated_to_id?: string } & PaginationParams) {
+    let result = clone(this.recordTasks);
+    if (params?.associated_to_id) {
+      result = result.filter(t => t.associated_to_id === params.associated_to_id);
+    }
+    if (params?.search) {
+      const q = params.search.toLowerCase();
+      result = result.filter(t => t.subject.toLowerCase().includes(q));
+    }
+    result.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+    if (params?.page && params?.limit) {
+      const offset = (params.page - 1) * params.limit;
+      result = result.slice(offset, offset + params.limit);
+    }
+    return this.filterByOrg(result);
+  }
+
+  async getRecordTaskById(id: string) {
+    const task = this.recordTasks.find(item => item.id === id);
+    if (!task || !this.checkOrg(task)) return null;
+    return clone(task);
+  }
+
+  async addRecordTask(input: CreateRecordTaskInput) {
+    const now = new Date().toISOString();
+    const task: RecordTask = {
+      id: `rt-${randomUUID()}`,
+      organization_id: getCurrentOrgId() || 'default',
+      user_id: input.user_id,
+      subject: input.subject,
+      description: input.description || '',
+      due_date: input.due_date || undefined,
+      associated_to_id: input.associated_to_id,
+      created_at: now,
+      updated_at: now,
+    };
+    this.recordTasks.unshift(task);
+    return clone(task);
+  }
+
+  async updateRecordTask(id: string, input: UpdateRecordTaskInput) {
+    const idx = this.recordTasks.findIndex(item => item.id === id);
+    if (idx === -1) return null;
+    const next: RecordTask = { ...this.recordTasks[idx] };
+    if (input.subject !== undefined) next.subject = input.subject;
+    if (input.description !== undefined) next.description = input.description;
+    if (input.due_date !== undefined) next.due_date = input.due_date || undefined;
+    if (input.completed_at !== undefined) next.completed_at = input.completed_at || undefined;
+    next.updated_at = new Date().toISOString();
+    this.recordTasks[idx] = next;
+    return clone(next);
+  }
+
+  async deleteRecordTask(id: string) {
+    const idx = this.recordTasks.findIndex(item => item.id === id);
+    if (idx === -1) return false;
+    this.recordTasks.splice(idx, 1);
+    return true;
+  }
+
+  // ─── Call Logs (timeline sub-system) ────────────────
+
+  async listCallLogs(params?: { associated_to_id?: string } & PaginationParams) {
+    let result = clone(this.callLogs);
+    if (params?.associated_to_id) {
+      result = result.filter(c => c.associated_to_id === params.associated_to_id);
+    }
+    if (params?.search) {
+      const q = params.search.toLowerCase();
+      result = result.filter(c => c.subject.toLowerCase().includes(q) || c.description.toLowerCase().includes(q));
+    }
+    result.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+    if (params?.page && params?.limit) {
+      const offset = (params.page - 1) * params.limit;
+      result = result.slice(offset, offset + params.limit);
+    }
+    return this.filterByOrg(result);
+  }
+
+  async getCallLogById(id: string) {
+    const log = this.callLogs.find(item => item.id === id);
+    if (!log || !this.checkOrg(log)) return null;
+    return clone(log);
+  }
+
+  async addCallLog(input: CreateCallLogInput) {
+    const log: CallLog = {
+      id: `cl-${randomUUID()}`,
+      organization_id: getCurrentOrgId() || 'default',
+      user_id: input.user_id,
+      subject: input.subject,
+      description: input.description || '',
+      due_date: input.due_date || undefined,
+      associated_to_id: input.associated_to_id,
+      created_at: new Date().toISOString(),
+    };
+    this.callLogs.unshift(log);
+    return clone(log);
   }
 
   // ─── Notifications ──────────────────────────────────
@@ -1126,6 +1534,7 @@ export class InMemoryCrmRepository implements CrmRepository {
       users: this.users,
       accounts: this.accounts,
       contacts: this.contacts,
+      leads: this.leads,
       pipelines: this.pipelines,
       stages: this.stages,
       deals: this.deals,
@@ -1150,6 +1559,7 @@ export class InMemoryCrmRepository implements CrmRepository {
       users: this.filterByOrg(all.users),
       accounts: this.filterByOrg(all.accounts),
       contacts: this.filterByOrg(all.contacts),
+      leads: this.filterByOrg(all.leads),
       deals: this.filterByOrg(all.deals),
       tasks: this.filterByOrg(all.tasks),
       activities: this.filterByOrg(all.activities),
@@ -1208,6 +1618,7 @@ export class InMemoryCrmRepository implements CrmRepository {
     return {
       contacts: clone(this.contacts.filter(c => c.owner_id === userId)),
       accounts: clone(this.accounts.filter(a => a.owner_id === userId)),
+      leads: clone(this.leads.filter(l => l.owner_id === userId)),
       deals: clone(this.deals.filter(d => d.owner_id === userId)),
       tasks: clone(this.tasks.filter(t => t.assigned_to_id === userId || t.created_by_id === userId)),
       activities: clone(this.activities.filter(a => a.user_id === userId)),

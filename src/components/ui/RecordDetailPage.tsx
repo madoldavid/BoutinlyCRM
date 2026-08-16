@@ -158,6 +158,9 @@ export interface RecordDetailPageProps {
   users?: User[];
   timelineTitle?: string;
 
+  /* Custom timeline panel (Activity Timeline sub-system) — overrides activities when provided */
+  timeline?: React.ReactNode;
+
   /* Tabs below main content */
   tabs?: TabItem[];
 
@@ -180,6 +183,7 @@ export default function RecordDetailPage({
   activities,
   users = [],
   timelineTitle = 'Activity Timeline',
+  timeline,
   tabs,
   pathIndicator,
   className = '',
@@ -250,7 +254,12 @@ export default function RecordDetailPage({
                 </HighlightsPanel>
               )}
 
-              {activities !== undefined && (
+              {timeline !== undefined ? (
+                <div className="bg-theme-card border border-theme-border rounded-[10px] shadow-card p-4 sm:p-5">
+                  <h4 className="text-2xs font-semibold text-theme-secondary uppercase tracking-wider font-sans mb-3">{timelineTitle}</h4>
+                  {timeline}
+                </div>
+              ) : activities !== undefined ? (
                 <div className="bg-theme-card border border-theme-border rounded-[10px] shadow-card p-4 sm:p-5">
                   <h4 className="text-2xs font-semibold text-theme-secondary uppercase tracking-wider font-sans mb-3">{timelineTitle}</h4>
                   <div className="max-h-[500px] overflow-y-auto pr-1 -mr-1">
@@ -261,7 +270,7 @@ export default function RecordDetailPage({
                     />
                   </div>
                 </div>
-              )}
+              ) : null}
             </div>
           </div>
         )}

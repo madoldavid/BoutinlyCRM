@@ -22,7 +22,9 @@ import {
   UserCheck,
   PanelLeftClose,
   PanelLeftOpen,
-  ArrowRight
+  ArrowRight,
+  Building2,
+  UserPlus,
 } from 'lucide-react';
 
 export default function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
@@ -71,11 +73,12 @@ export default function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
 
   const navigationItems = [
     { id: 'dashboard', label: 'Dashboards', icon: LayoutDashboard },
+    { id: 'accounts', label: 'Accounts', icon: Building2 },
     { id: 'contacts', label: 'Contacts', icon: Users },
-    { id: 'deals', label: 'Pipeline', icon: Briefcase },
+    { id: 'leads', label: 'Leads', icon: UserPlus },
+    { id: 'deals', label: 'Opportunities', icon: Briefcase },
     { id: 'tasks', label: 'Tasks', icon: CheckSquare },
     { id: 'emails', label: 'Email', icon: Mail, featureFlag: 'email_module' as const },
-    { id: 'admin', label: 'Administration', icon: Sliders, roles: [UserRole.SUPER_ADMIN, UserRole.ADMIN] },
   ].filter(item => {
     if (item.featureFlag === 'email_module' && !emailModuleEnabled) return false;
     return true;
@@ -204,11 +207,6 @@ export default function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
           <p className="px-2.5 pb-2 text-[10px] font-semibold uppercase tracking-[0.14em] text-sidebar-muted/80">Workspace</p>
         )}
         {navigationItems.map(item => {
-          // If item is restricted to specific roles, check permission
-          if (item.roles && !item.roles.includes(currentUser.role)) {
-            return null;
-          }
-
           const isActive = activeModule === item.id;
           const Icon = item.icon;
 
@@ -275,16 +273,6 @@ export default function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
         </div>
         )}
 
-        <button
-          onClick={toggleCollapsed}
-          className={`w-full flex items-center gap-2.5 py-2 text-[13px] font-medium text-sidebar-muted hover:text-sidebar-text hover:bg-sidebar-hover rounded-lg transition-colors cursor-pointer ${collapsed ? 'justify-center px-0' : 'px-2.5'}`}
-          aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-          title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-        >
-          {collapsed ? <PanelLeftOpen className="w-4 h-4" /> : <PanelLeftClose className="w-4 h-4" />}
-          {!collapsed && <span>Collapse</span>}
-        </button>
-
         {/* User card / role switcher */}
         <div className="relative">
           <button
@@ -350,6 +338,40 @@ export default function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
             </div>
           )}
         </div>
+
+        {/* Administration — kept below the workspace modules so the nav stays focused */}
+        {(currentUser.role === UserRole.SUPER_ADMIN || currentUser.role === UserRole.ADMIN) && (
+          <button
+            onClick={() => handleModuleClick('admin')}
+            className={`relative w-full flex items-center text-[13px] font-medium rounded-lg transition-colors cursor-pointer ${
+              collapsed ? 'justify-center py-2.5 px-0' : 'gap-2.5 px-2.5 py-2'
+            } ${
+              activeModule === 'admin'
+                ? 'bg-sidebar-active text-sidebar-text font-semibold'
+                : 'text-sidebar-muted hover:text-sidebar-text hover:bg-sidebar-hover'
+            }`}
+            id="nav-admin"
+            aria-current={activeModule === 'admin' ? 'page' : undefined}
+            aria-label="Administration"
+            title={collapsed ? 'Administration' : undefined}
+          >
+            {activeModule === 'admin' && (
+              <span className="absolute left-0 top-2 bottom-2 w-[3px] bg-theme-pulse rounded-full" aria-hidden="true" />
+            )}
+            <Sliders className={`w-4 h-4 shrink-0 ${activeModule === 'admin' ? 'text-theme-pulse' : ''}`} strokeWidth={activeModule === 'admin' ? 2.2 : 1.8} />
+            {!collapsed && <span className="truncate">Administration</span>}
+          </button>
+        )}
+
+        <button
+          onClick={toggleCollapsed}
+          className={`w-full flex items-center gap-2.5 py-2 text-[13px] font-medium text-sidebar-muted hover:text-sidebar-text hover:bg-sidebar-hover rounded-lg transition-colors cursor-pointer ${collapsed ? 'justify-center px-0' : 'px-2.5'}`}
+          aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+          title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+        >
+          {collapsed ? <PanelLeftOpen className="w-4 h-4" /> : <PanelLeftClose className="w-4 h-4" />}
+          {!collapsed && <span>Collapse</span>}
+        </button>
       </div>
 
       {/* Notifications center modal */}

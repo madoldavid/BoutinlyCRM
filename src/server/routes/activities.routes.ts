@@ -18,6 +18,7 @@ export function registerActivitiesRoutes(
     const activities = await repository.listActivities({
       contact_id: query.contact_id,
       deal_id: query.deal_id,
+      lead_id: query.lead_id,
       user_id: query.user_id,
     });
 
@@ -27,7 +28,7 @@ export function registerActivitiesRoutes(
     const deals = await repository.listDeals();
     const scoped = scopeSnapshot({
       users, contacts, deals, activities,
-      accounts: [], pipelines: [], stages: [], tasks: [],
+      leads: [], accounts: [], pipelines: [], stages: [], tasks: [],
       notifications: [], customFields: [], emailTemplates: [], emailCampaigns: [], auditLogs: [],
     }, req.principal);
 

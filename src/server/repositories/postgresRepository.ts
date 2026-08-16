@@ -13,11 +13,14 @@ import type {
   EmailTemplate,
   FieldPermission,
   FileRecord,
+  Lead,
   Notification,
   Organization,
   OrgSecurityPolicy,
   Pipeline,
   Quota,
+  RecordTask,
+  CallLog,
   Stage,
   Task,
   User,
@@ -40,12 +43,19 @@ import type {
   CreateEmailCampaignInput,
   CreateEmailTemplateInput,
   CreateFileInput,
+  CreateLeadInput,
+  CreateRecordTaskInput,
+  CreateCallLogInput,
   CreateTaskInput,
   CreateUserInput,
+  ConvertLeadInput,
+  LeadConversionResult,
   PaginationParams,
   UpdateAccountInput,
   UpdateContactInput,
   UpdateDealInput,
+  UpdateLeadInput,
+  UpdateRecordTaskInput,
   UpdateTaskInput,
 } from './crmRepository.js';
 
@@ -558,6 +568,187 @@ export class PostgresCrmRepository implements CrmRepository {
     return this.getDealById(id);
   }
 
+  // ─── Leads ──────────────────────────────────────────
+
+  async listLeads(params?: { status?: string; owner_id?: string } & PaginationParams): Promise<Lead[]> {
+    let sql = `SELECT * FROM leads`;
+    const conditions: string[] = [];
+    const values: unknown[] = [];
+    let paramIdx = 1;
+
+    if (params?.status) { conditions.push(`status = $${paramIdx++}`); values.push(params.status); }
+    if (params?.owner_id) { conditions.push(`owner_id = $${paramIdx++}`); values.push(params.owner_id); }
+    if (params?.search) { conditions.push(`(first_name ILIKE $${paramIdx++} OR last_name ILIKE $${paramIdx++} OR company_name ILIKE $${paramIdx++} OR email ILIKE $${paramIdx++})`); values.push(`%${params.search}%`, `%${params.search}%`, `%${params.search}%`, `%${params.search}%`); }
+
+    if (conditions.length > 0) sql += ` WHERE ` + conditions.join(' AND ');
+    sql += ` ORDER BY created_at DESC`;
+
+    if (params?.page && params?.limit) {
+      sql += ` LIMIT $${paramIdx} OFFSET $${paramIdx + 1}`;
+      values.push(params.limit, (params.page - 1) * params.limit);
+    }
+
+    const result = await query(sql, values);
+    return result.rows.map((row: DbRow) => this.rowToLead(row));
+  }
+
+  async getLeadById(id: string): Promise<Lead | null> {
+    const result = await query('SELECT * FROM leads WHERE id = $1', [id]);
+    return result.rows.length > 0 ? this.rowToLead(result.rows[0]) : null;
+  }
+
+  async addLead(input: CreateLeadInput): Promise<Lead> {
+    const result = await query(
+      `INSERT INTO leads (id, organization_id, owner_id, first_name, last_name, company_name, email, phone, source, status)
+       VALUES ($1, current_setting('app.organization_id'), $2, $3, $4, $5, $6, $7, $8, $9)
+       RETURNING *`,
+      [randomUUID(), input.owner_id, input.first_name, input.last_name, input.company_name, input.email,
+       input.phone || '', input.source || null, input.status || 'new'],
+    );
+    return this.rowToLead(result.rows[0]);
+  }
+
+  async updateLead(id: string, input: UpdateLeadInput): Promise<Lead | null> {
+    const fields: string[] = [];
+    const values: unknown[] = [id];
+    let idx = 2;
+
+    const stringFields = ['first_name', 'last_name', 'company_name', 'email', 'phone', 'source', 'status', 'owner_id'] as const;
+    for (const field of stringFields) {
+      if (input[field] !== undefined) {
+        fields.push(`${field} = $${idx++}`);
+        values.push(input[field]);
+      }
+    }
+
+    if (fields.length === 0) return this.getLeadById(id);
+    fields.push(`updated_at = NOW()`);
+
+    const result = await query(
+      `UPDATE leads SET ${fields.join(', ')} WHERE id = $1 RETURNING *`,
+      values,
+    );
+    return result.rows.length > 0 ? this.rowToLead(result.rows[0]) : null;
+  }
+
+  async deleteLead(id: string): Promise<boolean> {
+    const result = await query('DELETE FROM leads WHERE id = $1', [id]);
+    return (result.rowCount || 0) > 0;
+  }
+
+  async convertLead(id: string, input: ConvertLeadInput, converterUserId: string): Promise<LeadConversionResult | null> {
+    const client = (await import('../db/connection.js')).getClient;
+    const conn = await client();
+
+    try {
+      await conn.query('BEGIN');
+
+      const leadResult = await conn.query('SELECT * FROM leads WHERE id = $1', [id]);
+      if (leadResult.rows.length === 0) { await conn.query('ROLLBACK'); return null; }
+      const leadRow = leadResult.rows[0];
+      if (leadRow.is_converted || leadRow.status === 'converted' || leadRow.status !== 'qualified') { await conn.query('ROLLBACK'); return null; }
+
+      let accountId = input.account_id;
+      if (!accountId) {
+        const accountName = input.account?.name || leadRow.company_name;
+        if (!accountName) { await conn.query('ROLLBACK'); return null; }
+        const orgId = leadRow.organization_id;
+        const accountResult = await conn.query(
+          `SELECT id FROM accounts WHERE organization_id = $1 AND name ILIKE $2 LIMIT 1`,
+          [orgId, accountName],
+        );
+        if (accountResult.rows.length > 0) {
+          accountId = accountResult.rows[0].id;
+        } else {
+          const created = await conn.query(
+            `INSERT INTO accounts (id, organization_id, owner_id, name, domain, industry, size, website, arr, tags, custom_fields)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+             RETURNING *`,
+            [randomUUID(), orgId, input.account?.owner_id || leadRow.owner_id, accountName,
+             input.account?.domain || '', input.account?.industry || '', input.account?.size || '1-10',
+             input.account?.website || '', input.account?.arr || 0, input.account?.tags || [], JSON.stringify(input.account?.custom_fields || {})],
+          );
+          accountId = created.rows[0].id;
+        }
+      }
+
+      const firstName = input.contact?.first_name || leadRow.first_name || 'Lead';
+      const lastName = input.contact?.last_name || leadRow.last_name || '';
+      const contactResult = await conn.query(
+        `INSERT INTO contacts (id, organization_id, account_id, owner_id, first_name, last_name, email, phone, title, linkedin_url, tags, custom_fields, unsubscribed)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+         RETURNING *`,
+        [randomUUID(), leadRow.organization_id, accountId, leadRow.owner_id,
+         firstName || 'Unknown', lastName || '', input.contact?.email || leadRow.email,
+         input.contact?.phone || leadRow.phone || '', input.contact?.title || '', '',
+         input.contact?.tags || [], '{}', false],
+      );
+      const contactId = contactResult.rows[0].id;
+
+      // Step 3 (optional): create "[Company] - Default Opportunity" on the account
+      let opportunityId: string | null = null;
+      if (input.create_opportunity) {
+        const pipelineResult = await conn.query(
+          `SELECT id FROM pipelines WHERE organization_id = $1 AND is_default = true ORDER BY created_at LIMIT 1`,
+          [leadRow.organization_id],
+        );
+        if (pipelineResult.rows.length > 0) {
+          const pipelineId = pipelineResult.rows[0].id;
+          const stageResult = await conn.query(
+            `SELECT id, probability FROM stages WHERE pipeline_id = $1 AND type = 'open' ORDER BY stage_order ASC LIMIT 1`,
+            [pipelineId],
+          );
+          if (stageResult.rows.length > 0) {
+            const accountNameResult = await conn.query(`SELECT name FROM accounts WHERE id = $1`, [accountId]);
+            const accountName = accountNameResult.rows[0]?.name || leadRow.company_name;
+            const closeDate = new Date(Date.now() + 90 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+            const dealResult = await conn.query(
+              `INSERT INTO deals (id, organization_id, pipeline_id, stage_id, account_id, owner_id, name, value, currency, probability, close_date, custom_fields, line_items)
+               VALUES ($1, $2, $3, $4, $5, $6, $7, 0, 'USD', $8, $9, '{}', '[]')
+               RETURNING id`,
+              [randomUUID(), leadRow.organization_id, pipelineId, stageResult.rows[0].id, accountId, leadRow.owner_id,
+               `${accountName} - Default Opportunity`, stageResult.rows[0].probability ?? null, closeDate],
+            );
+            opportunityId = dealResult.rows[0].id;
+          }
+        }
+      }
+
+      // Step 4: archive the lead — flag it, never delete it
+      const now = new Date().toISOString();
+      await conn.query(
+        `UPDATE leads SET status = 'converted', is_converted = true, converted_account_id = $2, converted_contact_id = $3, converted_at = $4, updated_at = $5 WHERE id = $1`,
+        [id, accountId, contactId, now, now],
+      );
+
+      await conn.query(
+        `INSERT INTO activities (id, organization_id, user_id, contact_id, lead_id, type, title, body, metadata)
+         VALUES ($1, $2, $3, $4, $5, 'lead_converted', $6, $7, $8)`,
+        [randomUUID(), leadRow.organization_id, converterUserId, contactId, id,
+         `Lead converted to contact and account`, '', JSON.stringify({ account_id: accountId, contact_id: contactId })],
+      );
+
+      await conn.query('COMMIT');
+
+      const updatedLead = await this.getLeadById(id);
+      const account = await this.getAccountById(accountId);
+      const contact = await this.getContactById(contactId);
+      const opportunity = opportunityId ? await this.getDealById(opportunityId) : undefined;
+      if (!updatedLead) return null;
+      return {
+        lead: updatedLead,
+        account: account || undefined,
+        contact: contact || undefined,
+        opportunity: opportunity || undefined,
+      };
+    } catch (err) {
+      await conn.query('ROLLBACK');
+      throw err;
+    } finally {
+      conn.release();
+    }
+  }
+
   // ─── Tasks ──────────────────────────────────────────
 
   async listTasks(params?: { assigned_to_id?: string; status?: 'open' | 'completed' | 'all' } & PaginationParams): Promise<Task[]> {
@@ -590,11 +781,11 @@ export class PostgresCrmRepository implements CrmRepository {
 
   async addTask(input: CreateTaskInput): Promise<Task> {
     const result = await query(
-      `INSERT INTO tasks (id, organization_id, assigned_to_id, created_by_id, contact_id, deal_id, title, type, priority, due_at, recurrence_rule)
-       VALUES ($1, current_setting('app.organization_id'), $2, $3, $4, $5, $6, $7, $8, $9, $10)
+      `INSERT INTO tasks (id, organization_id, assigned_to_id, created_by_id, contact_id, deal_id, lead_id, title, type, priority, due_at, recurrence_rule)
+       VALUES ($1, current_setting('app.organization_id'), $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
        RETURNING *`,
       [randomUUID(), input.assigned_to_id, input.created_by_id, input.contact_id || null,
-       input.deal_id || null, input.title, input.type, input.priority || 'medium',
+       input.deal_id || null, input.lead_id || null, input.title, input.type, input.priority || 'medium',
        input.due_at, input.recurrence_rule || null],
     );
     return this.rowToTask(result.rows[0]);
@@ -605,7 +796,7 @@ export class PostgresCrmRepository implements CrmRepository {
     const values: unknown[] = [id];
     let idx = 2;
 
-    const stringFields: (keyof UpdateTaskInput)[] = ['title', 'type', 'priority', 'due_at', 'assigned_to_id', 'contact_id', 'deal_id', 'recurrence_rule'];
+    const stringFields: (keyof UpdateTaskInput)[] = ['title', 'type', 'priority', 'due_at', 'assigned_to_id', 'contact_id', 'deal_id', 'lead_id', 'recurrence_rule'];
     for (const field of stringFields) {
       if (input[field] !== undefined) {
         fields.push(`${field} = $${idx++}`);
@@ -638,7 +829,7 @@ export class PostgresCrmRepository implements CrmRepository {
 
   // ─── Activities ─────────────────────────────────────
 
-  async listActivities(params?: { contact_id?: string; deal_id?: string; user_id?: string } & PaginationParams): Promise<Activity[]> {
+  async listActivities(params?: { contact_id?: string; deal_id?: string; lead_id?: string; user_id?: string } & PaginationParams): Promise<Activity[]> {
     let sql = `SELECT * FROM activities`;
     const conditions: string[] = [];
     const values: unknown[] = [];
@@ -646,6 +837,7 @@ export class PostgresCrmRepository implements CrmRepository {
 
     if (params?.contact_id) { conditions.push(`contact_id = $${paramIdx++}`); values.push(params.contact_id); }
     if (params?.deal_id) { conditions.push(`deal_id = $${paramIdx++}`); values.push(params.deal_id); }
+    if (params?.lead_id) { conditions.push(`lead_id = $${paramIdx++}`); values.push(params.lead_id); }
     if (params?.user_id) { conditions.push(`user_id = $${paramIdx++}`); values.push(params.user_id); }
 
     if (conditions.length > 0) sql += ` WHERE ` + conditions.join(' AND ');
@@ -662,14 +854,114 @@ export class PostgresCrmRepository implements CrmRepository {
 
   async addActivity(input: CreateActivityInput): Promise<Activity> {
     const result = await query(
-      `INSERT INTO activities (id, organization_id, user_id, contact_id, deal_id, task_id, type, title, body, outcome, duration_seconds, metadata)
-       VALUES ($1, current_setting('app.organization_id'), $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+      `INSERT INTO activities (id, organization_id, user_id, contact_id, deal_id, lead_id, task_id, type, title, body, outcome, duration_seconds, metadata)
+       VALUES ($1, current_setting('app.organization_id'), $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
        RETURNING *`,
       [randomUUID(), input.user_id, input.contact_id || null, input.deal_id || null,
-       input.task_id || null, input.type, input.title, input.body || '',
+       input.lead_id || null, input.task_id || null, input.type, input.title, input.body || '',
        input.outcome || null, input.duration_seconds || null, JSON.stringify(input.metadata || {})],
     );
     return this.rowToActivity(result.rows[0]);
+  }
+
+  // ─── Record Tasks (timeline sub-system) ─────────────
+
+  async listRecordTasks(params?: { associated_to_id?: string } & PaginationParams): Promise<RecordTask[]> {
+    let sql = `SELECT * FROM record_tasks`;
+    const conditions: string[] = [];
+    const values: unknown[] = [];
+    let paramIdx = 1;
+
+    if (params?.associated_to_id) { conditions.push(`associated_to_id = $${paramIdx++}`); values.push(params.associated_to_id); }
+    if (params?.search) { conditions.push(`subject ILIKE $${paramIdx++}`); values.push(`%${params.search}%`); }
+
+    if (conditions.length > 0) sql += ` WHERE ` + conditions.join(' AND ');
+    sql += ` ORDER BY created_at DESC`;
+
+    if (params?.page && params?.limit) {
+      sql += ` LIMIT $${paramIdx} OFFSET $${paramIdx + 1}`;
+      values.push(params.limit, (params.page - 1) * params.limit);
+    }
+
+    const result = await query(sql, values);
+    return result.rows.map((row: DbRow) => this.rowToRecordTask(row));
+  }
+
+  async getRecordTaskById(id: string): Promise<RecordTask | null> {
+    const result = await query('SELECT * FROM record_tasks WHERE id = $1', [id]);
+    return result.rows.length > 0 ? this.rowToRecordTask(result.rows[0]) : null;
+  }
+
+  async addRecordTask(input: CreateRecordTaskInput): Promise<RecordTask> {
+    const result = await query(
+      `INSERT INTO record_tasks (id, organization_id, user_id, subject, description, due_date, associated_to_id)
+       VALUES ($1, current_setting('app.organization_id'), $2, $3, $4, $5, $6)
+       RETURNING *`,
+      [randomUUID(), input.user_id, input.subject, input.description || '', input.due_date || null, input.associated_to_id],
+    );
+    return this.rowToRecordTask(result.rows[0]);
+  }
+
+  async updateRecordTask(id: string, input: UpdateRecordTaskInput): Promise<RecordTask | null> {
+    const fields: string[] = [];
+    const values: unknown[] = [id];
+    let idx = 2;
+
+    if (input.subject !== undefined) { fields.push(`subject = $${idx++}`); values.push(input.subject); }
+    if (input.description !== undefined) { fields.push(`description = $${idx++}`); values.push(input.description); }
+    if (input.due_date !== undefined) { fields.push(`due_date = $${idx++}`); values.push(input.due_date); }
+    if (input.completed_at !== undefined) { fields.push(`completed_at = $${idx++}`); values.push(input.completed_at); }
+    if (fields.length === 0) return this.getRecordTaskById(id);
+    fields.push(`updated_at = NOW()`);
+
+    const result = await query(
+      `UPDATE record_tasks SET ${fields.join(', ')} WHERE id = $1 RETURNING *`,
+      values,
+    );
+    return result.rows.length > 0 ? this.rowToRecordTask(result.rows[0]) : null;
+  }
+
+  async deleteRecordTask(id: string): Promise<boolean> {
+    const result = await query('DELETE FROM record_tasks WHERE id = $1', [id]);
+    return (result.rowCount || 0) > 0;
+  }
+
+  // ─── Call Logs (timeline sub-system) ────────────────
+
+  async listCallLogs(params?: { associated_to_id?: string } & PaginationParams): Promise<CallLog[]> {
+    let sql = `SELECT * FROM call_logs`;
+    const conditions: string[] = [];
+    const values: unknown[] = [];
+    let paramIdx = 1;
+
+    if (params?.associated_to_id) { conditions.push(`associated_to_id = $${paramIdx++}`); values.push(params.associated_to_id); }
+    if (params?.search) { conditions.push(`(subject ILIKE $${paramIdx++} OR description ILIKE $${paramIdx++})`); const q = `%${params.search}%`; values.push(q, q); }
+
+    if (conditions.length > 0) sql += ` WHERE ` + conditions.join(' AND ');
+    sql += ` ORDER BY created_at DESC`;
+
+    if (params?.page && params?.limit) {
+      sql += ` LIMIT $${paramIdx} OFFSET $${paramIdx + 1}`;
+      values.push(params.limit, (params.page - 1) * params.limit);
+    }
+
+    const result = await query(sql, values);
+    return result.rows.map((row: DbRow) => this.rowToCallLog(row));
+  }
+
+  async getCallLogById(id: string): Promise<CallLog | null> {
+    const result = await query('SELECT * FROM call_logs WHERE id = $1', [id]);
+    return result.rows.length > 0 ? this.rowToCallLog(result.rows[0]) : null;
+  }
+
+  async addCallLog(input: CreateCallLogInput): Promise<CallLog> {
+    const result = await query(
+      `INSERT INTO call_logs (id, organization_id, user_id, subject, description, due_date, associated_to_id)
+       VALUES ($1, current_setting('app.organization_id'), $2, $3, $4, $5, $6)
+       RETURNING *`,
+      [randomUUID(), input.user_id, input.subject, input.description || '', input.due_date || null, input.associated_to_id],
+    );
+    return this.rowToCallLog(result.rows[0]);
   }
 
   // ─── Notifications ──────────────────────────────────
@@ -1233,13 +1525,14 @@ export class PostgresCrmRepository implements CrmRepository {
 
   async snapshot(): Promise<CrmSnapshot> {
     const [
-      users, accounts, contacts, pipelines, stages, deals, tasks, activities, notifications,
+      users, accounts, contacts, leads, pipelines, stages, deals, tasks, activities, notifications,
       customFields, emailTemplates, emailCampaigns, auditLogs,
       apiKeys, webhooks, quotas, approvals, securityPolicy, fieldPermissions,
     ] = await Promise.all([
       this.listUsers(),
       this.listAccounts(),
       this.listContacts(),
+      this.listLeads(),
       this.listPipelines(),
       this.listStages(),
       this.listDeals(),
@@ -1259,7 +1552,7 @@ export class PostgresCrmRepository implements CrmRepository {
     ]);
 
     return {
-      users, accounts, contacts, pipelines, stages, deals, tasks, activities, notifications,
+      users, accounts, contacts, leads, pipelines, stages, deals, tasks, activities, notifications,
       customFields, emailTemplates, emailCampaigns, auditLogs,
       apiKeys, webhooks, quotas, approvals, securityPolicy, fieldPermissions,
     };
@@ -1320,16 +1613,17 @@ export class PostgresCrmRepository implements CrmRepository {
   // ─── GDPR ───────────────────────────────────────────
 
   async exportUserData(userId: string): Promise<Record<string, unknown>> {
-    const [contacts, accounts, deals, tasks, activities, notifications] = await Promise.all([
+    const [contacts, accounts, leads, deals, tasks, activities, notifications] = await Promise.all([
       query('SELECT * FROM contacts WHERE owner_id = $1', [userId]).then(r => r.rows.map((row: DbRow) => this.rowToContact(row))),
       query('SELECT * FROM accounts WHERE owner_id = $1', [userId]).then(r => r.rows.map((row: DbRow) => this.rowToAccount(row))),
+      query('SELECT * FROM leads WHERE owner_id = $1', [userId]).then(r => r.rows.map((row: DbRow) => this.rowToLead(row))),
       query('SELECT * FROM deals WHERE owner_id = $1', [userId]).then(r => r.rows.map((row: DbRow) => this.rowToDeal(row))),
       query('SELECT * FROM tasks WHERE assigned_to_id = $1 OR created_by_id = $1', [userId]).then(r => r.rows.map((row: DbRow) => this.rowToTask(row))),
       query('SELECT * FROM activities WHERE user_id = $1', [userId]).then(r => r.rows.map((row: DbRow) => this.rowToActivity(row))),
       query('SELECT * FROM notifications WHERE user_id = $1', [userId]).then(r => r.rows.map((row: DbRow) => this.rowToNotification(row))),
     ]);
 
-    return { contacts, accounts, deals, tasks, activities, notifications };
+    return { contacts, accounts, leads, deals, tasks, activities, notifications };
   }
 
   async deleteUserData(userId: string): Promise<void> {
@@ -1396,6 +1690,7 @@ export class PostgresCrmRepository implements CrmRepository {
       custom_fields: row.custom_fields || {},
       unsubscribed: row.unsubscribed || false,
       created_at: row.created_at instanceof Date ? row.created_at.toISOString() : String(row.created_at),
+      updated_at: row.updated_at instanceof Date ? row.updated_at.toISOString() : row.updated_at ? String(row.updated_at) : undefined,
     };
   }
 
@@ -1413,6 +1708,7 @@ export class PostgresCrmRepository implements CrmRepository {
       tags: row.tags || [],
       custom_fields: row.custom_fields || {},
       created_at: row.created_at instanceof Date ? row.created_at.toISOString() : String(row.created_at),
+      updated_at: row.updated_at instanceof Date ? row.updated_at.toISOString() : row.updated_at ? String(row.updated_at) : undefined,
     };
   }
 
@@ -1439,6 +1735,27 @@ export class PostgresCrmRepository implements CrmRepository {
     };
   }
 
+  private rowToLead(row: DbRow): Lead {
+    return {
+      id: row.id,
+      organization_id: row.organization_id,
+      first_name: row.first_name,
+      last_name: row.last_name,
+      company_name: row.company_name,
+      email: row.email,
+      phone: row.phone || '',
+      source: row.source || undefined,
+      status: row.status,
+      owner_id: row.owner_id,
+      is_converted: row.is_converted === true,
+      converted_account_id: row.converted_account_id || undefined,
+      converted_contact_id: row.converted_contact_id || undefined,
+      converted_at: row.converted_at ? (row.converted_at instanceof Date ? row.converted_at.toISOString() : String(row.converted_at)) : undefined,
+      created_at: row.created_at instanceof Date ? row.created_at.toISOString() : String(row.created_at),
+      updated_at: row.updated_at ? (row.updated_at instanceof Date ? row.updated_at.toISOString() : String(row.updated_at)) : undefined,
+    };
+  }
+
   private rowToTask(row: DbRow): Task {
     return {
       id: row.id,
@@ -1452,7 +1769,36 @@ export class PostgresCrmRepository implements CrmRepository {
       created_by_id: row.created_by_id,
       contact_id: row.contact_id || undefined,
       deal_id: row.deal_id || undefined,
+      lead_id: row.lead_id || undefined,
       recurrence_rule: row.recurrence_rule || undefined,
+    };
+  }
+
+  private rowToRecordTask(row: DbRow): RecordTask {
+    return {
+      id: row.id,
+      organization_id: row.organization_id,
+      user_id: row.user_id,
+      subject: row.subject,
+      description: row.description || '',
+      due_date: row.due_date ? (row.due_date instanceof Date ? row.due_date.toISOString() : String(row.due_date)) : undefined,
+      associated_to_id: row.associated_to_id,
+      completed_at: row.completed_at ? (row.completed_at instanceof Date ? row.completed_at.toISOString() : String(row.completed_at)) : undefined,
+      created_at: row.created_at instanceof Date ? row.created_at.toISOString() : String(row.created_at),
+      updated_at: row.updated_at ? (row.updated_at instanceof Date ? row.updated_at.toISOString() : String(row.updated_at)) : undefined,
+    };
+  }
+
+  private rowToCallLog(row: DbRow): CallLog {
+    return {
+      id: row.id,
+      organization_id: row.organization_id,
+      user_id: row.user_id,
+      subject: row.subject,
+      description: row.description || '',
+      due_date: row.due_date ? (row.due_date instanceof Date ? row.due_date.toISOString() : String(row.due_date)) : undefined,
+      associated_to_id: row.associated_to_id,
+      created_at: row.created_at instanceof Date ? row.created_at.toISOString() : String(row.created_at),
     };
   }
 
@@ -1468,6 +1814,7 @@ export class PostgresCrmRepository implements CrmRepository {
       user_id: row.user_id,
       contact_id: row.contact_id || undefined,
       deal_id: row.deal_id || undefined,
+      lead_id: row.lead_id || undefined,
       task_id: row.task_id || undefined,
       metadata: row.metadata || undefined,
       created_at: row.created_at instanceof Date ? row.created_at.toISOString() : String(row.created_at),

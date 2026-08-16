@@ -4,25 +4,28 @@
  */
 
 import React, { createContext, useContext, useState, useEffect, useCallback, useRef, useMemo } from 'react';
-import type { User, UserRole, Account, Contact, Pipeline, Stage, Deal, Task, Activity, Notification, CustomFieldDefinition, EmailTemplate, EmailCampaign, AuditLog, FileRecord, ApprovalRequest } from './types';
+import type { User, UserRole, Account, Contact, Pipeline, Stage, Deal, Lead, LeadStatus, Task, Activity, Notification, CustomFieldDefinition, EmailTemplate, EmailCampaign, AuditLog, FileRecord, ApprovalRequest, RecordTask, CallLog } from './types';
 import { runtimeConfig } from './runtimeConfig';
 import { toast } from './components/ui/toast';
 import {
   INITIAL_USERS,
   INITIAL_ACCOUNTS,
   INITIAL_CONTACTS,
+  INITIAL_LEADS,
   INITIAL_PIPELINES,
   INITIAL_STAGES,
   INITIAL_DEALS,
   INITIAL_TASKS,
   INITIAL_ACTIVITIES,
+  INITIAL_RECORD_TASKS,
+  INITIAL_CALL_LOGS,
   INITIAL_NOTIFICATIONS,
   INITIAL_CUSTOM_FIELDS,
   INITIAL_TEMPLATES,
   INITIAL_CAMPAIGNS,
   INITIAL_AUDIT_LOGS,
 } from './initialData';
-import { apiClient, ApiError, type MfaRequiredResponse } from './apiClient';
+import { apiClient, ApiError, SESSION_EXPIRED_EVENT, type MfaRequiredResponse } from './apiClient';
 
 // ─── Context type ──────────────────────────────────────
 
@@ -31,11 +34,14 @@ interface CRMContextType {
   users: User[];
   accounts: Account[];
   contacts: Contact[];
+  leads: Lead[];
   pipelines: Pipeline[];
   stages: Stage[];
   deals: Deal[];
   tasks: Task[];
   activities: Activity[];
+  recordTasks: RecordTask[];
+  callLogs: CallLog[];
   notifications: Notification[];
   customFields: CustomFieldDefinition[];
   emailTemplates: EmailTemplate[];
@@ -125,13 +131,13 @@ interface CRMContextType {
 
   // Contact CRUD
   addContact: (contact: Omit<Contact, 'id' | 'created_at'>) => Promise<void>;
-  updateContact: (id: string, contact: Partial<Contact>) => Promise<void>;
+  updateContact: (id: string, contact: Partial<Contact>) => Promise<boolean>;
   deleteContact: (id: string) => Promise<void>;
   mergeContacts: (sourceId: string, targetId: string, finalValues: Partial<Contact>) => Promise<void>;
 
   // Account CRUD
   addAccount: (account: Omit<Account, 'id' | 'created_at'>) => Promise<void>;
-  updateAccount: (id: string, account: Partial<Account>) => Promise<void>;
+  updateAccount: (id: string, account: Partial<Account>) => Promise<boolean>;
   deleteAccount: (id: string) => Promise<void>;
 
   // Deal CRUD
@@ -141,6 +147,12 @@ interface CRMContextType {
   moveDealStage: (id: string, targetStageId: string) => Promise<boolean>;
   closeDeal: (id: string, outcome: 'won' | 'lost', reason?: string) => Promise<boolean>;
 
+  // Lead CRUD
+  addLead: (lead: Omit<Lead, 'id' | 'created_at' | 'is_converted'>) => Promise<void>;
+  updateLead: (id: string, lead: Partial<Lead>) => Promise<boolean>;
+  deleteLead: (id: string) => Promise<void>;
+  convertLead: (id: string, data: Record<string, unknown>) => Promise<boolean>;
+
   // Task CRUD
   addTask: (task: Omit<Task, 'id' | 'created_by_id'>) => Promise<void>;
   updateTask: (id: string, task: Partial<Task>) => Promise<void>;
@@ -149,6 +161,12 @@ interface CRMContextType {
 
   // Activity log
   addActivity: (activity: Omit<Activity, 'id' | 'created_at'>) => Promise<void>;
+
+  // Activity Timeline sub-system (record tasks + call logs)
+  addRecordTask: (task: Omit<RecordTask, 'id' | 'created_at' | 'updated_at'>) => Promise<void>;
+  toggleRecordTask: (id: string) => Promise<void>;
+  deleteRecordTask: (id: string) => Promise<void>;
+  addCallLog: (log: Omit<CallLog, 'id' | 'created_at'>) => Promise<void>;
 
   // Custom Fields
   addCustomFieldDefinition: (cfd: Omit<CustomFieldDefinition, 'id'>) => Promise<void>;
@@ -171,6 +189,7 @@ interface CRMContextType {
   // Data helpers based on active User Role
   getScopedContacts: () => Contact[];
   getScopedAccounts: () => Account[];
+  getScopedLeads: () => Lead[];
   getScopedDeals: () => Deal[];
   getScopedTasks: () => Task[];
   getScopedActivities: () => Activity[];
@@ -240,6 +259,27 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [users, setUsers] = useState<User[]>(() => loadFromStorage('users', INITIAL_USERS));
   const [accounts, setAccounts] = useState<Account[]>(() => loadFromStorage('accounts', INITIAL_ACCOUNTS));
   const [contacts, setContacts] = useState<Contact[]>(() => loadFromStorage('contacts', INITIAL_CONTACTS));
+  const [leads, setLeads] = useState<Lead[]>(() => {
+    const loaded = loadFromStorage<Lead[]>('leads', INITIAL_LEADS);
+    const validStatuses: LeadStatus[] = ['new', 'working', 'nurturing', 'qualified', 'unqualified', 'converted'];
+    return loaded.map(l => {
+      const legacy = l as Lead & { name?: string };
+      let first = legacy.first_name ?? '';
+      let last = legacy.last_name ?? '';
+      if ((!first && !last) && legacy.name) {
+        const parts = legacy.name.trim().split(/\s+/);
+        first = parts[0] || '';
+        last = parts.slice(1).join(' ');
+      }
+      return {
+        ...legacy,
+        first_name: first,
+        last_name: last,
+        is_converted: legacy.is_converted === true,
+        status: validStatuses.includes(legacy.status) ? legacy.status : 'new',
+      };
+    });
+  });
   const [pipelines, setPipelines] = useState<Pipeline[]>(INITIAL_PIPELINES);
   const pipelinesRef = useRef(pipelines);
   pipelinesRef.current = pipelines;
@@ -247,6 +287,10 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [deals, setDeals] = useState<Deal[]>(() => loadFromStorage('deals', INITIAL_DEALS));
   const [tasks, setTasks] = useState<Task[]>(() => loadFromStorage('tasks', INITIAL_TASKS));
   const [activities, setActivities] = useState<Activity[]>(() => loadFromStorage('activities', INITIAL_ACTIVITIES));
+  const [recordTasks, setRecordTasks] = useState<RecordTask[]>(() => loadFromStorage('record_tasks', INITIAL_RECORD_TASKS));
+  const recordTasksRef = useRef(recordTasks);
+  recordTasksRef.current = recordTasks;
+  const [callLogs, setCallLogs] = useState<CallLog[]>(() => loadFromStorage('call_logs', INITIAL_CALL_LOGS));
   const [notifications, setNotifications] = useState<Notification[]>(() => loadFromStorage('notifications', INITIAL_NOTIFICATIONS));
   const [customFields, setCustomFields] = useState<CustomFieldDefinition[]>(() => loadFromStorage('custom_fields', INITIAL_CUSTOM_FIELDS));
   const [emailTemplates, setEmailTemplates] = useState<EmailTemplate[]>(() => loadFromStorage('email_templates', INITIAL_TEMPLATES));
@@ -269,9 +313,12 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     write('users', 'users', snapshot.users);
     write('accounts', 'accounts', snapshot.accounts);
     write('contacts', 'contacts', snapshot.contacts);
+    write('leads', 'leads', snapshot.leads);
     write('deals', 'deals', snapshot.deals);
     write('tasks', 'tasks', snapshot.tasks);
     write('activities', 'activities', snapshot.activities);
+    write('record_tasks', 'recordTasks', snapshot.recordTasks);
+    write('call_logs', 'callLogs', snapshot.callLogs);
     write('notifications', 'notifications', snapshot.notifications);
     write('custom_fields', 'customFields', snapshot.customFields);
     write('email_templates', 'emailTemplates', snapshot.emailTemplates);
@@ -325,6 +372,19 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   }, []);
 
+  // When the ApiClient determines the session is unrecoverable (refresh failed,
+  // tokens cleared), route back to the login screen instead of keeping the
+  // dashboard alive while every request bounces off the server token-less.
+  useEffect(() => {
+    const onSessionExpired = () => {
+      setCurrentUserState(null);
+      setApiError('Your session has expired. Please sign in again.');
+      setIsAuthenticated(false);
+    };
+    window.addEventListener(SESSION_EXPIRED_EVENT, onSessionExpired);
+    return () => window.removeEventListener(SESSION_EXPIRED_EVENT, onSessionExpired);
+  }, []);
+
   const logout = useCallback(() => {
     // Invalidate refresh token server-side (fire-and-forget — clear local state either way)
     apiClient.logout().catch(() => {});
@@ -332,7 +392,7 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     userStoreSet(null);
     // Clear persisted data on logout
     const keysToRemove = [
-      'users', 'accounts', 'contacts', 'deals', 'tasks', 'activities',
+      'users', 'accounts', 'contacts', 'leads', 'deals', 'tasks', 'activities', 'record_tasks', 'call_logs',
       'notifications', 'custom_fields', 'email_templates', 'email_campaigns', 'audit_logs',
     ];
     keysToRemove.forEach(k => safeRemoveItem(LOCAL_STORAGE_KEY_PREFIX + k));
@@ -340,9 +400,12 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setUsers([]);
     setAccounts([]);
     setContacts([]);
+    setLeads([]);
     setDeals([]);
     setTasks([]);
     setActivities([]);
+    setRecordTasks([]);
+    setCallLogs([]);
     setNotifications([]);
     setCustomFields([]);
     setEmailTemplates([]);
@@ -359,8 +422,8 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   // Human-readable labels for failedResources keys, used to build a specific banner message.
   const RESOURCE_LABELS: Record<string, string> = {
-    users: 'team members', accounts: 'accounts', contacts: 'contacts', pipelines: 'pipelines',
-    stages: 'stages', deals: 'deals', tasks: 'tasks', activities: 'activities',
+    users: 'team members', accounts: 'accounts', contacts: 'contacts', leads: 'leads', pipelines: 'pipelines',
+    stages: 'stages', deals: 'deals', tasks: 'tasks', activities: 'activities', recordTasks: 'timeline tasks', callLogs: 'call logs',
     notifications: 'notifications', customFields: 'custom fields', emailTemplates: 'email templates',
     emailCampaigns: 'email campaigns', auditLogs: 'audit logs',
   };
@@ -390,6 +453,7 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       if (!failed.has('users')) setUsers(snapshot.users);
       if (!failed.has('accounts')) setAccounts(snapshot.accounts);
       if (!failed.has('contacts')) setContacts(snapshot.contacts);
+      if (!failed.has('leads')) setLeads(snapshot.leads);
       if (!failed.has('pipelines') && snapshot.pipelines.length > 0) setPipelines(snapshot.pipelines);
       if (!failed.has('stages') && snapshot.stages.length > 0) setStages(snapshot.stages);
       // Auto-select the default pipeline on first successful bootstrap
@@ -401,6 +465,8 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       if (!failed.has('deals')) setDeals(snapshot.deals);
       if (!failed.has('tasks')) setTasks(snapshot.tasks);
       if (!failed.has('activities')) setActivities(snapshot.activities);
+      if (!failed.has('recordTasks')) setRecordTasks(snapshot.recordTasks);
+      if (!failed.has('callLogs')) setCallLogs(snapshot.callLogs);
       if (!failed.has('notifications')) setNotifications(snapshot.notifications);
       if (!failed.has('customFields')) setCustomFields(snapshot.customFields);
       if (!failed.has('emailTemplates')) setEmailTemplates(snapshot.emailTemplates);
@@ -435,9 +501,11 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       persistToLocalStorage(snapshot, failed);
     } catch (err) {
       if (cancelledRef.current) return;
-      // Auth error — user no longer exists (e.g. server restarted in dev mode)
-      // Force logout so the user can re-authenticate cleanly
-      if (err instanceof ApiError && (err.code === 'user_not_found' || err.status === 404)) {
+      // Auth error — session is dead (user removed, tokens expired/revoked, or
+      // no credentials left to authenticate with). Force logout so the user can
+      // re-authenticate cleanly instead of leaving the app firing token-less
+      // requests that fail with "Missing bearer token".
+      if (err instanceof ApiError && (err.status === 401 || err.status === 404 || err.code === 'user_not_found')) {
         logout();
         return;
       }
@@ -517,6 +585,13 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return accounts;
   }, [currentUser, accounts, teamIds]);
 
+  const scopedLeads = useMemo(() => {
+    if (!currentUser) return leads;
+    if (currentUser.role === 'sales_rep' as UserRole) return leads.filter(l => l.owner_id === currentUser.id);
+    if (currentUser.role === 'manager' as UserRole) return leads.filter(l => teamIds.includes(l.owner_id));
+    return leads;
+  }, [currentUser, leads, teamIds]);
+
   const scopedDeals = useMemo(() => {
     if (!currentUser) return deals;
     if (currentUser.role === 'sales_rep' as UserRole) return deals.filter(d => d.owner_id === currentUser.id);
@@ -540,6 +615,7 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const getScopedContacts = useCallback(() => scopedContacts, [scopedContacts]);
   const getScopedAccounts = useCallback(() => scopedAccounts, [scopedAccounts]);
+  const getScopedLeads = useCallback(() => scopedLeads, [scopedLeads]);
   const getScopedDeals = useCallback(() => scopedDeals, [scopedDeals]);
   const getScopedTasks = useCallback(() => scopedTasks, [scopedTasks]);
   const getScopedActivities = useCallback(() => scopedActivities, [scopedActivities]);
@@ -561,8 +637,10 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       const updated = await apiClient.updateContact(id, updatedData as Record<string, unknown>);
       setContacts(prev => prev.map(c => c.id === id ? updated : c));
       toast.success('Contact updated');
+      return true;
     } catch {
       toast.error('Failed to update contact', 'Please try again.');
+      return false;
     }
   }, []);
 
@@ -608,8 +686,10 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       const updated = await apiClient.updateAccount(id, updatedData as Record<string, unknown>);
       setAccounts(prev => prev.map(a => a.id === id ? updated : a));
       toast.success('Account updated');
+      return true;
     } catch {
       toast.error('Failed to update account', 'Please try again.');
+      return false;
     }
   }, []);
 
@@ -629,9 +709,9 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     try {
       const created = await apiClient.createDeal(dealData as Record<string, unknown>);
       setDeals(prev => [created, ...prev]);
-      toast.success('Deal created', `${dealData.name} — $${dealData.value.toLocaleString()}`);
+      toast.success('Opportunity created', `${dealData.name} — $${dealData.value.toLocaleString()}`);
     } catch {
-      toast.error('Failed to create deal', 'The deal was not saved. Please try again.');
+      toast.error('Failed to create opportunity', 'The opportunity was not saved. Please try again.');
     }
   }, []);
 
@@ -640,7 +720,7 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       const updated = await apiClient.updateDeal(id, updatedData as Record<string, unknown>);
       setDeals(prev => prev.map(d => d.id === id ? updated : d));
     } catch {
-      toast.error('Failed to update deal', 'Your changes were not saved. Please try again.');
+      toast.error('Failed to update opportunity', 'Your changes were not saved. Please try again.');
     }
   }, []);
 
@@ -648,9 +728,9 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     try {
       await apiClient.deleteDeal(id);
       setDeals(prev => prev.filter(d => d.id !== id));
-      toast.success('Deal deleted');
+      toast.success('Opportunity deleted');
     } catch {
-      toast.error('Failed to delete deal', 'Please try again.');
+      toast.error('Failed to delete opportunity', 'Please try again.');
     }
   }, []);
 
@@ -658,10 +738,10 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     try {
       const moved = await apiClient.moveDealStage(id, targetStageId);
       setDeals(prev => prev.map(d => d.id === id ? moved : d));
-      toast.success('Deal moved', 'Stage updated successfully.');
+      toast.success('Opportunity moved', 'Stage updated successfully.');
       return true;
     } catch {
-      toast.error('Failed to move deal', 'The stage change was not saved. Please try again.');
+      toast.error('Failed to move opportunity', 'The stage change was not saved. Please try again.');
       return false;
     }
   }, []);
@@ -670,10 +750,59 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     try {
       const closed = await apiClient.closeDeal(id, outcome, reason);
       setDeals(prev => prev.map(d => d.id === id ? closed : d));
-      toast.success(`Deal ${outcome === 'won' ? 'won' : 'lost'}`, `Deal has been closed as ${outcome}.`);
+      toast.success(`Opportunity ${outcome === 'won' ? 'won' : 'lost'}`, `Opportunity has been closed as ${outcome}.`);
       return true;
     } catch {
-      toast.error('Failed to close deal', 'The deal status was not updated. Please try again.');
+      toast.error('Failed to close opportunity', 'The opportunity status was not updated. Please try again.');
+      return false;
+    }
+  }, []);
+
+  // ─── Lead CRUD ─────────────────────────────────────
+
+  const addLead = useCallback(async (leadData: Omit<Lead, 'id' | 'created_at' | 'is_converted'>) => {
+    try {
+      const created = await apiClient.createLead({ ...leadData, is_converted: false } as Record<string, unknown>);
+      setLeads(prev => [created, ...prev]);
+      toast.success('Lead created', `${leadData.first_name} ${leadData.last_name} — ${leadData.company_name}`);
+    } catch {
+      toast.error('Failed to create lead', 'The lead was not saved. Please try again.');
+    }
+  }, []);
+
+  const updateLead = useCallback(async (id: string, updatedData: Partial<Lead>) => {
+    try {
+      const updated = await apiClient.updateLead(id, updatedData as Record<string, unknown>);
+      setLeads(prev => prev.map(l => l.id === id ? updated : l));
+      toast.success('Lead updated');
+      return true;
+    } catch {
+      toast.error('Failed to update lead', 'Your changes were not saved. Please try again.');
+      return false;
+    }
+  }, []);
+
+  const deleteLead = useCallback(async (id: string) => {
+    try {
+      await apiClient.deleteLead(id);
+      setLeads(prev => prev.filter(l => l.id !== id));
+      toast.success('Lead deleted');
+    } catch {
+      toast.error('Failed to delete lead', 'Please try again.');
+    }
+  }, []);
+
+  const convertLead = useCallback(async (id: string, data: Record<string, unknown>) => {
+    try {
+      const result = await apiClient.convertLead(id, data);
+      setLeads(prev => prev.map(l => l.id === id ? result.lead : l));
+      if (result.account) setAccounts(prev => [result.account!, ...prev.filter(a => a.id !== result.account!.id)]);
+      if (result.contact) setContacts(prev => [result.contact!, ...prev.filter(c => c.id !== result.contact!.id)]);
+      if (result.opportunity) setDeals(prev => [result.opportunity!, ...prev.filter(d => d.id !== result.opportunity!.id)]);
+      toast.success('Lead converted', 'Account and contact created from lead.');
+      return true;
+    } catch {
+      toast.error('Failed to convert lead', 'Please try again.');
       return false;
     }
   }, []);
@@ -731,6 +860,57 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       toast.error('Failed to log activity');
     }
   }, []);
+
+  // ─── Activity Timeline sub-system (record tasks + call logs) ───
+
+  const addRecordTask = useCallback(async (taskData: Omit<RecordTask, 'id' | 'created_at' | 'updated_at'>) => {
+    try {
+      const created = await apiClient.createRecordTask({
+        ...taskData,
+        user_id: currentUser?.id,
+      } as Record<string, unknown>);
+      setRecordTasks(prev => [created, ...prev]);
+      toast.success('Task added');
+    } catch {
+      toast.error('Failed to add task', 'Please try again.');
+    }
+  }, [currentUser]);
+
+  const toggleRecordTask = useCallback(async (id: string) => {
+    try {
+      const task = recordTasksRef.current.find(t => t.id === id);
+      if (!task) return;
+      const updated = await apiClient.updateRecordTask(id, {
+        completed_at: task.completed_at ? null : new Date().toISOString(),
+      });
+      setRecordTasks(prev => prev.map(t => t.id === id ? updated : t));
+    } catch {
+      toast.error('Failed to update task', 'Please try again.');
+    }
+  }, []);
+
+  const deleteRecordTask = useCallback(async (id: string) => {
+    try {
+      await apiClient.deleteRecordTask(id);
+      setRecordTasks(prev => prev.filter(t => t.id !== id));
+      toast.success('Task deleted');
+    } catch {
+      toast.error('Failed to delete task', 'Please try again.');
+    }
+  }, []);
+
+  const addCallLog = useCallback(async (logData: Omit<CallLog, 'id' | 'created_at'>) => {
+    try {
+      const created = await apiClient.createCallLog({
+        ...logData,
+        user_id: currentUser?.id,
+      } as Record<string, unknown>);
+      setCallLogs(prev => [created, ...prev]);
+      toast.success('Call logged');
+    } catch {
+      toast.error('Failed to log call', 'Please try again.');
+    }
+  }, [currentUser]);
 
   // ─── Custom Fields ─────────────────────────────────
 
@@ -1082,11 +1262,11 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const bulkUpdateDeals = useCallback(async (ids: string[], changes: Record<string, unknown>) => {
     try {
       await apiClient.bulkUpdateDeals(ids, changes);
-      toast.success(`${ids.length} deals updated`);
+      toast.success(`${ids.length} opportunities updated`);
       const result = await apiClient.listDeals();
       setDeals(result.data);
     } catch {
-      toast.error('Failed to update deals', 'Please try again.');
+      toast.error('Failed to update opportunities', 'Please try again.');
     }
   }, []);
 
@@ -1236,11 +1416,14 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     users,
     accounts,
     contacts,
+    leads,
     pipelines,
     stages,
     deals,
     tasks,
     activities,
+    recordTasks,
+    callLogs,
     notifications,
     customFields,
     emailTemplates,
@@ -1277,11 +1460,19 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     deleteDeal,
     moveDealStage,
     closeDeal,
+    addLead,
+    updateLead,
+    deleteLead,
+    convertLead,
     addTask,
     updateTask,
     completeTask,
     deleteTask,
     addActivity,
+    addRecordTask,
+    toggleRecordTask,
+    deleteRecordTask,
+    addCallLog,
     addCustomFieldDefinition,
     deleteCustomFieldDefinition,
     markNotificationRead,
@@ -1328,6 +1519,7 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     deleteAdminFlagOverride,
     getScopedContacts,
     getScopedAccounts,
+    getScopedLeads,
     getScopedDeals,
     getScopedTasks,
     getScopedActivities,

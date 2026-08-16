@@ -11,6 +11,7 @@ import { Loader2, X, AlertTriangle } from 'lucide-react';
 
 export { toast, ToastViewport } from './toast';
 export { default as ActivityTimeline } from './ActivityTimeline';
+export { default as TimelinePanel } from './TimelinePanel';
 export { default as RecordDetailPage, RelatedList, FieldRow, HighlightsPanel, DetailTabs } from './RecordDetailPage';
 export type { RecordDetailPageProps } from './RecordDetailPage';
 export { default as DashboardWidgetGrid } from './DashboardWidgetGrid';
@@ -168,10 +169,17 @@ const modalWidths = { sm: 'max-w-sm', md: 'max-w-lg', lg: 'max-w-2xl' };
 export function Modal({ open, onClose, title, subtitle, children, footer, width = 'md' }: ModalProps) {
   const ref = useRef<HTMLDivElement>(null);
 
+  // Keep the latest onClose in a ref so the keydown handler stays stable —
+  // otherwise the focus-on-open effect below re-runs on every parent render
+  // (each keystroke re-creates inline onClose arrows) and steals focus from
+  // whichever field the user is typing in.
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
+
   // Esc to close + rudimentary focus trap
   const onKeyDown = useCallback(
     (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
+      if (e.key === 'Escape') onCloseRef.current();
       if (e.key === 'Tab' && ref.current) {
         const focusables = ref.current.querySelectorAll<HTMLElement>(
           'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
@@ -188,15 +196,17 @@ export function Modal({ open, onClose, title, subtitle, children, footer, width 
         }
       }
     },
-    [onClose]
+    []
   );
 
   useEffect(() => {
     if (!open) return;
     document.addEventListener('keydown', onKeyDown);
-    // Focus first focusable on open
+    // Focus first form field on open (fall back to any button for dialogs without inputs)
     const t = window.setTimeout(() => {
-      ref.current?.querySelector<HTMLElement>('input, select, textarea, button')?.focus();
+      const el = ref.current?.querySelector<HTMLElement>('input, select, textarea')
+        ?? ref.current?.querySelector<HTMLElement>('button');
+      el?.focus();
     }, 50);
     return () => {
       document.removeEventListener('keydown', onKeyDown);

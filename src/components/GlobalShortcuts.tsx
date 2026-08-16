@@ -5,7 +5,7 @@
  * Global keyboard shortcuts + shortcuts cheatsheet modal.
  *
  *  ?            — open this cheatsheet
- *  g then r/c/d/t/e/a — navigate (Reports / Contacts / Deals / Tasks / Emails / Admin)
+ *  g then r/b/c/l/o/t/e/a — navigate (Reports / Accounts / Contacts / Leads / Opportunities / Tasks / Emails / Admin)
  *  n            — create a new record in the active module
  *  ⌘K / Ctrl+K  — command palette (handled by CommandPalette)
  *
@@ -29,7 +29,7 @@ export interface DrillDownDetail {
 }
 
 export interface SelectEntityDetail {
-  module: 'contacts' | 'deals' | 'tasks';
+  module: 'contacts' | 'deals' | 'tasks' | 'accounts' | 'leads';
   entityId: string;
 }
 
@@ -57,8 +57,10 @@ export function dispatchNavigate(module: string): void {
 
 const NAV_KEYS: Record<string, string> = {
   r: 'dashboard',
+  b: 'accounts',
   c: 'contacts',
-  d: 'deals',
+  l: 'leads',
+  o: 'deals',
   t: 'tasks',
   e: 'emails',
   a: 'admin',
@@ -72,8 +74,10 @@ interface ShortcutRow {
 const SHORTCUTS: ShortcutRow[] = [
   { keys: '?', label: 'Show this shortcut cheatsheet' },
   { keys: 'g then r', label: 'Go to Reports & Dashboards' },
-  { keys: 'g then c', label: 'Go to Contacts & Accounts' },
-  { keys: 'g then d', label: 'Go to Sales Pipeline' },
+  { keys: 'g then b', label: 'Go to Accounts' },
+  { keys: 'g then c', label: 'Go to Contacts' },
+  { keys: 'g then l', label: 'Go to Leads' },
+  { keys: 'g then o', label: 'Go to Opportunities' },
   { keys: 'g then t', label: 'Go to Tasks & Activities' },
   { keys: 'g then e', label: 'Go to Email & Comms' },
   { keys: 'g then a', label: 'Go to System Admin (admin only)' },
@@ -175,9 +179,13 @@ export default function GlobalShortcuts() {
           <span className="text-theme-secondary">
             <kbd className="bg-theme-inset border border-theme-border rounded px-1 font-mono text-[10px]">r</kbd> reports
             <span className="mx-1 text-theme-secondary/50">·</span>
+            <kbd className="bg-theme-inset border border-theme-border rounded px-1 font-mono text-[10px]">b</kbd> accounts
+            <span className="mx-1 text-theme-secondary/50">·</span>
             <kbd className="bg-theme-inset border border-theme-border rounded px-1 font-mono text-[10px]">c</kbd> contacts
             <span className="mx-1 text-theme-secondary/50">·</span>
-            <kbd className="bg-theme-inset border border-theme-border rounded px-1 font-mono text-[10px]">d</kbd> deals
+            <kbd className="bg-theme-inset border border-theme-border rounded px-1 font-mono text-[10px]">l</kbd> leads
+            <span className="mx-1 text-theme-secondary/50">·</span>
+            <kbd className="bg-theme-inset border border-theme-border rounded px-1 font-mono text-[10px]">o</kbd> opportunities
             <span className="mx-1 text-theme-secondary/50">·</span>
             <kbd className="bg-theme-inset border border-theme-border rounded px-1 font-mono text-[10px]">t</kbd> tasks
             <span className="mx-1 text-theme-secondary/50">·</span>

@@ -7,7 +7,7 @@
  * so the UI isn't completely empty.
  */
 
-import { UserRole, type User, type Account, type Contact, type Pipeline, type Stage, type Deal, type Task, type Activity, type Notification, type CustomFieldDefinition, type EmailTemplate, type EmailCampaign, type AuditLog } from './types.js';
+import { UserRole, type User, type Account, type Contact, type Pipeline, type Stage, type Deal, type Lead, type Task, type Activity, type Notification, type CustomFieldDefinition, type EmailTemplate, type EmailCampaign, type AuditLog, type RecordTask, type CallLog } from './types.js';
 
 const ORG_ID = 'org-boutinly';
 
@@ -30,6 +30,7 @@ export const INITIAL_ACCOUNTS: Account[] = [
   { id: 'acc-initech', organization_id: ORG_ID, name: 'Initech Solutions', domain: 'initech.com', industry: 'Finance', size: '201-1000', website: 'https://initech.com', arr: 420000, owner_id: 'usr-casey', tags: ['finance', 'enterprise'], custom_fields: {}, created_at: '2025-11-01T00:00:00Z' },
   { id: 'acc-umbrella', organization_id: ORG_ID, name: 'Umbrella Health', domain: 'umbrella.health', industry: 'Healthcare', size: '1000+', website: 'https://umbrella.health', arr: 600000, owner_id: 'usr-morgan', tags: ['healthcare', 'hipaa'], custom_fields: {}, created_at: '2026-02-10T00:00:00Z' },
   { id: 'acc-startupx', organization_id: ORG_ID, name: 'StartupX', domain: 'startupx.dev', industry: 'Technology', size: '1-10', website: 'https://startupx.dev', arr: 12000, owner_id: 'usr-riley', tags: ['startup', 'devtools'], custom_fields: {}, created_at: '2026-06-01T00:00:00Z' },
+  { id: 'acc-pioneer', organization_id: ORG_ID, name: 'Pioneer Foods', domain: 'pioneerfoods.com', industry: 'Food & Beverage', size: '51-200', website: 'https://pioneerfoods.com', arr: 95000, owner_id: 'usr-casey', tags: ['retail', 'converted-lead'], custom_fields: {}, created_at: '2026-07-05T00:00:00Z' },
 ];
 
 // ─── Contacts ────────────────────────────────────────
@@ -45,6 +46,19 @@ export const INITIAL_CONTACTS: Contact[] = [
   { id: 'con-george', organization_id: ORG_ID, first_name: 'George', last_name: 'Wilson', email: 'george@umbrella.health', phone: '555-0402', title: 'Compliance Officer', account_id: 'acc-umbrella', owner_id: 'usr-morgan', tags: ['compliance'], custom_fields: {}, unsubscribed: false, created_at: '2026-03-01T00:00:00Z' },
   { id: 'con-hannah', organization_id: ORG_ID, first_name: 'Hannah', last_name: 'Garcia', email: 'hannah@globex.io', phone: '555-0202', title: 'VP Engineering', account_id: 'acc-globex', owner_id: 'usr-riley', tags: ['technical', 'decision-maker'], custom_fields: {}, unsubscribed: false, created_at: '2026-04-10T00:00:00Z' },
   { id: 'con-ivan', organization_id: ORG_ID, first_name: 'Ivan', last_name: 'Thompson', email: 'ivan@acme.com', phone: '555-0103', title: 'Procurement Manager', account_id: 'acc-acme', owner_id: 'usr-casey', tags: ['procurement'], custom_fields: {}, unsubscribed: true, created_at: '2026-02-01T00:00:00Z' },
+  { id: 'con-leo', organization_id: ORG_ID, first_name: 'Leo', last_name: 'Fontaine', email: 'leo@pioneerfoods.com', phone: '555-0606', title: 'Head of Operations', account_id: 'acc-pioneer', owner_id: 'usr-casey', tags: ['converted-lead'], custom_fields: {}, unsubscribed: false, created_at: '2026-07-05T00:00:00Z' },
+];
+
+// ─── Leads (staging area) ─────────────────────────────
+
+export const INITIAL_LEADS: Lead[] = [
+  { id: 'lead-nova', organization_id: ORG_ID, first_name: 'Nora', last_name: 'Voss', company_name: 'Nova Systems', email: 'nora@novasystems.io', phone: '555-0601', source: 'Website', status: 'new', owner_id: 'usr-casey', is_converted: false, created_at: '2026-07-28T00:00:00Z', updated_at: '2026-07-28T00:00:00Z' },
+  { id: 'lead-bridge', organization_id: ORG_ID, first_name: 'Omar', last_name: 'Haddad', company_name: 'Bridgewater Retail', email: 'omar@bridgewater.co', phone: '555-0602', source: 'Referral', status: 'working', owner_id: 'usr-riley', is_converted: false, created_at: '2026-07-25T00:00:00Z', updated_at: '2026-07-26T00:00:00Z' },
+  { id: 'lead-vertex', organization_id: ORG_ID, first_name: 'Priya', last_name: 'Raman', company_name: 'Vertex Logistics', email: 'priya@vertexlogistics.com', phone: '555-0603', source: 'Trade Show', status: 'nurturing', owner_id: 'usr-riley', is_converted: false, created_at: '2026-07-22T00:00:00Z', updated_at: '2026-07-27T00:00:00Z' },
+  { id: 'lead-lumen', organization_id: ORG_ID, first_name: 'Maya', last_name: 'Chen', company_name: 'Lumen Finance', email: 'maya@lumenfinance.com', phone: '555-0607', source: 'Cold Outreach', status: 'unqualified', owner_id: 'usr-casey', is_converted: false, created_at: '2026-07-15T00:00:00Z', updated_at: '2026-07-20T00:00:00Z' },
+  { id: 'lead-halcyon', organization_id: ORG_ID, first_name: 'Tom', last_name: 'Whitfield', company_name: 'Halcyon Media', email: 'tom@halcyon.media', phone: '555-0604', source: 'Cold Outreach', status: 'qualified', owner_id: 'usr-casey', is_converted: false, created_at: '2026-07-18T00:00:00Z', updated_at: '2026-07-29T00:00:00Z' },
+  { id: 'lead-archer', organization_id: ORG_ID, first_name: 'Sofia', last_name: 'Lindqvist', company_name: 'Archer Analytics', email: 'sofia@archeranalytics.com', phone: '555-0605', source: 'Website', status: 'qualified', owner_id: 'usr-morgan', is_converted: false, created_at: '2026-07-10T00:00:00Z', updated_at: '2026-07-12T00:00:00Z' },
+  { id: 'lead-pioneer', organization_id: ORG_ID, first_name: 'Leo', last_name: 'Fontaine', company_name: 'Pioneer Foods', email: 'leo@pioneerfoods.com', phone: '555-0606', source: 'Referral', status: 'converted', owner_id: 'usr-casey', is_converted: true, converted_account_id: 'acc-pioneer', converted_contact_id: 'con-leo', converted_at: '2026-07-05T00:00:00Z', created_at: '2026-06-20T00:00:00Z', updated_at: '2026-07-05T00:00:00Z' },
 ];
 
 // ─── Pipeline & Stages ───────────────────────────────
@@ -84,6 +98,7 @@ export const INITIAL_TASKS: Task[] = [
   { id: 'task-review-umbrella', organization_id: ORG_ID, title: 'Review Umbrella security requirements', type: 'todo', priority: 'medium', due_at: '2026-08-10T00:00:00Z', completed_at: '2026-07-30T00:00:00Z', assigned_to_id: 'usr-morgan', created_by_id: 'usr-morgan', contact_id: 'con-diana', deal_id: 'deal-umbrella-hipaa' },
   { id: 'task-onboard-startupx', organization_id: ORG_ID, title: 'Send onboarding docs to StartupX', type: 'email', priority: 'low', due_at: '2026-08-15T00:00:00Z', assigned_to_id: 'usr-riley', created_by_id: 'usr-riley', contact_id: 'con-fiona', deal_id: 'deal-startupx-pilot' },
   { id: 'task-overdue', organization_id: ORG_ID, title: 'Quarterly pipeline review', type: 'meeting', priority: 'high', due_at: '2026-07-25T09:00:00Z', assigned_to_id: 'usr-casey', created_by_id: 'usr-morgan' },
+  { id: 'task-call-halcyon', organization_id: ORG_ID, title: 'Discovery call with Halcyon Media', type: 'call', priority: 'high', due_at: '2026-08-03T15:00:00Z', assigned_to_id: 'usr-casey', created_by_id: 'usr-casey', lead_id: 'lead-halcyon' },
 ];
 
 // ─── Activities ──────────────────────────────────────
@@ -96,6 +111,28 @@ export const INITIAL_ACTIVITIES: Activity[] = [
   { id: 'act-meeting-1', organization_id: ORG_ID, type: 'meeting', title: 'Security review with Umbrella', body: 'Covered SOC2, HIPAA, and data residency requirements. Diana requested documentation.', outcome: 'follow-up', duration_seconds: 2700, user_id: 'usr-morgan', contact_id: 'con-diana', deal_id: 'deal-umbrella-hipaa', created_at: '2026-07-18T00:00:00Z' },
   { id: 'act-won-1', organization_id: ORG_ID, type: 'deal_closed', title: 'Acme Premium Support won!', body: 'Closed at $45k ARR.', user_id: 'usr-casey', deal_id: 'deal-acme-support', created_at: '2026-07-15T00:00:00Z' },
   { id: 'act-lost-1', organization_id: ORG_ID, type: 'deal_closed', title: 'Globex Legacy Migration lost', body: 'Lost due to budget constraints.', user_id: 'usr-riley', deal_id: 'deal-globex-old', created_at: '2026-06-30T00:00:00Z' },
+  { id: 'act-lead-halcyon', organization_id: ORG_ID, type: 'call', title: 'Intro call with Halcyon Media', body: 'Tom is evaluating a unified CRM. Interested in reporting capabilities.', outcome: 'connected', duration_seconds: 1500, user_id: 'usr-casey', lead_id: 'lead-halcyon', created_at: '2026-07-19T00:00:00Z' },
+  { id: 'act-lead-bridge', organization_id: ORG_ID, type: 'email_sent', title: 'Follow-up sent to Bridgewater', body: 'Sent pricing sheet after the trade show intro.', user_id: 'usr-riley', lead_id: 'lead-bridge', created_at: '2026-07-26T00:00:00Z' },
+  { id: 'act-lead-converted', organization_id: ORG_ID, type: 'lead_converted', title: 'Pioneer Foods converted', body: 'Lead converted to an account and contact.', user_id: 'usr-casey', lead_id: 'lead-pioneer', metadata: { account_id: 'acc-pioneer', contact_id: 'con-leo' }, created_at: '2026-07-05T00:00:00Z' },
+];
+
+// ─── Record Tasks (timeline sub-system) ──────────────
+
+export const INITIAL_RECORD_TASKS: RecordTask[] = [
+  { id: 'rt-acme-migrate', organization_id: ORG_ID, user_id: 'usr-casey', subject: 'Send SSO integration doc to Jane', description: 'Jane asked about SAML/SSO during the discovery call. Email the integration guide before Thursday.', due_date: '2026-08-04T00:00:00Z', associated_to_id: 'deal-acme-ent', created_at: '2026-07-28T00:00:00Z', updated_at: '2026-07-28T00:00:00Z' },
+  { id: 'rt-globex-pricing', organization_id: ORG_ID, user_id: 'usr-riley', subject: 'Draft pricing comparison for Globex', description: 'Prepare a side-by-side vs CompetitorX highlighting HIPAA compliance.', due_date: '2026-08-07T00:00:00Z', associated_to_id: 'deal-globex-saas', created_at: '2026-07-26T00:00:00Z', updated_at: '2026-07-26T00:00:00Z' },
+  { id: 'rt-umbrella-docs', organization_id: ORG_ID, user_id: 'usr-morgan', subject: 'Share SOC2 report with Diana', description: 'Security review follow-up — attach the SOC2 report and data residency sheet.', completed_at: '2026-07-30T00:00:00Z', associated_to_id: 'deal-umbrella-hipaa', created_at: '2026-07-19T00:00:00Z', updated_at: '2026-07-30T00:00:00Z' },
+  { id: 'rt-halcyon-demo', organization_id: ORG_ID, user_id: 'usr-casey', subject: 'Book product demo for Halcyon Media', description: 'Tom is ready to see reporting capabilities in action.', due_date: '2026-08-06T00:00:00Z', associated_to_id: 'lead-halcyon', created_at: '2026-07-30T00:00:00Z', updated_at: '2026-07-30T00:00:00Z' },
+  { id: 'rt-leo-renewal', organization_id: ORG_ID, user_id: 'usr-casey', subject: 'Check on Pioneer Foods expansion', description: 'Leo mentioned interest in a second territory. Warm up the conversation.', due_date: '2026-08-10T00:00:00Z', associated_to_id: 'con-leo', created_at: '2026-07-24T00:00:00Z', updated_at: '2026-07-24T00:00:00Z' },
+];
+
+// ─── Call Logs (timeline sub-system) ──────────────────
+
+export const INITIAL_CALL_LOGS: CallLog[] = [
+  { id: 'cl-acme-discovery', organization_id: ORG_ID, user_id: 'usr-casey', subject: 'Discovery call — Acme', description: 'Discussed enterprise licensing and SSO. Jane will loop in their security team.', associated_to_id: 'deal-acme-ent', created_at: '2026-07-20T00:00:00Z' },
+  { id: 'cl-globex-followup', organization_id: ORG_ID, user_id: 'usr-riley', subject: 'Follow-up call — Globex', description: 'Alice confirmed budget cycle ends in October. Demo scheduled.', associated_to_id: 'deal-globex-saas', created_at: '2026-07-23T00:00:00Z' },
+  { id: 'cl-halcyon-intro', organization_id: ORG_ID, user_id: 'usr-casey', subject: 'Intro call — Halcyon Media', description: 'Tom evaluating a unified CRM; keen on reporting. Left with a demo request.', associated_to_id: 'lead-halcyon', created_at: '2026-07-19T00:00:00Z' },
+  { id: 'cl-leo-checkin', organization_id: ORG_ID, user_id: 'usr-casey', subject: 'Check-in call — Leo Fontaine', description: 'Pioneer Foods very happy post-launch. Leo floated a second-territory expansion.', associated_to_id: 'con-leo', created_at: '2026-07-22T00:00:00Z' },
 ];
 
 // ─── Notifications ───────────────────────────────────

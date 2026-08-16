@@ -20,11 +20,12 @@ import {
   Sliders,
   ArrowRight,
   CornerDownLeft,
+  UserPlus,
 } from 'lucide-react';
 
 interface PaletteItem {
   id: string;
-  kind: 'nav' | 'contact' | 'account' | 'deal' | 'task';
+  kind: 'nav' | 'contact' | 'account' | 'lead' | 'deal' | 'task';
   title: string;
   subtitle?: string;
   icon: React.ReactNode;
@@ -35,7 +36,8 @@ const kindLabels: Record<string, string> = {
   nav: 'Navigation',
   contact: 'Contacts',
   account: 'Accounts',
-  deal: 'Deals',
+  lead: 'Leads',
+  deal: 'Opportunities',
   task: 'Tasks',
 };
 
@@ -45,6 +47,7 @@ export default function CommandPalette() {
     setActiveModule,
     getScopedContacts,
     getScopedAccounts,
+    getScopedLeads,
     getScopedDeals,
     getScopedTasks,
   } = useCRM();
@@ -87,8 +90,10 @@ export default function CommandPalette() {
 
     const navItems: PaletteItem[] = [
       { id: 'nav-dashboard', kind: 'nav', title: 'Go to Reports & Dashboards', icon: <LayoutDashboard className="w-4 h-4" />, run: () => { setActiveModule('dashboard'); close(); } },
-      { id: 'nav-contacts', kind: 'nav', title: 'Go to Contacts & Accounts', icon: <User className="w-4 h-4" />, run: () => { setActiveModule('contacts'); close(); } },
-      { id: 'nav-deals', kind: 'nav', title: 'Go to Sales Pipeline', icon: <Briefcase className="w-4 h-4" />, run: () => { setActiveModule('deals'); close(); } },
+      { id: 'nav-accounts', kind: 'nav', title: 'Go to Accounts', icon: <Building2 className="w-4 h-4" />, run: () => { setActiveModule('accounts'); close(); } },
+      { id: 'nav-contacts', kind: 'nav', title: 'Go to Contacts', icon: <User className="w-4 h-4" />, run: () => { setActiveModule('contacts'); close(); } },
+      { id: 'nav-leads', kind: 'nav', title: 'Go to Leads', icon: <UserPlus className="w-4 h-4" />, run: () => { setActiveModule('leads'); close(); } },
+      { id: 'nav-deals', kind: 'nav', title: 'Go to Opportunities', icon: <Briefcase className="w-4 h-4" />, run: () => { setActiveModule('deals'); close(); } },
       { id: 'nav-tasks', kind: 'nav', title: 'Go to Tasks & Activities', icon: <CheckSquare className="w-4 h-4" />, run: () => { setActiveModule('tasks'); close(); } },
       { id: 'nav-emails', kind: 'nav', title: 'Go to Email & Comms', icon: <Mail className="w-4 h-4" />, run: () => { setActiveModule('emails'); close(); } },
       ...([UserRole.SUPER_ADMIN, UserRole.ADMIN].includes(currentUser.role)
@@ -125,7 +130,20 @@ export default function CommandPalette() {
         title: a.name,
         subtitle: `${a.industry || 'Account'} · ${a.domain}`,
         icon: <Building2 className="w-4 h-4" />,
-        run: () => { setActiveModule('contacts'); close(); },
+        run: () => { setActiveModule('accounts'); close(); },
+      }));
+
+    const leads = getScopedLeads()
+      .filter(l => !l.is_converted)
+      .filter(l => l.first_name.toLowerCase().includes(q) || l.last_name.toLowerCase().includes(q) || `${l.first_name} ${l.last_name}`.toLowerCase().includes(q) || l.company_name.toLowerCase().includes(q) || l.email.toLowerCase().includes(q))
+      .slice(0, 5)
+      .map<PaletteItem>(l => ({
+        id: `lead-${l.id}`,
+        kind: 'lead',
+        title: `${l.first_name} ${l.last_name}`,
+        subtitle: `${l.company_name} · ${l.status}`,
+        icon: <UserPlus className="w-4 h-4" />,
+        run: () => { setActiveModule('leads'); close(); },
       }));
 
     const deals = getScopedDeals()
@@ -152,8 +170,8 @@ export default function CommandPalette() {
         run: () => { setActiveModule('tasks'); close(); },
       }));
 
-    return [...matchNav, ...contacts, ...accounts, ...deals, ...tasks];
-  }, [open, query, currentUser.role, getScopedContacts, getScopedAccounts, getScopedDeals, getScopedTasks, setActiveModule, close]);
+    return [...matchNav, ...contacts, ...accounts, ...leads, ...deals, ...tasks];
+  }, [open, query, currentUser.role, getScopedContacts, getScopedAccounts, getScopedLeads, getScopedDeals, getScopedTasks, setActiveModule, close]);
 
   // Keep selection in bounds
   useEffect(() => { setSelected(0); }, [query]);
@@ -204,7 +222,7 @@ export default function CommandPalette() {
             value={query}
             onChange={e => setQuery(e.target.value)}
             onKeyDown={onInputKeyDown}
-            placeholder="Search contacts, accounts, deals, tasks…"
+            placeholder="Search contacts, accounts, leads, opportunities, tasks…"
             className="w-full bg-transparent text-sm text-theme-primary placeholder:text-theme-secondary/60 py-3.5 outline-none font-sans"
             aria-label="Search"
             role="combobox"

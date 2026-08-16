@@ -11,6 +11,7 @@ import { FieldRow } from './ui/RecordDetailPage';
 import { DataTable, type DataTableColumn } from './ui/DataTable';
 import { useSavedViews, ViewSwitcher, type SavedView } from './ui/SavedViews';
 import KanbanBoard from './ui/KanbanBoard';
+import TimelinePanel from './ui/TimelinePanel';
 import { NEW_RECORD_EVENT, SELECT_ENTITY_EVENT, type SelectEntityDetail } from './GlobalShortcuts';
 import { exportCsv } from '../utils/exportCsv';
 import { relativeDueLabel, formatDateTime } from '../utils/time';
@@ -91,7 +92,6 @@ export default function PipelineModule() {
     customFields,
     activePipelineId,
     setActivePipelineId,
-    activities,
     tasks,
     contacts,
     uploadFile,
@@ -527,7 +527,6 @@ export default function PipelineModule() {
       const dealAccount = accounts.find(a => a.id === deal.account_id);
       const dealOwner = users.find(u => u.id === deal.owner_id);
       const dealStage = stages.find(s => s.id === deal.stage_id);
-      const dealActivities = activities.filter(a => a.deal_id === deal.id);
       const dealScore = scoreMap.get(deal.id);
       const relatedTasks = tasks.filter(t => t.deal_id === deal.id);
       const relatedContacts = deal.account_id
@@ -544,11 +543,11 @@ export default function PipelineModule() {
           }}
           onBack={() => setFullDealDetail(null)}
           users={users}
-          activities={dealActivities}
+          timeline={<TimelinePanel entityType="deal" entityId={deal.id} readOnly={isReadOnly} />}
           highlightsPanel={
             <div>
               <div className="flex items-center justify-between mb-1">
-                <span className="text-2xs text-theme-secondary font-sans">Deal Value</span>
+                <span className="text-2xs text-theme-secondary font-sans">Opportunity Value</span>
                 <span className="text-base font-bold text-theme-primary tnum" data-metric>${deal.value.toLocaleString()}</span>
               </div>
               <div className="h-1.5 bg-theme-inset rounded-full overflow-hidden mt-1 mb-3">
@@ -709,7 +708,7 @@ export default function PipelineModule() {
                 className="bg-transparent text-sm font-semibold text-theme-primary focus:outline-none cursor-pointer border border-transparent hover:border-theme-border rounded-md px-1.5 py-0.5 min-w-0 max-w-[180px] truncate"
               >
                 {pipelines.map(p => (
-                  <option key={p.id} value={p.id} className="bg-theme-card text-theme-primary">{p.name} Pipeline</option>
+                  <option key={p.id} value={p.id} className="bg-theme-card text-theme-primary">{p.name}</option>
                 ))}
               </select>
             </div>
@@ -730,7 +729,7 @@ export default function PipelineModule() {
                 className={`p-1.5 rounded-md cursor-pointer transition-colors ${
                   viewType === 'list' ? 'bg-theme-card text-theme-primary shadow-card' : 'text-theme-secondary hover:text-theme-primary'
                 }`}
-                title="Deals Grid"
+                title="Opportunities Grid"
               >
                 <List className="w-3.5 h-3.5" />
               </button>
@@ -752,7 +751,7 @@ export default function PipelineModule() {
               <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-theme-secondary pointer-events-none" />
               <input
                 type="text"
-                placeholder="Search deals…"
+                placeholder="Search opportunities…"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 className="w-full h-9 bg-theme-card text-theme-primary border border-theme-border rounded-lg !pl-9 pr-3 text-sm focus:ring-2 focus:ring-theme-accent/10 focus:border-theme-accent focus:outline-none placeholder:text-theme-secondary/50"
@@ -783,7 +782,7 @@ export default function PipelineModule() {
                 onClick={() => setShowCreateDeal(true)}
                 className="bg-theme-accent hover:bg-theme-accent-strong text-white px-3 h-9 rounded-lg flex items-center gap-1 text-xs font-semibold transition-colors shadow-card shrink-0 cursor-pointer"
               >
-                <Plus className="w-3.5 h-3.5" /> Deal
+                <Plus className="w-3.5 h-3.5" /> Opportunity
               </button>
             )}
           </div>
@@ -912,14 +911,14 @@ export default function PipelineModule() {
           <div className="flex-1 flex flex-col overflow-hidden bg-theme-base">
             <div className="flex items-center justify-between px-4 pt-3 pb-2 shrink-0">
               <p className="text-xs text-theme-secondary font-sans">
-                {filteredDeals.length} deal{filteredDeals.length === 1 ? '' : 's'} ·{' '}
+                {filteredDeals.length} opportunity{filteredDeals.length === 1 ? '' : 's'} ·{' '}
                 <span className="font-medium text-theme-primary">${filteredDeals.reduce((s, d) => s + d.value, 0).toLocaleString()}</span> open pipeline
               </p>
               <button
                 onClick={handleExportDeals}
                 disabled={filteredDeals.length === 0}
                 className="flex items-center gap-1.5 text-[11px] font-medium text-theme-secondary hover:text-theme-primary border border-theme-border rounded-md px-2.5 py-1.5 hover:bg-theme-hover transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed bg-theme-card"
-                aria-label="Export deals to CSV"
+                aria-label="Export opportunities to CSV"
               >
                 <Download className="w-3.5 h-3.5" /> Export CSV
               </button>
@@ -932,7 +931,7 @@ export default function PipelineModule() {
                 showDensityToggle
                 emptyState={
                   <div className="bg-theme-card border border-theme-border rounded-[10px] p-10 text-center text-xs text-theme-secondary font-sans">
-                    No deals match the current filters.
+                    No opportunities match the current filters.
                   </div>
                 }
                 columns={[
@@ -1070,8 +1069,8 @@ export default function PipelineModule() {
               {filteredDeals.length === 0 ? (
                 <div className="text-center py-8 text-xs text-theme-secondary/70 font-sans">
                   <TrendingUp className="w-10 h-10 mx-auto mb-3 text-theme-secondary/30" />
-                  <p className="font-semibold text-theme-secondary">No deals to forecast</p>
-                  <p className="mt-1">Forecast data will populate once deals are created in the pipeline.</p>
+                  <p className="font-semibold text-theme-secondary">No opportunities to forecast</p>
+                  <p className="mt-1">Forecast data will populate once opportunities are created in the pipeline.</p>
                 </div>
               ) : (
                 forecastMonths.map(month => {
@@ -1187,8 +1186,8 @@ export default function PipelineModule() {
               {/* Core Attributes */}
               <div className="grid grid-cols-3 gap-4 mt-5 pt-4 border-t border-theme-border text-[11px] text-theme-secondary font-sans">
                 <div>
-                  <span className="text-theme-secondary/80 block font-sans text-[9px] uppercase tracking-wider font-semibold">Deal Value</span>
-                   <span className="text-sm font-semibold tnum text-theme-primary font-sans">${activeDeal.value.toLocaleString()}</span>
+                  <span className="text-theme-secondary/80 block font-sans text-[9px] uppercase tracking-wider font-semibold">Opportunity Value</span>
+                  <span className="text-sm font-semibold tnum text-theme-primary font-sans">${activeDeal.value.toLocaleString()}</span>
                 </div>
                 <div>
                   <span className="text-theme-secondary/80 block font-sans text-[9px] uppercase tracking-wider font-semibold">Pipeline Stage</span>
@@ -1223,7 +1222,7 @@ export default function PipelineModule() {
               {/* Stage Transition Control Bar */}
               {!isReadOnly && (
                 <div className="mt-5 bg-theme-base/50 p-2.5 rounded-lg border border-theme-border flex items-center justify-between gap-1 text-[11px]">
-                  <span className="font-semibold text-theme-secondary">Change Deal State:</span>
+                  <span className="font-semibold text-theme-secondary">Change Opportunity State:</span>
                   <div className="flex gap-1.5">
                     <button
                       onClick={() => triggerCloseDeal('won')}
@@ -1528,7 +1527,7 @@ export default function PipelineModule() {
         <div className="fixed inset-0 z-[90] flex items-center justify-center p-4 bg-theme-primary/60 backdrop-blur-[2px] animate-fade-in">
           <div className="bg-theme-card rounded-xl shadow-overlay border border-theme-border w-full max-w-lg overflow-hidden flex flex-col max-h-[85vh] animate-overlay-in">
             <header className="bg-theme-inset px-5 py-4 border-b border-theme-border flex justify-between items-center shrink-0">
-              <h3 className="text-sm font-bold text-theme-primary">Provision New Opportunity (Deal)</h3>
+              <h3 className="text-sm font-bold text-theme-primary">Provision New Opportunity</h3>
               <button onClick={() => setShowCreateDeal(false)} className="text-theme-secondary hover:text-theme-primary font-bold text-xs cursor-pointer bg-transparent border-none">✕</button>
             </header>
             <form onSubmit={handleCreateDealSubmit} className="p-5 space-y-4 text-xs text-left overflow-y-auto">
@@ -1699,9 +1698,9 @@ export default function PipelineModule() {
           }
           setConfirmDeleteDealId(null);
         }}
-        title="Delete deal?"
-        body="This permanently removes the deal and its history from the pipeline. This action cannot be undone."
-        confirmLabel="Delete deal"
+        title="Delete opportunity?"
+        body="This permanently removes the opportunity and its history from the pipeline. This action cannot be undone."
+        confirmLabel="Delete opportunity"
       />
 
     </div>

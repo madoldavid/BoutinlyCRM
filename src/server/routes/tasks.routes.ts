@@ -30,7 +30,7 @@ export function registerTasksRoutes(
     const scoped = scopeSnapshot({
       users,
       tasks,
-      accounts: [], contacts: [], deals: [], pipelines: [], stages: [], activities: [],
+      accounts: [], contacts: [], leads: [], deals: [], pipelines: [], stages: [], activities: [],
       notifications: [], customFields: [], emailTemplates: [], emailCampaigns: [], auditLogs: [],
     }, req.principal);
 

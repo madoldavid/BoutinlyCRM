@@ -8,6 +8,8 @@ import {
   INITIAL_TASKS,
   INITIAL_TEMPLATES,
   INITIAL_USERS,
+  INITIAL_RECORD_TASKS,
+  INITIAL_CALL_LOGS,
 } from '../../initialData.js';
 import { hashPassword } from '../security/password.js';
 import { getClient, setOrganizationContext, type DbConfig } from './connection.js';
@@ -120,6 +122,24 @@ export async function seedDatabase(
         `INSERT INTO tasks (id, organization_id, assigned_to_id, created_by_id, contact_id, deal_id, title, type, priority, due_at)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
         [task.id, orgId, task.assigned_to_id, task.created_by_id, task.contact_id || null, task.deal_id || null, task.title, task.type, task.priority, task.due_at],
+      );
+    }
+
+    // Insert record tasks (activity timeline sub-system)
+    for (const recordTask of INITIAL_RECORD_TASKS) {
+      await client.query(
+        `INSERT INTO record_tasks (id, organization_id, user_id, subject, description, due_date, associated_to_id, completed_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+        [recordTask.id, orgId, recordTask.user_id, recordTask.subject, recordTask.description, recordTask.due_date || null, recordTask.associated_to_id, recordTask.completed_at || null],
+      );
+    }
+
+    // Insert call logs (activity timeline sub-system)
+    for (const callLog of INITIAL_CALL_LOGS) {
+      await client.query(
+        `INSERT INTO call_logs (id, organization_id, user_id, subject, description, due_date, associated_to_id)
+         VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+        [callLog.id, orgId, callLog.user_id, callLog.subject, callLog.description, callLog.due_date || null, callLog.associated_to_id],
       );
     }
 
