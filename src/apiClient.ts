@@ -11,10 +11,13 @@ import type {
   EmailCampaign,
   EmailTemplate,
   FieldPermission,
+  Lead,
   Notification,
   OrgSecurityPolicy,
   Pipeline,
   Quota,
+  RecordTask,
+  CallLog,
   Stage,
   Task,
   User,
@@ -29,11 +32,14 @@ export interface CrmBootstrapResponse {
   users: User[];
   accounts: Account[];
   contacts: Contact[];
+  leads: Lead[];
   pipelines: Pipeline[];
   stages: Stage[];
   deals: Deal[];
   tasks: Task[];
   activities: Activity[];
+  recordTasks: RecordTask[];
+  callLogs: CallLog[];
   notifications: Notification[];
   customFields: CustomFieldDefinition[];
   emailTemplates: EmailTemplate[];
@@ -105,6 +111,15 @@ function getCsrfToken(): string | null {
 
 // ─── Token management ──────────────────────────────────
 
+/** Dispatched when the session is unrecoverable (refresh failed / tokens cleared) so the UI can route to login. */
+export const SESSION_EXPIRED_EVENT = 'boutinly:session-expired';
+
+function notifySessionExpired() {
+  try {
+    window.dispatchEvent(new CustomEvent(SESSION_EXPIRED_EVENT));
+  } catch { /* non-browser environment */ }
+}
+
 const TOKEN_KEY = 'boutinly_token';
 const REFRESH_KEY = 'boutinly_refresh_token';
 const USER_KEY = 'boutinly_current_user';
@@ -154,6 +169,8 @@ function setStoredUser(userJson: string | null) {
 
 export class ApiClient {
   private refreshToken: string | null = getStoredRefreshToken();
+  /** Single-flight guard: only one refresh runs at a time, all waiters share its result. */
+  private refreshPromise: Promise<RefreshResponse> | null = null;
 
   constructor(
     private readonly baseUrl = runtimeConfig.apiUrl,
@@ -258,8 +275,8 @@ export class ApiClient {
     }, false);
   }
 
-  async refresh() {
-    if (!this.refreshToken) throw new Error('No refresh token');
+  private async doRefresh(): Promise<RefreshResponse> {
+    if (!this.refreshToken) throw new ApiError(401, 'No refresh token available.', 'missing_token');
     const res = await this.request<RefreshResponse>('/api/auth/refresh', {
       method: 'POST',
       body: JSON.stringify({ refreshToken: this.refreshToken }),
@@ -267,6 +284,45 @@ export class ApiClient {
     this.setToken(res.token);
     this.setRefreshToken(res.refresh_token);
     return res;
+  }
+
+  /** Refreshes the access token. Concurrent callers share a single request
+   *  (the server rotates the refresh token, so parallel refreshes would
+   *  otherwise invalidate each other). */
+  async refresh(): Promise<RefreshResponse> {
+    if (this.refreshPromise) return this.refreshPromise;
+    this.refreshPromise = this.doRefresh().catch((e) => {
+      if (e instanceof ApiError && e.status === 401) {
+        this.clearSession();
+        notifySessionExpired();
+      }
+      throw e;
+    }).finally(() => { this.refreshPromise = null; });
+    return this.refreshPromise;
+  }
+
+  /** Drops all local session credentials (access + refresh + cached user). */
+  private clearSession() {
+    this.token = null;
+    this.refreshToken = null;
+    setStoredToken(null);
+    setStoredRefreshToken(null);
+    setStoredUser(null);
+  }
+
+  /** Returns headers for an authenticated request, refreshing the access token
+   *  first if needed so we never hit the server token-less. Throws a clear
+   *  session error when there is nothing left to authenticate with. */
+  private async ensureAuthHeaders(headers: Record<string, string> = {}): Promise<Record<string, string>> {
+    if (!this.token) {
+      if (!this.refreshToken) {
+        notifySessionExpired();
+        throw new ApiError(401, 'Your session has expired. Please sign in again.', 'session_expired');
+      }
+      await this.refresh();
+    }
+    if (this.token) headers['Authorization'] = `Bearer ${this.token}`;
+    return headers;
   }
 
   async getOidcProviders(): Promise<Array<{ id: string; name: string }>> {
@@ -326,11 +382,14 @@ export class ApiClient {
       users: () => this.listUsers(),
       accounts: () => this.fetchAllPages(p => this.listAccounts(p)),
       contacts: () => this.fetchAllPages(p => this.listContacts(p)),
+      leads: () => this.fetchAllPages(p => this.listLeads(p)),
       pipelines: () => this.listPipelines(),
       stages: () => this.listStages(),
       deals: () => this.fetchAllPages(p => this.listDeals(p)),
       tasks: () => this.fetchAllPages(p => this.listTasks(p)),
       activities: () => this.fetchAllPages(p => this.listActivities(p)),
+      recordTasks: () => this.fetchAllPages(p => this.listRecordTasks(p)),
+      callLogs: () => this.fetchAllPages(p => this.listCallLogs(p)),
       notifications: () => this.listNotifications(),
       customFields: () => this.listCustomFields(),
       emailTemplates: () => this.listEmailTemplates(),
@@ -473,6 +532,41 @@ export class ApiClient {
     return res.deal;
   }
 
+  // ─── Leads ──────────────────────────────────────────
+
+  async listLeads(params?: { status?: string; owner_id?: string; page?: number; limit?: number }) {
+    const res = await this.request<{ leads: Lead[]; total: number; page: number; limit: number }>(
+      '/api/leads' + this.toQuery(params),
+    );
+    return { data: res.leads, total: res.total, page: res.page, limit: res.limit } as PaginatedResponse<Lead>;
+  }
+
+  async getLead(id: string): Promise<Lead> {
+    const res = await this.request<{ lead: Lead }>(`/api/leads/${id}`);
+    return res.lead;
+  }
+
+  async createLead(data: Record<string, unknown>): Promise<Lead> {
+    const res = await this.request<{ lead: Lead }>('/api/leads', { method: 'POST', body: JSON.stringify(data) });
+    return res.lead;
+  }
+
+  async updateLead(id: string, data: Record<string, unknown>): Promise<Lead> {
+    const res = await this.request<{ lead: Lead }>(`/api/leads/${id}`, { method: 'PUT', body: JSON.stringify(data) });
+    return res.lead;
+  }
+
+  async deleteLead(id: string): Promise<void> {
+    await this.request<void>(`/api/leads/${id}`, { method: 'DELETE' });
+  }
+
+  async convertLead(id: string, data: Record<string, unknown>): Promise<{ lead: Lead; account?: Account; contact?: Contact; opportunity?: Deal }> {
+    return this.request<{ lead: Lead; account?: Account; contact?: Contact; opportunity?: Deal }>(`/api/leads/${id}/convert`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
   // ─── Bulk operations ────────────────────────────────
 
   async bulkUpdateContacts(ids: string[], patch: Record<string, unknown>): Promise<{ updated: number }> {
@@ -537,6 +631,41 @@ export class ApiClient {
   async createActivity(data: Record<string, unknown>): Promise<Activity> {
     const res = await this.request<{ activity: Activity }>('/api/activities', { method: 'POST', body: JSON.stringify(data) });
     return res.activity;
+  }
+
+  // ─── Activity Timeline sub-system (record tasks + call logs) ───
+
+  async listRecordTasks(params?: { associated_to_id?: string; page?: number; limit?: number }) {
+    const res = await this.request<{ recordTasks: RecordTask[]; total: number; page: number; limit: number }>(
+      '/api/record-tasks' + this.toQuery(params),
+    );
+    return { data: res.recordTasks, total: res.total, page: res.page, limit: res.limit } as PaginatedResponse<RecordTask>;
+  }
+
+  async createRecordTask(data: Record<string, unknown>): Promise<RecordTask> {
+    const res = await this.request<{ recordTask: RecordTask }>('/api/record-tasks', { method: 'POST', body: JSON.stringify(data) });
+    return res.recordTask;
+  }
+
+  async updateRecordTask(id: string, data: Record<string, unknown>): Promise<RecordTask> {
+    const res = await this.request<{ recordTask: RecordTask }>(`/api/record-tasks/${id}`, { method: 'PATCH', body: JSON.stringify(data) });
+    return res.recordTask;
+  }
+
+  async deleteRecordTask(id: string): Promise<void> {
+    await this.request<void>(`/api/record-tasks/${id}`, { method: 'DELETE' });
+  }
+
+  async listCallLogs(params?: { associated_to_id?: string; page?: number; limit?: number }) {
+    const res = await this.request<{ callLogs: CallLog[]; total: number; page: number; limit: number }>(
+      '/api/call-logs' + this.toQuery(params),
+    );
+    return { data: res.callLogs, total: res.total, page: res.page, limit: res.limit } as PaginatedResponse<CallLog>;
+  }
+
+  async createCallLog(data: Record<string, unknown>): Promise<CallLog> {
+    const res = await this.request<{ callLog: CallLog }>('/api/call-logs', { method: 'POST', body: JSON.stringify(data) });
+    return res.callLog;
   }
 
   // ─── Notifications ─────────────────────────────────
@@ -751,9 +880,29 @@ export class ApiClient {
   // ─── Audit log export ──────────────────────────────
 
   async exportAuditLogs(format: 'json' | 'csv'): Promise<Blob> {
+<<<<<<< HEAD
     const headers: Record<string, string> = {};
     if (this.token) headers['Authorization'] = `Bearer ${this.token}`;
     const response = await fetch(`${this.baseUrl}/api/audit-logs/export?format=${format}`, { headers, credentials: 'include' });
+=======
+    const headers = await this.ensureAuthHeaders();
+    let response = await fetch(`${this.baseUrl}/api/audit-logs/export?format=${format}`, { headers });
+
+    if (response.status === 401 && this.refreshToken) {
+      try {
+        await this.refresh();
+        headers['Authorization'] = `Bearer ${this.token}`;
+        response = await fetch(`${this.baseUrl}/api/audit-logs/export?format=${format}`, { headers });
+      } catch (e) {
+        if (e instanceof ApiError && e.status === 401) {
+          this.clearSession();
+          notifySessionExpired();
+        }
+        throw e;
+      }
+    }
+
+>>>>>>> 41b4c3ae4ad66e243403374fe02d576454752884
     if (!response.ok) {
       const payload = await response.json().catch(() => null);
       throw new ApiError(response.status, payload?.error?.message || 'Export failed', payload?.error?.code);
@@ -898,8 +1047,7 @@ export class ApiClient {
   }
 
   async downloadFile(id: string): Promise<Blob> {
-    const headers: Record<string, string> = {};
-    if (this.token) headers['Authorization'] = `Bearer ${this.token}`;
+    const headers = await this.ensureAuthHeaders();
 
     let response = await fetch(`${this.baseUrl}/api/files/${id}`, { headers, credentials: 'include' });
 
@@ -910,9 +1058,8 @@ export class ApiClient {
         response = await fetch(`${this.baseUrl}/api/files/${id}`, { headers, credentials: 'include' });
       } catch (e) {
         if (e instanceof ApiError && e.status === 401) {
-          this.setToken(null);
-          this.setRefreshToken(null);
-          setStoredUser(null);
+          this.clearSession();
+          notifySessionExpired();
         }
         throw e;
       }
@@ -1101,8 +1248,18 @@ export class ApiClient {
       'Content-Type': 'application/json',
     };
 
-    if (authenticated && this.token) {
-      headers['Authorization'] = `Bearer ${this.token}`;
+    // Authenticated calls must carry a token. Refresh first if the access
+    // token is missing so we never send a header-less request (which the
+    // server rejects as "Missing bearer token").
+    if (authenticated) {
+      try {
+        await this.ensureAuthHeaders(headers);
+      } catch (e) {
+        if (e instanceof ApiError && e.status === 401) {
+          notifySessionExpired();
+        }
+        throw e;
+      }
     }
 
     // Add CSRF token for mutating methods
@@ -1156,9 +1313,8 @@ export class ApiClient {
         return retryResponse.json() as Promise<T>;
       } catch (e) {
         if (e instanceof ApiError && e.status === 401) {
-          this.setToken(null);
-          this.setRefreshToken(null);
-          setStoredUser(null);
+          this.clearSession();
+          notifySessionExpired();
         }
         throw e;
       }

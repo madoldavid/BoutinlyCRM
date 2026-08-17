@@ -15,13 +15,15 @@ import ThemeSwitcher, { getStoredTheme, applyTheme } from './components/ThemeSwi
 import {
   ShieldAlert, Loader2, WifiOff, Search, Menu, Plus, HelpCircle,
   LayoutDashboard, Users, Briefcase, CheckSquare, Mail, Sliders,
-  ChevronDown, LogOut, Settings,
+  ChevronDown, LogOut, Settings, Building2, UserPlus,
 } from 'lucide-react';
 import { UserRole } from './types';
 import { useFeatureFlag } from './utils/featureFlags';
 
 const ReportsModule = React.lazy(() => import('./components/ReportsModule'));
 const ContactsModule = React.lazy(() => import('./components/ContactsModule'));
+const AccountsModule = React.lazy(() => import('./components/AccountsModule'));
+const LeadsModule = React.lazy(() => import('./components/LeadsModule'));
 const PipelineModule = React.lazy(() => import('./components/PipelineModule'));
 const TasksModule = React.lazy(() => import('./components/TasksModule'));
 const EmailsModule = React.lazy(() => import('./components/EmailsModule'));
@@ -199,8 +201,12 @@ function DashboardLayout() {
     switch (activeModule) {
       case 'dashboard':
         return <ReportsModule />;
+      case 'accounts':
+        return <AccountsModule />;
       case 'contacts':
         return <ContactsModule />;
+      case 'leads':
+        return <LeadsModule />;
       case 'deals':
         return <PipelineModule />;
       case 'tasks':
@@ -216,8 +222,10 @@ function DashboardLayout() {
 
   const enterpriseTabs = [
     { id: 'dashboard', label: 'Dashboards', icon: LayoutDashboard },
+    { id: 'accounts', label: 'Accounts', icon: Building2 },
     { id: 'contacts', label: 'Contacts', icon: Users },
-    { id: 'deals', label: 'Pipeline', icon: Briefcase },
+    { id: 'leads', label: 'Leads', icon: UserPlus },
+    { id: 'deals', label: 'Opportunities', icon: Briefcase },
     { id: 'tasks', label: 'Tasks', icon: CheckSquare },
     ...(emailModuleEnabled ? [{ id: 'emails' as const, label: 'Email', icon: Mail }] : []),
     ...(currentUser?.role === UserRole.SUPER_ADMIN || currentUser?.role === UserRole.ADMIN

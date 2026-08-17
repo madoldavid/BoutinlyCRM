@@ -55,6 +55,7 @@ export interface Contact {
   custom_fields: Record<string, any>;
   unsubscribed: boolean;
   created_at: string;
+  updated_at?: string;
 }
 
 export interface Account {
@@ -71,6 +72,31 @@ export interface Account {
   tags: string[];
   custom_fields: Record<string, any>;
   created_at: string;
+  updated_at?: string;
+}
+
+export type LeadStatus = 'new' | 'working' | 'nurturing' | 'qualified' | 'unqualified' | 'converted';
+
+export interface Lead {
+  id: string;
+  organization_id?: string;
+  /** Lead name — usually the prospective contact's name. */
+  first_name: string;
+  last_name: string;
+  /** Company the lead represents (free-text, not linked to Accounts yet). */
+  company_name: string;
+  email: string;
+  phone?: string;
+  source?: string;
+  status: LeadStatus;
+  owner_id: string; // Assigned User ID
+  /** Archived flag — converted leads are never deleted, only marked. */
+  is_converted: boolean;
+  converted_account_id?: string;
+  converted_contact_id?: string;
+  converted_at?: string;
+  created_at: string;
+  updated_at?: string;
 }
 
 export type ForecastCategory = 'pipeline' | 'best_case' | 'commit' | 'omitted' | 'closed';
@@ -136,13 +162,49 @@ export interface Task {
   created_by_id: string;
   contact_id?: string;
   deal_id?: string;
+  lead_id?: string;
   recurrence_rule?: string;
+}
+
+/**
+ * A lightweight to-do item attached to a lead, contact, or opportunity via a
+ * polymorphic `associated_to_id` (no hard FK — the id may point at any of the
+ * three entity tables). Part of the Activity Timeline sub-system.
+ */
+export interface RecordTask {
+  id: string;
+  organization_id?: string;
+  user_id: string; // who created the to-do
+  subject: string;
+  description: string;
+  due_date?: string;
+  /** Polymorphic link: lead | contact | deal id */
+  associated_to_id: string;
+  completed_at?: string;
+  created_at: string;
+  updated_at?: string;
+}
+
+/**
+ * A historical call note attached to a lead, contact, or opportunity via a
+ * polymorphic `associated_to_id`. Part of the Activity Timeline sub-system.
+ */
+export interface CallLog {
+  id: string;
+  organization_id?: string;
+  user_id: string; // who logged the call
+  subject: string;
+  description: string;
+  due_date?: string;
+  /** Polymorphic link: lead | contact | deal id */
+  associated_to_id: string;
+  created_at: string;
 }
 
 export interface Activity {
   id: string;
   organization_id?: string;
-  type: 'call' | 'meeting' | 'email_sent' | 'note' | 'stage_change' | 'task_completed' | 'file_uploaded' | 'deal_closed';
+  type: 'call' | 'meeting' | 'email_sent' | 'note' | 'stage_change' | 'task_completed' | 'file_uploaded' | 'deal_closed' | 'lead_converted';
   title: string;
   body: string;
   outcome?: string; // e.g., 'connected', 'voicemail', etc.
@@ -150,6 +212,7 @@ export interface Activity {
   user_id: string;
   contact_id?: string;
   deal_id?: string;
+  lead_id?: string;
   task_id?: string;
   metadata?: Record<string, any>;
   created_at: string;

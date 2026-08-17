@@ -31,7 +31,7 @@ export const OPEN_NOTIFICATIONS_EVENT = 'boutinly:open-notifications';
 const PREFS_KEY = 'boutinly_notif_prefs';
 
 const TYPE_META: Record<string, { label: string; icon: React.ReactNode }> = {
-  deal: { label: 'Deals', icon: <Briefcase className="w-3.5 h-3.5" /> },
+  deal: { label: 'Opportunities', icon: <Briefcase className="w-3.5 h-3.5" /> },
   task: { label: 'Tasks', icon: <CalendarClock className="w-3.5 h-3.5" /> },
   contact: { label: 'Contacts', icon: <User className="w-3.5 h-3.5" /> },
   email: { label: 'Email', icon: <Mail className="w-3.5 h-3.5" /> },

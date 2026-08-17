@@ -213,9 +213,28 @@ describe('Boutinly CRM API', () => {
       .set('Authorization', `Bearer ${token}`)
       .send({ first_name: 'J', last_name: 'D', email: 'j@x.com', account_id: acct.body.account.id, owner_id: userId })
       .expect(201);
+    expect(c.body.contact.updated_at).toBeTruthy();
     const u = await request(h.app).put(`/api/contacts/${c.body.contact.id}`)
       .set('Authorization', `Bearer ${token}`).send({ title: 'CTO' }).expect(200);
     expect(u.body.contact.title).toBe('CTO');
+  });
+
+  it('tracks updated_at when a contact is edited', async () => {
+    const { token, userId } = await h.signup('A', 'a@t.com', 'ChangeMe123!', 'TC');
+    const acct = await request(h.app).post('/api/accounts')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ name: 'Acme', owner_id: userId }).expect(201);
+    const c = await request(h.app).post('/api/contacts')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ first_name: 'J', last_name: 'D', email: 'j@x.com', account_id: acct.body.account.id, owner_id: userId })
+      .expect(201);
+    const created = new Date(c.body.contact.updated_at).getTime();
+
+    const u = await request(h.app).put(`/api/contacts/${c.body.contact.id}`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ title: 'CTO' }).expect(200);
+    expect(u.body.contact.title).toBe('CTO');
+    expect(new Date(u.body.contact.updated_at).getTime()).toBeGreaterThanOrEqual(created);
   });
 
   it('deletes a contact', async () => {
@@ -238,9 +257,24 @@ describe('Boutinly CRM API', () => {
       .set('Authorization', `Bearer ${token}`)
       .send({ name: 'Acme Corp', owner_id: userId }).expect(201);
     expect(r.body.account.name).toBe('Acme Corp');
+    expect(r.body.account.updated_at).toBeTruthy();
     const l = await request(h.app).get('/api/accounts')
       .set('Authorization', `Bearer ${token}`).expect(200);
     expect(l.body.accounts.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('tracks updated_at when an account is edited', async () => {
+    const { token, userId } = await h.signup('A', 'a@t.com', 'ChangeMe123!', 'TC');
+    const r = await request(h.app).post('/api/accounts')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ name: 'Acme Corp', owner_id: userId }).expect(201);
+    const created = new Date(r.body.account.updated_at).getTime();
+
+    const u = await request(h.app).put(`/api/accounts/${r.body.account.id}`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ industry: 'Technology' }).expect(200);
+    expect(u.body.account.industry).toBe('Technology');
+    expect(new Date(u.body.account.updated_at).getTime()).toBeGreaterThanOrEqual(created);
   });
 
   // ── Deals ─────────────────────────────────────────
@@ -273,6 +307,130 @@ describe('Boutinly CRM API', () => {
     expect(w.body.deal.won_at).toBeTruthy();
   });
 
+  // ── Leads ────────────────────────────────────────
+
+  it('creates and lists leads', async () => {
+    const { token, userId } = await h.signup('A', 'a@t.com', 'ChangeMe123!', 'TC');
+    const r = await request(h.app).post('/api/leads')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ first_name: 'Jane', last_name: 'Doe', company_name: 'Widgets Inc', email: 'jane@widgets.com', owner_id: userId })
+      .expect(201);
+    expect(r.body.lead.first_name).toBe('Jane');
+    expect(r.body.lead.last_name).toBe('Doe');
+    expect(r.body.lead.status).toBe('new');
+    expect(r.body.lead.updated_at).toBeTruthy();
+
+    const l = await request(h.app).get('/api/leads')
+      .set('Authorization', `Bearer ${token}`).expect(200);
+    expect(l.body.leads.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('updates a lead and tracks updated_at', async () => {
+    const { token, userId } = await h.signup('A', 'a@t.com', 'ChangeMe123!', 'TC');
+    const c = await request(h.app).post('/api/leads')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ first_name: 'Jane', last_name: 'Doe', company_name: 'W', email: 'j@w.com', owner_id: userId })
+      .expect(201);
+    const u = await request(h.app).put(`/api/leads/${c.body.lead.id}`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ status: 'nurturing', source: 'website' }).expect(200);
+    expect(u.body.lead.status).toBe('nurturing');
+    expect(u.body.lead.source).toBe('website');
+    expect(u.body.lead.updated_at).toBeTruthy();
+  });
+
+  it('refuses to convert a lead that is not qualified', async () => {
+    const { token, userId } = await h.signup('A', 'a@t.com', 'ChangeMe123!', 'TC');
+    const c = await request(h.app).post('/api/leads')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ first_name: 'Jane', last_name: 'Doe', company_name: 'Widgets Inc', email: 'jane@widgets.com', owner_id: userId })
+      .expect(201);
+
+    await request(h.app).post(`/api/leads/${c.body.lead.id}/convert`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ account: { name: 'Widgets Inc', owner_id: userId }, contact: { first_name: 'Jane', last_name: 'Doe', email: 'jane@widgets.com' } })
+      .expect(400);
+  });
+
+  it('converts a qualified lead into an account and contact', async () => {
+    const { token, userId } = await h.signup('A', 'a@t.com', 'ChangeMe123!', 'TC');
+    const c = await request(h.app).post('/api/leads')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ first_name: 'Jane', last_name: 'Doe', company_name: 'Widgets Inc', email: 'jane@widgets.com', owner_id: userId, status: 'qualified' })
+      .expect(201);
+    expect(c.body.lead.is_converted).toBe(false);
+
+    const cv = await request(h.app).post(`/api/leads/${c.body.lead.id}/convert`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ account: { name: 'Widgets Inc', owner_id: userId }, contact: { first_name: 'Jane', last_name: 'Doe', email: 'jane@widgets.com' }, create_opportunity: true })
+      .expect(200);
+    expect(cv.body.account).toBeTruthy();
+    expect(cv.body.contact).toBeTruthy();
+    expect(cv.body.lead.status).toBe('converted');
+    expect(cv.body.lead.is_converted).toBe(true);
+    expect(cv.body.lead.converted_account_id).toBe(cv.body.account.id);
+
+    // Opportunity was created from the conversion ("[Company] - Default Opportunity")
+    expect(cv.body.opportunity).toBeTruthy();
+    expect(cv.body.opportunity.name).toBe('Widgets Inc - Default Opportunity');
+    expect(cv.body.opportunity.account_id).toBe(cv.body.account.id);
+
+    const dl = await request(h.app).get('/api/deals')
+      .set('Authorization', `Bearer ${token}`).expect(200);
+    expect(dl.body.deals.some((d: { id: string }) => d.id === cv.body.opportunity.id)).toBe(true);
+
+    const l = await request(h.app).get(`/api/leads/${c.body.lead.id}`)
+      .set('Authorization', `Bearer ${token}`).expect(200);
+    expect(l.body.lead.converted_at).toBeTruthy();
+  });
+
+  it('skips opportunity creation when create_opportunity is false', async () => {
+    const { token, userId } = await h.signup('A', 'a@t.com', 'ChangeMe123!', 'TC');
+    const c = await request(h.app).post('/api/leads')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ first_name: 'Jane', last_name: 'Doe', company_name: 'Widgets Inc', email: 'jane@widgets.com', owner_id: userId, status: 'qualified' })
+      .expect(201);
+
+    const cv = await request(h.app).post(`/api/leads/${c.body.lead.id}/convert`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ account: { name: 'Widgets Inc', owner_id: userId }, contact: { first_name: 'Jane', last_name: 'Doe', email: 'jane@widgets.com' }, create_opportunity: false })
+      .expect(200);
+    expect(cv.body.opportunity).toBeUndefined();
+    expect(cv.body.lead.is_converted).toBe(true);
+
+    const dl = await request(h.app).get('/api/deals')
+      .set('Authorization', `Bearer ${token}`).expect(200);
+    expect(dl.body.deals.some((d: { name: string }) => d.name === 'Widgets Inc - Default Opportunity')).toBe(false);
+  });
+
+  it('rejects converting a lead that has already been converted', async () => {
+    const { token, userId } = await h.signup('A', 'a@t.com', 'ChangeMe123!', 'TC');
+    const c = await request(h.app).post('/api/leads')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ first_name: 'Jane', last_name: 'Doe', company_name: 'Widgets Inc', email: 'jane@widgets.com', owner_id: userId, status: 'qualified' })
+      .expect(201);
+
+    await request(h.app).post(`/api/leads/${c.body.lead.id}/convert`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ account: { name: 'Widgets Inc', owner_id: userId }, contact: { first_name: 'Jane', last_name: 'Doe', email: 'jane@widgets.com' } })
+      .expect(200);
+
+    await request(h.app).post(`/api/leads/${c.body.lead.id}/convert`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ account: { name: 'Widgets Inc', owner_id: userId }, contact: { first_name: 'Jane', last_name: 'Doe', email: 'jane@widgets.com' } })
+      .expect(400);
+  });
+
+  it('deletes a lead', async () => {
+    const { token, userId } = await h.signup('A', 'a@t.com', 'ChangeMe123!', 'TC');
+    const c = await request(h.app).post('/api/leads')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ first_name: 'Jane', last_name: 'Doe', company_name: 'W', email: 'j@w.com', owner_id: userId })
+      .expect(201);
+    await request(h.app).delete(`/api/leads/${c.body.lead.id}`)
+      .set('Authorization', `Bearer ${token}`).expect(204);
+  });
+
   // ── Tasks ─────────────────────────────────────────
 
   it('creates, completes, deletes a task', async () => {
@@ -287,6 +445,58 @@ describe('Boutinly CRM API', () => {
     expect(c.body.task.completed_at).toBeTruthy();
     await request(h.app).delete(`/api/tasks/${t.body.task.id}`)
       .set('Authorization', `Bearer ${token}`).expect(204);
+  });
+
+  // ── Activity Timeline sub-system (record tasks + call logs) ──
+
+  it('creates, lists, completes, and deletes a record task', async () => {
+    const { token } = await h.signup('A', 'a@t.com', 'ChangeMe123!', 'TC');
+    const created = await request(h.app).post('/api/record-tasks')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ subject: 'Send proposal', description: 'Follow up', associated_to_id: 'lead-abc' })
+      .expect(201);
+    expect(created.body.recordTask.subject).toBe('Send proposal');
+    expect(created.body.recordTask.user_id).toBeTruthy();
+    expect(created.body.recordTask.associated_to_id).toBe('lead-abc');
+
+    const listed = await request(h.app).get('/api/record-tasks?associated_to_id=lead-abc')
+      .set('Authorization', `Bearer ${token}`).expect(200);
+    expect(listed.body.recordTasks.length).toBe(1);
+    expect(listed.body.total).toBe(1);
+
+    const completed = await request(h.app).patch(`/api/record-tasks/${created.body.recordTask.id}`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ completed_at: new Date().toISOString() })
+      .expect(200);
+    expect(completed.body.recordTask.completed_at).toBeTruthy();
+
+    await request(h.app).delete(`/api/record-tasks/${created.body.recordTask.id}`)
+      .set('Authorization', `Bearer ${token}`).expect(204);
+  });
+
+  it('creates and lists call logs', async () => {
+    const { token } = await h.signup('A', 'a@t.com', 'ChangeMe123!', 'TC');
+    const created = await request(h.app).post('/api/call-logs')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ subject: 'Discovery call', description: 'Went well', associated_to_id: 'deal-xyz' })
+      .expect(201);
+    expect(created.body.callLog.subject).toBe('Discovery call');
+
+    const listed = await request(h.app).get('/api/call-logs?associated_to_id=deal-xyz')
+      .set('Authorization', `Bearer ${token}`).expect(200);
+    expect(listed.body.callLogs.length).toBe(1);
+
+    const other = await request(h.app).get('/api/call-logs?associated_to_id=deal-other')
+      .set('Authorization', `Bearer ${token}`).expect(200);
+    expect(other.body.callLogs.length).toBe(0);
+  });
+
+  it('rejects a record task without a subject', async () => {
+    const { token } = await h.signup('A', 'a@t.com', 'ChangeMe123!', 'TC');
+    await request(h.app).post('/api/record-tasks')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ description: 'missing subject', associated_to_id: 'lead-abc' })
+      .expect(400);
   });
 
   // ── Email ─────────────────────────────────────────

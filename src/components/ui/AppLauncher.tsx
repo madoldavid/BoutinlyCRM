@@ -11,6 +11,8 @@ import {
   Search,
   ArrowRight,
   Star,
+  Building2,
+  UserPlus,
 } from 'lucide-react';
 
 interface AppItem {
@@ -143,18 +145,32 @@ export function getDefaultApps(activeModule: string, navigate: (id: string) => v
       colorClass: 'bg-info-soft text-info',
     },
     {
+      id: 'accounts',
+      label: 'Accounts',
+      description: 'Master list of accounts and organizations',
+      icon: <Building2 className="w-4 h-4" />,
+      colorClass: 'bg-theme-accent-soft text-theme-accent',
+    },
+    {
       id: 'contacts',
       label: 'Contacts',
-      description: 'Contacts, accounts, and relationship management',
+      description: 'Contacts and relationship management',
       icon: <Users className="w-4 h-4" />,
       colorClass: 'bg-success-soft text-success',
     },
     {
+      id: 'leads',
+      label: 'Leads',
+      description: 'Staging area for new prospects, ready to convert',
+      icon: <UserPlus className="w-4 h-4" />,
+      colorClass: 'bg-warning-soft text-warning',
+    },
+    {
       id: 'deals',
-      label: 'Pipeline',
+      label: 'Opportunities',
       description: 'Sales deals, kanban board, and opportunity tracking',
       icon: <Briefcase className="w-4 h-4" />,
-      colorClass: 'bg-theme-accent-soft text-theme-accent',
+      colorClass: 'bg-info-soft text-info',
     },
     {
       id: 'tasks',

@@ -34,7 +34,7 @@ export function registerDealsRoutes(
     const scoped = scopeSnapshot({
       users, accounts,
       deals,
-      contacts: [], pipelines: [], stages: [], tasks: [], activities: [],
+      leads: [], contacts: [], pipelines: [], stages: [], tasks: [], activities: [],
       notifications: [], customFields: [], emailTemplates: [], emailCampaigns: [], auditLogs: [],
     }, req.principal);
 

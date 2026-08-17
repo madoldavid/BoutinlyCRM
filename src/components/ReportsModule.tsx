@@ -780,7 +780,7 @@ export default function ReportsModule() {
                       label: s.stageName,
                       value: s.count,
                     }))}
-                    centerLabel="Deals"
+                    centerLabel="Opportunities"
                   />
                 ) : (
                   <p className="text-xs text-theme-secondary py-10 text-center">No stage data available.</p>
@@ -976,7 +976,7 @@ export default function ReportsModule() {
                               className="bg-theme-accent text-white text-xs font-semibold py-2.5 px-4 rounded-lg shadow-card flex justify-between items-center transition-all"
                               style={{ width: `${widthPct}%` }}
                             >
-                              <span>{stg.count} Deal{stg.count !== 1 ? 's' : ''}</span>
+                              <span>{stg.count} Opportunity{stg.count !== 1 ? 's' : ''}</span>
                               <span className="font-mono text-white/90">${stg.value.toLocaleString()}</span>
                             </div>
                           </div>
@@ -1155,7 +1155,7 @@ export default function ReportsModule() {
                     }}
                     className="w-full bg-theme-card text-theme-primary rounded-lg border border-theme-border px-3 text-sm font-medium focus:border-theme-accent focus:outline-none h-9"
                   >
-                    <option value="deal">Deals</option>
+                    <option value="deal">Opportunities</option>
                     <option value="contact">Contacts</option>
                     <option value="task">Tasks</option>
                   </select>

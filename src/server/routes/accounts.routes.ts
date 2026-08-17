@@ -25,7 +25,7 @@ export function registerAccountsRoutes(
     const users = await repository.listUsers();
     const scoped = scopeSnapshot({
       users, accounts,
-      contacts: [], deals: [], pipelines: [], stages: [], tasks: [], activities: [],
+      contacts: [], leads: [], deals: [], pipelines: [], stages: [], tasks: [], activities: [],
       notifications: [], customFields: [], emailTemplates: [], emailCampaigns: [], auditLogs: [],
     }, req.principal);
 

@@ -1056,7 +1056,7 @@ export default function AdminModule() {
               <div className="p-8 text-center text-xs text-theme-secondary/70 font-sans">
                 <SlidersHorizontal className="w-8 h-8 mx-auto mb-2 text-theme-secondary/40" />
                 <p className="font-semibold text-theme-secondary">No custom fields defined</p>
-                <p className="mt-1">Create attributes to extend your CRM schema for contacts, accounts, and deals.</p>
+                <p className="mt-1">Create attributes to extend your CRM schema for contacts, accounts, leads, and opportunities.</p>
               </div>
             ) : (
               customFields.map(cf => (

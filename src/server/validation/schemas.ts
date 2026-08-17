@@ -144,6 +144,46 @@ export const createDealSchema = z.object({
 
 export const updateDealSchema = z.object(dealCore).partial();
 
+// ─── Leads ─────────────────────────────────────────────────────
+
+export const createLeadSchema = z.object({
+  first_name: z.string().min(1).max(100),
+  last_name: z.string().min(1).max(100),
+  company_name: z.string().min(1).max(200),
+  email: z.string().email(),
+  phone: z.string().max(50).default(''),
+  source: z.string().max(100).optional(),
+  status: z.enum(['new', 'working', 'nurturing', 'qualified', 'unqualified', 'converted']).default('new'),
+  owner_id: z.string().min(1),
+});
+
+export const updateLeadSchema = createLeadSchema.partial();
+
+export const convertLeadSchema = z.object({
+  account_id: z.string().min(1).optional(),
+  /** If true, the engine also creates "[Company] - Default Opportunity" linked to the account. */
+  create_opportunity: z.boolean().optional(),
+  account: z.object({
+    name: z.string().min(1).max(200).optional(),
+    domain: z.string().max(255).optional(),
+    industry: z.string().max(100).optional(),
+    size: z.enum(['1-10', '11-50', '51-200', '201-1000', '1000+']).optional(),
+    website: z.string().max(500).optional(),
+    arr: z.number().min(0).optional(),
+    owner_id: z.string().min(1).optional(),
+    tags: z.array(z.string().min(1)).optional(),
+    custom_fields: z.record(z.string(), z.unknown()).optional(),
+  }).optional(),
+  contact: z.object({
+    first_name: z.string().min(1).max(100).optional(),
+    last_name: z.string().min(1).max(100).optional(),
+    email: z.string().email().optional(),
+    phone: z.string().max(50).optional(),
+    title: z.string().max(150).optional(),
+    tags: z.array(z.string().min(1)).optional(),
+  }).optional(),
+});
+
 export const moveDealStageSchema = z.object({
   target_stage_id: z.string().min(1),
 });
@@ -163,6 +203,7 @@ const taskCore = {
   assigned_to_id: z.string().min(1),
   contact_id: z.string().optional(),
   deal_id: z.string().optional(),
+  lead_id: z.string().optional(),
   recurrence_rule: z.string().optional(),
 };
 
@@ -176,7 +217,7 @@ export const updateTaskSchema = z.object(taskCore).partial();
 // ─── Activities ────────────────────────────────────────────────
 
 export const createActivitySchema = z.object({
-  type: z.enum(['call', 'meeting', 'email_sent', 'note', 'stage_change', 'task_completed', 'file_uploaded']),
+  type: z.enum(['call', 'meeting', 'email_sent', 'note', 'stage_change', 'task_completed', 'file_uploaded', 'deal_closed', 'lead_converted']),
   title: z.string().min(1).max(300),
   body: z.string().default(''),
   outcome: z.string().optional(),
@@ -184,6 +225,7 @@ export const createActivitySchema = z.object({
   user_id: z.string().min(1),
   contact_id: z.string().optional(),
   deal_id: z.string().optional(),
+  lead_id: z.string().optional(),
   task_id: z.string().optional(),
   metadata: z.record(z.string(), z.unknown()).optional(),
 });
@@ -264,6 +306,11 @@ export const dealQuerySchema = paginationSchema.extend({
   owner_id: z.string().optional(),
 });
 
+export const leadQuerySchema = paginationSchema.extend({
+  status: z.enum(['new', 'working', 'qualified', 'converted']).optional(),
+  owner_id: z.string().optional(),
+});
+
 export const taskQuerySchema = paginationSchema.extend({
   assigned_to_id: z.string().optional(),
   status: z.enum(['open', 'completed', 'all']).optional(),
@@ -272,5 +319,39 @@ export const taskQuerySchema = paginationSchema.extend({
 export const activityQuerySchema = paginationSchema.extend({
   contact_id: z.string().optional(),
   deal_id: z.string().optional(),
+  lead_id: z.string().optional(),
   user_id: z.string().optional(),
+});
+
+// ─── Activity Timeline sub-system (record tasks + call logs) ───
+
+export const createRecordTaskSchema = z.object({
+  subject: z.string().min(1).max(300),
+  description: z.string().max(5000).default(''),
+  due_date: z.string().optional(),
+  /** Polymorphic link — the id of the lead, contact, or deal this to-do belongs to. */
+  associated_to_id: z.string().min(1),
+});
+
+export const updateRecordTaskSchema = z.object({
+  subject: z.string().min(1).max(300).optional(),
+  description: z.string().max(5000).optional(),
+  due_date: z.string().nullable().optional(),
+  completed_at: z.string().nullable().optional(),
+});
+
+export const recordTaskQuerySchema = paginationSchema.extend({
+  associated_to_id: z.string().optional(),
+});
+
+export const createCallLogSchema = z.object({
+  subject: z.string().min(1).max(300),
+  description: z.string().max(5000).default(''),
+  due_date: z.string().optional(),
+  /** Polymorphic link — the id of the lead, contact, or deal this note belongs to. */
+  associated_to_id: z.string().min(1),
+});
+
+export const callLogQuerySchema = paginationSchema.extend({
+  associated_to_id: z.string().optional(),
 });

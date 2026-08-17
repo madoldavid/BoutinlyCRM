@@ -527,7 +527,7 @@ export default function TasksModule() {
                     </select>
                   </div>
                   <div className="space-y-1">
-                    <label className="block font-semibold text-theme-secondary">Related Deal Opportunity</label>
+                    <label className="block font-semibold text-theme-secondary">Related Opportunity</label>
                     <select
                       value={callForm.deal_id}
                       onChange={(e) => setCallForm({ ...callForm, deal_id: e.target.value })}
@@ -848,13 +848,13 @@ export default function TasksModule() {
                   </select>
                 </div>
                 <div className="space-y-1">
-                  <label className="block font-semibold text-theme-secondary">Link Opportunity Deal</label>
+                  <label className="block font-semibold text-theme-secondary">Link Opportunity</label>
                   <select
                     value={taskForm.deal_id}
                     onChange={(e) => setTaskForm({ ...taskForm, deal_id: e.target.value })}
                     className="w-full bg-theme-base text-theme-primary rounded border border-theme-border px-2.5 py-1.5 focus:ring-1 focus:ring-theme-accent focus:outline-none"
                   >
-                    <option value="" className="bg-theme-card text-theme-primary">-- No Deal Link --</option>
+                    <option value="" className="bg-theme-card text-theme-primary">-- No Opportunity Link --</option>
                     {deals.map(d => <option key={d.id} value={d.id} className="bg-theme-card text-theme-primary">{d.name}</option>)}
                   </select>
                 </div>
