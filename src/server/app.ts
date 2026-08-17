@@ -60,6 +60,20 @@ export function createApp({ config, logger, repository, emailService, fileServic
   const flags = featureFlags ?? new FeatureFlagService(config.FEATURE_FLAGS);
   const app = express();
 
+  // Loudly flag it when either protection is deliberately off outside tests
+  // — these are opt-out flags now (see csrf.ts / rateLimiter.ts), not an
+  // NODE_ENV inference, so reaching this point always means someone set
+  // DISABLE_CSRF/DISABLE_RATE_LIMIT on purpose, but it's cheap insurance
+  // against that env var following a build to somewhere it shouldn't.
+  if (config.NODE_ENV !== 'test') {
+    if (process.env.DISABLE_CSRF === 'true') {
+      logger.warn('DISABLE_CSRF=true — CSRF protection is OFF. This should never be set outside local development.');
+    }
+    if (process.env.DISABLE_RATE_LIMIT === 'true') {
+      logger.warn('DISABLE_RATE_LIMIT=true — rate limiting is OFF. This should never be set outside local development.');
+    }
+  }
+
   app.disable('x-powered-by');
   app.use(helmet({
     contentSecurityPolicy: config.NODE_ENV === 'production' ? {

@@ -33,7 +33,10 @@ export function createRateLimiter(opts: RateLimiterOpts): RateLimiter {
   }, Math.min(windowMs, 60_000)).unref();
 
   const middleware = (req: Request, _res: Response, next: NextFunction) => {
-    if (process.env.NODE_ENV === 'test' || process.env.NODE_ENV === 'development') return next();
+    // Same reasoning as csrf.ts: an explicit opt-out, not NODE_ENV=="development",
+    // so a deployment that forgets to set NODE_ENV=production doesn't silently
+    // run with no rate limiting (G-SEC-11). Set DISABLE_RATE_LIMIT=true locally.
+    if (process.env.NODE_ENV === 'test' || process.env.DISABLE_RATE_LIMIT === 'true') return next();
     const key = keyFn ? keyFn(req) : req.ip || req.socket.remoteAddress || 'unknown';
     const now = Date.now();
     const existing = windows.get(key);
@@ -69,8 +72,15 @@ export async function createRedisRateLimiter(opts: RateLimiterOpts): Promise<Rat
   }
 
   try {
-    // Dynamic import to keep ioredis optional
-    const { Redis } = await eval('import("ioredis")');
+    // ioredis is an optional peer dependency with no @types package
+    // installed — a literal `import('ioredis')` fails tsc's static module
+    // resolution (TS2307) whether or not the package is present at
+    // runtime. TypeScript only resolves *literal* import() specifiers, so
+    // building the specifier from a variable keeps this a real dynamic
+    // import (unlike the previous eval('import("ioredis")'), which just
+    // hid the same problem from static analysis instead of solving it).
+    const ioredisSpecifier = 'ioredis';
+    const { Redis } = await import(ioredisSpecifier);
     const redis = new Redis(redisUrl, { maxRetriesPerRequest: 2, lazyConnect: true });
 
     try {

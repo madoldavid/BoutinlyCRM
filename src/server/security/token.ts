@@ -25,6 +25,20 @@ function sign(data: string, secret: string) {
   return crypto.createHmac('sha256', secret).update(data).digest('base64url');
 }
 
+/**
+ * Constant-time signature comparison. crypto.timingSafeEqual throws a
+ * RangeError when the two buffers have different lengths instead of
+ * returning false, which a malformed or truncated token's signature
+ * segment can easily trigger — that would otherwise surface as an
+ * unhandled 500 instead of the expected 401 (G-SEC-11).
+ */
+function signaturesMatch(a: string, b: string): boolean {
+  const bufA = Buffer.from(a);
+  const bufB = Buffer.from(b);
+  if (bufA.length !== bufB.length) return false;
+  return crypto.timingSafeEqual(bufA, bufB);
+}
+
 export function issueToken(principal: Principal, secret: string, ttlSeconds: number, jti?: string) {
   const now = Math.floor(Date.now() / 1000);
   const header = base64Url(JSON.stringify({ alg: 'HS256', typ: 'JWT' }));
@@ -58,8 +72,7 @@ export function verifyToken(token: string, secret: string): Principal {
     throw new ApiError(401, 'Invalid bearer token.', 'invalid_token');
   }
 
-  const expected = sign(`${headerEnc}.${payloadEnc}`, secret);
-  if (!crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expected))) {
+  if (!signaturesMatch(signature, sign(`${headerEnc}.${payloadEnc}`, secret))) {
     throw new ApiError(401, 'Invalid bearer token.', 'invalid_token');
   }
 
@@ -140,8 +153,7 @@ export function verifyRefreshToken(token: string, secret: string): Principal {
     throw new ApiError(401, 'Invalid refresh token.', 'invalid_token');
   }
 
-  const expected = sign(`${header}.${payload}`, secret);
-  if (!crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expected))) {
+  if (!signaturesMatch(signature, sign(`${header}.${payload}`, secret))) {
     throw new ApiError(401, 'Invalid refresh token.', 'invalid_token');
   }
 

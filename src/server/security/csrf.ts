@@ -70,8 +70,13 @@ export function csrfProtection() {
       return next();
     }
 
-    // In test/dev, skip CSRF enforcement for API testing convenience
-    if (process.env.NODE_ENV === 'test' || process.env.NODE_ENV === 'development') return next();
+    // Tests bypass unconditionally (supertest doesn't manage cookies).
+    // Everywhere else, CSRF is enforced unless a developer explicitly opts
+    // out — deliberately NOT keyed off NODE_ENV=="development", since a real
+    // deployment that simply forgets to export NODE_ENV=production would
+    // otherwise silently lose CSRF protection with no warning (G-SEC-11).
+    // Set DISABLE_CSRF=true in your local .env for API-testing convenience.
+    if (process.env.NODE_ENV === 'test' || process.env.DISABLE_CSRF === 'true') return next();
 
     // Validate CSRF on mutating methods (skip exempt paths)
     if (isExempt) return next();
