@@ -13,14 +13,9 @@ export function scopeSnapshot(snapshot: CrmSnapshot, principal: Principal): CrmS
     users: byOrg(snapshot.users),
     accounts: byOrg(snapshot.accounts),
     contacts: byOrg(snapshot.contacts),
-<<<<<<< HEAD
+    leads: byOrg(snapshot.leads),
     pipelines: byOrg(snapshot.pipelines),
     stages: byOrg(snapshot.stages),
-=======
-    leads: byOrg(snapshot.leads),
-    pipelines: snapshot.pipelines,
-    stages: snapshot.stages,
->>>>>>> 41b4c3ae4ad66e243403374fe02d576454752884
     deals: byOrg(snapshot.deals),
     tasks: byOrg(snapshot.tasks),
     activities: byOrg(snapshot.activities),

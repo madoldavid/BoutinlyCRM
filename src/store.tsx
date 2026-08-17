@@ -7,9 +7,6 @@ import React, { createContext, useContext, useState, useEffect, useCallback, use
 import type { User, UserRole, Account, Contact, Pipeline, Stage, Deal, Lead, LeadStatus, Task, Activity, Notification, CustomFieldDefinition, EmailTemplate, EmailCampaign, AuditLog, FileRecord, ApprovalRequest, RecordTask, CallLog } from './types';
 import { runtimeConfig } from './runtimeConfig';
 import { toast } from './components/ui/toast';
-<<<<<<< HEAD
-import { apiClient, ApiError, type MfaRequiredResponse } from './apiClient';
-=======
 import {
   INITIAL_USERS,
   INITIAL_ACCOUNTS,
@@ -29,7 +26,6 @@ import {
   INITIAL_AUDIT_LOGS,
 } from './initialData';
 import { apiClient, ApiError, SESSION_EXPIRED_EVENT, type MfaRequiredResponse } from './apiClient';
->>>>>>> 41b4c3ae4ad66e243403374fe02d576454752884
 
 // ─── Context type ──────────────────────────────────────
 
@@ -140,13 +136,8 @@ interface CRMContextType {
   mergeContacts: (sourceId: string, targetId: string, finalValues: Partial<Contact>) => Promise<void>;
 
   // Account CRUD
-<<<<<<< HEAD
   addAccount: (account: Omit<Account, 'id' | 'created_at'>) => Promise<Account>;
-  updateAccount: (id: string, account: Partial<Account>) => Promise<void>;
-=======
-  addAccount: (account: Omit<Account, 'id' | 'created_at'>) => Promise<void>;
   updateAccount: (id: string, account: Partial<Account>) => Promise<boolean>;
->>>>>>> 41b4c3ae4ad66e243403374fe02d576454752884
   deleteAccount: (id: string) => Promise<void>;
 
   // Deal CRUD
@@ -266,23 +257,6 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return fallback;
   }
 
-<<<<<<< HEAD
-  const [users, setUsers] = useState<User[]>(() => loadFromStorage('users', []));
-  const [accounts, setAccounts] = useState<Account[]>(() => loadFromStorage('accounts', []));
-  const [contacts, setContacts] = useState<Contact[]>(() => loadFromStorage('contacts', []));
-  const [pipelines, setPipelines] = useState<Pipeline[]>([]);
-  const pipelinesRef = useRef(pipelines);
-  pipelinesRef.current = pipelines;
-  const [stages, setStages] = useState<Stage[]>([]);
-  const [deals, setDeals] = useState<Deal[]>(() => loadFromStorage('deals', []));
-  const [tasks, setTasks] = useState<Task[]>(() => loadFromStorage('tasks', []));
-  const [activities, setActivities] = useState<Activity[]>(() => loadFromStorage('activities', []));
-  const [notifications, setNotifications] = useState<Notification[]>(() => loadFromStorage('notifications', []));
-  const [customFields, setCustomFields] = useState<CustomFieldDefinition[]>(() => loadFromStorage('custom_fields', []));
-  const [emailTemplates, setEmailTemplates] = useState<EmailTemplate[]>(() => loadFromStorage('email_templates', []));
-  const [emailCampaigns, setEmailCampaigns] = useState<EmailCampaign[]>(() => loadFromStorage('email_campaigns', []));
-  const [auditLogs, setAuditLogs] = useState<AuditLog[]>(() => loadFromStorage('audit_logs', []));
-=======
   const [users, setUsers] = useState<User[]>(() => loadFromStorage('users', INITIAL_USERS));
   const [accounts, setAccounts] = useState<Account[]>(() => loadFromStorage('accounts', INITIAL_ACCOUNTS));
   const [contacts, setContacts] = useState<Contact[]>(() => loadFromStorage('contacts', INITIAL_CONTACTS));
@@ -323,7 +297,6 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [emailTemplates, setEmailTemplates] = useState<EmailTemplate[]>(() => loadFromStorage('email_templates', INITIAL_TEMPLATES));
   const [emailCampaigns, setEmailCampaigns] = useState<EmailCampaign[]>(() => loadFromStorage('email_campaigns', INITIAL_CAMPAIGNS));
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>(() => loadFromStorage('audit_logs', INITIAL_AUDIT_LOGS));
->>>>>>> 41b4c3ae4ad66e243403374fe02d576454752884
   const [files, setFiles] = useState<FileRecord[]>([]);
   const [approvals, setApprovals] = useState<ApprovalRequest[]>([]);
   const [adminFlags, setAdminFlags] = useState<Array<{ key: string; description: string; defaultEnabled: boolean; enabled: boolean; source: string; overridden: boolean }>>([]);
@@ -763,16 +736,11 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       const updated = await apiClient.updateContact(id, updatedData as Record<string, unknown>);
       setContacts(prev => prev.map(c => c.id === id ? updated : c));
       toast.success('Contact updated');
-<<<<<<< HEAD
+      return true;
     } catch (err) {
       console.error('updateContact failed:', err);
       toast.error('Failed to update contact', err instanceof ApiError ? err.message : 'Please try again.');
-=======
-      return true;
-    } catch {
-      toast.error('Failed to update contact', 'Please try again.');
       return false;
->>>>>>> 41b4c3ae4ad66e243403374fe02d576454752884
     }
   }, []);
 
@@ -823,16 +791,11 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       const updated = await apiClient.updateAccount(id, updatedData as Record<string, unknown>);
       setAccounts(prev => prev.map(a => a.id === id ? updated : a));
       toast.success('Account updated');
-<<<<<<< HEAD
+      return true;
     } catch (err) {
       console.error('update account failed:', err);
       toast.error('Failed to update account', err instanceof ApiError ? err.message : 'Please try again.');
-=======
-      return true;
-    } catch {
-      toast.error('Failed to update account', 'Please try again.');
       return false;
->>>>>>> 41b4c3ae4ad66e243403374fe02d576454752884
     }
   }, []);
 
@@ -853,16 +816,10 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     try {
       const created = await apiClient.createDeal(dealData as Record<string, unknown>);
       setDeals(prev => [created, ...prev]);
-<<<<<<< HEAD
-      toast.success('Deal created', `${dealData.name} — $${dealData.value.toLocaleString()}`);
+      toast.success('Opportunity created', `${dealData.name} — $${dealData.value.toLocaleString()}`);
     } catch (err) {
       console.error('create deal failed:', err);
-      toast.error('Failed to create deal', err instanceof ApiError ? err.message : 'The deal was not saved. Please try again.');
-=======
-      toast.success('Opportunity created', `${dealData.name} — $${dealData.value.toLocaleString()}`);
-    } catch {
-      toast.error('Failed to create opportunity', 'The opportunity was not saved. Please try again.');
->>>>>>> 41b4c3ae4ad66e243403374fe02d576454752884
+      toast.error('Failed to create opportunity', err instanceof ApiError ? err.message : 'The opportunity was not saved. Please try again.');
     }
   }, []);
 
@@ -870,14 +827,9 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     try {
       const updated = await apiClient.updateDeal(id, updatedData as Record<string, unknown>);
       setDeals(prev => prev.map(d => d.id === id ? updated : d));
-<<<<<<< HEAD
     } catch (err) {
       console.error('update deal failed:', err);
-      toast.error('Failed to update deal', err instanceof ApiError ? err.message : 'Your changes were not saved. Please try again.');
-=======
-    } catch {
-      toast.error('Failed to update opportunity', 'Your changes were not saved. Please try again.');
->>>>>>> 41b4c3ae4ad66e243403374fe02d576454752884
+      toast.error('Failed to update opportunity', err instanceof ApiError ? err.message : 'Your changes were not saved. Please try again.');
     }
   }, []);
 
@@ -885,16 +837,10 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     try {
       await apiClient.deleteDeal(id);
       setDeals(prev => prev.filter(d => d.id !== id));
-<<<<<<< HEAD
-      toast.success('Deal deleted');
+      toast.success('Opportunity deleted');
     } catch (err) {
       console.error('delete deal failed:', err);
-      toast.error('Failed to delete deal', err instanceof ApiError ? err.message : 'Please try again.');
-=======
-      toast.success('Opportunity deleted');
-    } catch {
-      toast.error('Failed to delete opportunity', 'Please try again.');
->>>>>>> 41b4c3ae4ad66e243403374fe02d576454752884
+      toast.error('Failed to delete opportunity', err instanceof ApiError ? err.message : 'Please try again.');
     }
   }, []);
 
@@ -904,14 +850,9 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       setDeals(prev => prev.map(d => d.id === id ? moved : d));
       toast.success('Opportunity moved', 'Stage updated successfully.');
       return true;
-<<<<<<< HEAD
     } catch (err) {
       console.error('move deal failed:', err);
-      toast.error('Failed to move deal', err instanceof ApiError ? err.message : 'The stage change was not saved. Please try again.');
-=======
-    } catch {
-      toast.error('Failed to move opportunity', 'The stage change was not saved. Please try again.');
->>>>>>> 41b4c3ae4ad66e243403374fe02d576454752884
+      toast.error('Failed to move opportunity', err instanceof ApiError ? err.message : 'The stage change was not saved. Please try again.');
       return false;
     }
   }, []);
@@ -922,13 +863,9 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       setDeals(prev => prev.map(d => d.id === id ? closed : d));
       toast.success(`Opportunity ${outcome === 'won' ? 'won' : 'lost'}`, `Opportunity has been closed as ${outcome}.`);
       return true;
-<<<<<<< HEAD
     } catch (err) {
       console.error('close deal failed:', err);
-      toast.error('Failed to close deal', err instanceof ApiError ? err.message : 'The deal status was not updated. Please try again.');
-=======
-    } catch {
-      toast.error('Failed to close opportunity', 'The opportunity status was not updated. Please try again.');
+      toast.error('Failed to close opportunity', err instanceof ApiError ? err.message : 'The opportunity status was not updated. Please try again.');
       return false;
     }
   }, []);
@@ -978,7 +915,6 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       return true;
     } catch {
       toast.error('Failed to convert lead', 'Please try again.');
->>>>>>> 41b4c3ae4ad66e243403374fe02d576454752884
       return false;
     }
   }, []);
@@ -1487,14 +1423,9 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       toast.success(`${ids.length} opportunities updated`);
       const result = await apiClient.listDeals();
       setDeals(result.data);
-<<<<<<< HEAD
     } catch (err) {
       console.error('update deals failed:', err);
-      toast.error('Failed to update deals', err instanceof ApiError ? err.message : 'Please try again.');
-=======
-    } catch {
-      toast.error('Failed to update opportunities', 'Please try again.');
->>>>>>> 41b4c3ae4ad66e243403374fe02d576454752884
+      toast.error('Failed to update opportunities', err instanceof ApiError ? err.message : 'Please try again.');
     }
   }, []);
 

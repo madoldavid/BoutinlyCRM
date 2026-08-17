@@ -64,17 +64,17 @@ export const INITIAL_LEADS: Lead[] = [
 // ─── Pipeline & Stages ───────────────────────────────
 
 export const INITIAL_PIPELINES: Pipeline[] = [
-  { id: 'pipe-default', name: 'Standard Sales Pipeline', is_default: true, is_archived: false },
+  { id: 'pipe-default', organization_id: ORG_ID, name: 'Standard Sales Pipeline', is_default: true, is_archived: false },
 ];
 
 export const INITIAL_STAGES: Stage[] = [
-  { id: 'stg-lead', pipeline_id: 'pipe-default', name: 'Lead Generated', probability: 10, order: 1, type: 'open' },
-  { id: 'stg-qualified', pipeline_id: 'pipe-default', name: 'Qualified Opportunity', probability: 25, order: 2, type: 'open' },
-  { id: 'stg-demo', pipeline_id: 'pipe-default', name: 'Solution Demo', probability: 50, order: 3, type: 'open' },
-  { id: 'stg-proposal', pipeline_id: 'pipe-default', name: 'Proposal Sent', probability: 75, order: 4, type: 'open' },
-  { id: 'stg-negotiation', pipeline_id: 'pipe-default', name: 'Contract Negotiation', probability: 90, order: 5, type: 'open' },
-  { id: 'stg-won', pipeline_id: 'pipe-default', name: 'Closed Won', probability: 100, order: 6, type: 'won' },
-  { id: 'stg-lost', pipeline_id: 'pipe-default', name: 'Closed Lost', probability: 0, order: 7, type: 'lost' },
+  { id: 'stg-lead', pipeline_id: 'pipe-default', organization_id: ORG_ID, name: 'Lead Generated', probability: 10, order: 1, type: 'open' },
+  { id: 'stg-qualified', pipeline_id: 'pipe-default', organization_id: ORG_ID, name: 'Qualified Opportunity', probability: 25, order: 2, type: 'open' },
+  { id: 'stg-demo', pipeline_id: 'pipe-default', organization_id: ORG_ID, name: 'Solution Demo', probability: 50, order: 3, type: 'open' },
+  { id: 'stg-proposal', pipeline_id: 'pipe-default', organization_id: ORG_ID, name: 'Proposal Sent', probability: 75, order: 4, type: 'open' },
+  { id: 'stg-negotiation', pipeline_id: 'pipe-default', organization_id: ORG_ID, name: 'Contract Negotiation', probability: 90, order: 5, type: 'open' },
+  { id: 'stg-won', pipeline_id: 'pipe-default', organization_id: ORG_ID, name: 'Closed Won', probability: 100, order: 6, type: 'won' },
+  { id: 'stg-lost', pipeline_id: 'pipe-default', organization_id: ORG_ID, name: 'Closed Lost', probability: 0, order: 7, type: 'lost' },
 ];
 
 // ─── Deals ───────────────────────────────────────────

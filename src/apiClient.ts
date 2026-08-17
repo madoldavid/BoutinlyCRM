@@ -880,11 +880,6 @@ export class ApiClient {
   // ─── Audit log export ──────────────────────────────
 
   async exportAuditLogs(format: 'json' | 'csv'): Promise<Blob> {
-<<<<<<< HEAD
-    const headers: Record<string, string> = {};
-    if (this.token) headers['Authorization'] = `Bearer ${this.token}`;
-    const response = await fetch(`${this.baseUrl}/api/audit-logs/export?format=${format}`, { headers, credentials: 'include' });
-=======
     const headers = await this.ensureAuthHeaders();
     let response = await fetch(`${this.baseUrl}/api/audit-logs/export?format=${format}`, { headers });
 
@@ -902,7 +897,7 @@ export class ApiClient {
       }
     }
 
->>>>>>> 41b4c3ae4ad66e243403374fe02d576454752884
+
     if (!response.ok) {
       const payload = await response.json().catch(() => null);
       throw new ApiError(response.status, payload?.error?.message || 'Export failed', payload?.error?.code);

@@ -1,8 +1,6 @@
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
-<<<<<<< HEAD
-=======
 import {
   INITIAL_ACCOUNTS,
   INITIAL_ACTIVITIES,
@@ -21,7 +19,6 @@ import {
   INITIAL_TEMPLATES,
   INITIAL_USERS,
 } from '../../initialData.js';
->>>>>>> 41b4c3ae4ad66e243403374fe02d576454752884
 import type {
   Account,
   Activity,
@@ -335,21 +332,6 @@ function clone<T>(value: T): T {
 
 export class InMemoryCrmRepository implements CrmRepository {
   private organizations: Organization[] = [];
-<<<<<<< HEAD
-  private users: User[] = [];
-  private accounts: Account[] = [];
-  private contacts: Contact[] = [];
-  private pipelines: Pipeline[] = [];
-  private stages: Stage[] = [];
-  private deals: Deal[] = [];
-  private tasks: Task[] = [];
-  private activities: Activity[] = [];
-  private notifications: Notification[] = [];
-  private customFields: CustomFieldDefinition[] = [];
-  private emailTemplates: EmailTemplate[] = [];
-  private emailCampaigns: EmailCampaign[] = [];
-  private auditLogs: AuditLog[] = [];
-=======
   private users = clone(INITIAL_USERS);
   private accounts = clone(INITIAL_ACCOUNTS);
   private contacts = clone(INITIAL_CONTACTS);
@@ -366,7 +348,6 @@ export class InMemoryCrmRepository implements CrmRepository {
   private emailTemplates = clone(INITIAL_TEMPLATES);
   private emailCampaigns = clone(INITIAL_CAMPAIGNS);
   private auditLogs = clone(INITIAL_AUDIT_LOGS);
->>>>>>> 41b4c3ae4ad66e243403374fe02d576454752884
   private files: FileRecord[] = [];
   private calendarTokens: CalendarTokenRecord[] = [];
   private passwordHashes = new Map<string, string>();
@@ -1580,12 +1561,9 @@ export class InMemoryCrmRepository implements CrmRepository {
       users: this.filterByOrg(all.users),
       accounts: this.filterByOrg(all.accounts),
       contacts: this.filterByOrg(all.contacts),
-<<<<<<< HEAD
+      leads: this.filterByOrg(all.leads),
       pipelines: this.filterByOrg(all.pipelines),
       stages: this.filterByOrg(all.stages),
-=======
-      leads: this.filterByOrg(all.leads),
->>>>>>> 41b4c3ae4ad66e243403374fe02d576454752884
       deals: this.filterByOrg(all.deals),
       tasks: this.filterByOrg(all.tasks),
       activities: this.filterByOrg(all.activities),
