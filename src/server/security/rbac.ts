@@ -72,6 +72,22 @@ export function requireWriteAccess(req: AuthenticatedRequest) {
   }
 }
 
+/**
+ * Enforce that a single record fetched by ID actually belongs to the caller's
+ * organization before it's returned or mutated. Throws 404 (not 403) so a
+ * cross-tenant probe can't distinguish "doesn't exist" from "exists, but not
+ * yours" (G-SEC-11).
+ *
+ * Records with no organization_id at all are treated as inaccessible rather
+ * than globally visible — callers that legitimately need org-less/global
+ * records should check for that explicitly before calling this.
+ */
+export function assertOwnedByOrg(record: { organization_id?: string } | null | undefined, principal: Principal): void {
+  if (!record || record.organization_id !== principal.organizationId) {
+    throw new ApiError(404, 'Record not found.', 'not_found');
+  }
+}
+
 export function canAccessOwner(principal: Principal, ownerId: string, ownerTeamId?: string) {
   if ([UserRole.SUPER_ADMIN, UserRole.ADMIN].includes(principal.role)) {
     return true;

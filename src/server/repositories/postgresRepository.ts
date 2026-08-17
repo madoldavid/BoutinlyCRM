@@ -104,10 +104,22 @@ export class PostgresCrmRepository implements CrmRepository {
     return this.rowToUser(row);
   }
 
+  // `users` is not covered by FORCE ROW LEVEL SECURITY (see migration 009):
+  // login and the OIDC callback must look a user up by email *before* any
+  // tenant context exists, since the same email can belong to a different
+  // user in a different org. So every single-user lookup/mutation below
+  // filters explicitly — but only when a tenant context is actually active
+  // (`current_setting('app.organization_id', true) IS NULL` short-circuits
+  // the filter for those pre-auth paths, exactly like crmRepository.ts's
+  // in-memory checkOrg()). Within an authenticated request, this correctly
+  // rejects IDs belonging to another organization.
   async getUserById(userId: string) {
     const result = await query(
       `SELECT id, organization_id, email, name, avatar_url, role, mfa_enabled, is_active, timezone, team_id
-       FROM users WHERE id = $1`,
+       FROM users
+       WHERE id = $1
+         AND (current_setting('app.organization_id', true) IS NULL
+              OR organization_id::text = current_setting('app.organization_id', true))`,
       [userId],
     );
     return result.rows.length > 0 ? this.rowToUser(result.rows[0]) : null;
@@ -116,7 +128,10 @@ export class PostgresCrmRepository implements CrmRepository {
   async getUserByEmail(email: string) {
     const result = await query(
       `SELECT id, organization_id, email, name, avatar_url, role, mfa_enabled, is_active, timezone, team_id
-       FROM users WHERE lower(email) = lower($1)`,
+       FROM users
+       WHERE lower(email) = lower($1)
+         AND (current_setting('app.organization_id', true) IS NULL
+              OR organization_id::text = current_setting('app.organization_id', true))`,
       [email],
     );
     return result.rows.length > 0 ? this.rowToUser(result.rows[0]) : null;
@@ -185,7 +200,10 @@ export class PostgresCrmRepository implements CrmRepository {
   async listUsers(): Promise<User[]> {
     const result = await query(
       `SELECT id, organization_id, email, name, avatar_url, role, mfa_enabled, is_active, timezone, team_id
-       FROM users ORDER BY name`,
+       FROM users
+       WHERE current_setting('app.organization_id', true) IS NULL
+          OR organization_id::text = current_setting('app.organization_id', true)
+       ORDER BY name`,
     );
     return result.rows.map((row: DbRow) => this.rowToUser(row));
   }
@@ -215,7 +233,10 @@ export class PostgresCrmRepository implements CrmRepository {
 
   async updateUserRole(userId: string, role: UserRole): Promise<User | null> {
     const result = await query(
-      `UPDATE users SET role = $2 WHERE id = $1
+      `UPDATE users SET role = $2
+       WHERE id = $1
+         AND (current_setting('app.organization_id', true) IS NULL
+              OR organization_id::text = current_setting('app.organization_id', true))
        RETURNING id, organization_id, email, name, avatar_url, role, mfa_enabled, is_active, timezone, team_id`,
       [userId, role],
     );
@@ -224,7 +245,10 @@ export class PostgresCrmRepository implements CrmRepository {
 
   async toggleUserStatus(userId: string): Promise<User | null> {
     const result = await query(
-      `UPDATE users SET is_active = NOT is_active WHERE id = $1
+      `UPDATE users SET is_active = NOT is_active
+       WHERE id = $1
+         AND (current_setting('app.organization_id', true) IS NULL
+              OR organization_id::text = current_setting('app.organization_id', true))
        RETURNING id, organization_id, email, name, avatar_url, role, mfa_enabled, is_active, timezone, team_id`,
       [userId],
     );
@@ -232,7 +256,13 @@ export class PostgresCrmRepository implements CrmRepository {
   }
 
   async deleteUser(userId: string): Promise<boolean> {
-    const result = await query(`DELETE FROM users WHERE id = $1`, [userId]);
+    const result = await query(
+      `DELETE FROM users
+       WHERE id = $1
+         AND (current_setting('app.organization_id', true) IS NULL
+              OR organization_id::text = current_setting('app.organization_id', true))`,
+      [userId],
+    );
     return (result.rowCount ?? 0) > 0;
   }
 
@@ -1016,8 +1046,18 @@ export class PostgresCrmRepository implements CrmRepository {
 
   // ─── Email Campaigns ────────────────────────────────
 
+  // `email_campaigns` is not covered by FORCE ROW LEVEL SECURITY (see
+  // migration 009) — the unauthenticated open/click tracking pixel updates
+  // a campaign's counters by id with no tenant context, so RLS can't be
+  // forced on this table without breaking tracking. Read paths filter
+  // explicitly instead, the same conditional pattern used for `users`.
   async listEmailCampaigns(): Promise<EmailCampaign[]> {
-    const result = await query(`SELECT * FROM email_campaigns ORDER BY created_at DESC`);
+    const result = await query(
+      `SELECT * FROM email_campaigns
+       WHERE current_setting('app.organization_id', true) IS NULL
+          OR organization_id::text = current_setting('app.organization_id', true)
+       ORDER BY created_at DESC`,
+    );
     return result.rows.map((row: DbRow) => this.rowToEmailCampaign(row));
   }
 

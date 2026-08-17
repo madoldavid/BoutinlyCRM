@@ -4,10 +4,12 @@ import type { Principal } from '../security/token.js';
 
 export function scopeSnapshot(snapshot: CrmSnapshot, principal: Principal): CrmSnapshot {
   // ── Defense-in-depth: filter by organization first ──
-  // Include records where organization_id is undefined (backward compat)
-  // or matches the principal's organization.
+  // An org-less record is excluded rather than shown to everyone — every
+  // add*/create* repository method is expected to stamp organization_id,
+  // so a record missing it is a data bug, not a "belongs to nobody" case
+  // that should default to global visibility (G-SEC-11).
   const byOrg = <T extends { organization_id?: string }>(items: T[]): T[] =>
-    items.filter(item => !item.organization_id || item.organization_id === principal.organizationId);
+    items.filter(item => item.organization_id === principal.organizationId);
 
   const orgScoped: CrmSnapshot = {
     users: byOrg(snapshot.users),

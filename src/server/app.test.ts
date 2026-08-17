@@ -786,4 +786,139 @@ describe('Boutinly CRM API', () => {
       .send({ first_name: 'T', last_name: 'C', email: 'tc@x.com', account_id: acct.body.account.id, owner_id: userId })
       .expect(201);
   });
+
+  // ── Cross-tenant isolation (G-SEC-11) ────────────────
+  //
+  // A user authenticated in one organization must never be able to read,
+  // modify, or delete a record — of any kind — that belongs to a different
+  // organization, even when they know (or guess) its id. Every one of these
+  // was independently confirmed missing before the fix.
+
+  describe('cross-tenant isolation', () => {
+    async function twoOrgs() {
+      const aSignup = await h.signup('Alice', 'alice@orga.com', 'ChangeMe123!', 'OrgA');
+      const a = { ...aSignup, email: 'alice@orga.com' };
+      const bSignup = await h.signup('Bob', 'bob@orgb.com', 'ChangeMe123!', 'OrgB');
+      const b = { ...bSignup, email: 'bob@orgb.com' };
+      const bsA = await request(h.app).get('/api/crm/bootstrap')
+        .set('Authorization', `Bearer ${a.token}`).expect(200);
+      return { a, b, pipelineIdA: bsA.body.pipelines[0].id, stageIdA: bsA.body.stages[0].id };
+    }
+
+    it('accounts: org B gets 404 reading, updating, or deleting org A\'s account', async () => {
+      const { a, b } = await twoOrgs();
+      const acct = await request(h.app).post('/api/accounts')
+        .set('Authorization', `Bearer ${a.token}`).send({ name: 'Acme (OrgA)', owner_id: a.userId }).expect(201);
+      const id = acct.body.account.id;
+
+      await request(h.app).get(`/api/accounts/${id}`).set('Authorization', `Bearer ${b.token}`).expect(404);
+      await request(h.app).put(`/api/accounts/${id}`).set('Authorization', `Bearer ${b.token}`)
+        .send({ name: 'Hijacked' }).expect(404);
+      await request(h.app).delete(`/api/accounts/${id}`).set('Authorization', `Bearer ${b.token}`).expect(404);
+
+      // Org A can still reach its own account, proving this isn't a global 404
+      await request(h.app).get(`/api/accounts/${id}`).set('Authorization', `Bearer ${a.token}`).expect(200);
+    });
+
+    it('deals: org B gets 404 reading, updating, or deleting org A\'s deal', async () => {
+      const { a, b, pipelineIdA, stageIdA } = await twoOrgs();
+      const acct = await request(h.app).post('/api/accounts')
+        .set('Authorization', `Bearer ${a.token}`).send({ name: 'OrgA Co', owner_id: a.userId }).expect(201);
+      const deal = await request(h.app).post('/api/deals')
+        .set('Authorization', `Bearer ${a.token}`)
+        .send({
+          name: 'OrgA Deal', pipeline_id: pipelineIdA, stage_id: stageIdA,
+          account_id: acct.body.account.id, owner_id: a.userId, value: 1000,
+          currency: 'USD', close_date: '2026-12-31',
+        }).expect(201);
+      const id = deal.body.deal.id;
+
+      await request(h.app).get(`/api/deals/${id}`).set('Authorization', `Bearer ${b.token}`).expect(404);
+      await request(h.app).put(`/api/deals/${id}`).set('Authorization', `Bearer ${b.token}`)
+        .send({ name: 'Hijacked' }).expect(404);
+      await request(h.app).delete(`/api/deals/${id}`).set('Authorization', `Bearer ${b.token}`).expect(404);
+    });
+
+    it('leads: org B gets 404 reading, updating, or deleting org A\'s lead', async () => {
+      const { a, b } = await twoOrgs();
+      const lead = await request(h.app).post('/api/leads')
+        .set('Authorization', `Bearer ${a.token}`)
+        .send({ first_name: 'Lee', last_name: 'Ad', company_name: 'OrgA Co', email: 'lead@orga.com', owner_id: a.userId })
+        .expect(201);
+      const id = lead.body.lead.id;
+
+      await request(h.app).get(`/api/leads/${id}`).set('Authorization', `Bearer ${b.token}`).expect(404);
+      await request(h.app).put(`/api/leads/${id}`).set('Authorization', `Bearer ${b.token}`)
+        .send({ status: 'qualified' }).expect(404);
+      await request(h.app).delete(`/api/leads/${id}`).set('Authorization', `Bearer ${b.token}`).expect(404);
+    });
+
+    it('tasks: org B gets 404 reading, updating, or deleting org A\'s task', async () => {
+      const { a, b } = await twoOrgs();
+      const task = await request(h.app).post('/api/tasks')
+        .set('Authorization', `Bearer ${a.token}`)
+        .send({ title: 'OrgA Task', type: 'todo', due_at: '2026-12-31T00:00:00Z', assigned_to_id: a.userId })
+        .expect(201);
+      const id = task.body.task.id;
+
+      await request(h.app).get(`/api/tasks/${id}`).set('Authorization', `Bearer ${b.token}`).expect(404);
+      await request(h.app).put(`/api/tasks/${id}`).set('Authorization', `Bearer ${b.token}`)
+        .send({ title: 'Hijacked' }).expect(404);
+      await request(h.app).delete(`/api/tasks/${id}`).set('Authorization', `Bearer ${b.token}`).expect(404);
+    });
+
+    it('contacts: org B gets 404 reading, updating, or deleting org A\'s contact', async () => {
+      const { a, b } = await twoOrgs();
+      const acct = await request(h.app).post('/api/accounts')
+        .set('Authorization', `Bearer ${a.token}`).send({ name: 'OrgA Co', owner_id: a.userId }).expect(201);
+      const contact = await request(h.app).post('/api/contacts')
+        .set('Authorization', `Bearer ${a.token}`)
+        .send({ first_name: 'Con', last_name: 'Tact', email: 'con@orga.com', account_id: acct.body.account.id, owner_id: a.userId })
+        .expect(201);
+      const id = contact.body.contact.id;
+
+      await request(h.app).get(`/api/contacts/${id}`).set('Authorization', `Bearer ${b.token}`).expect(404);
+      await request(h.app).put(`/api/contacts/${id}`).set('Authorization', `Bearer ${b.token}`)
+        .send({ title: 'Hijacked' }).expect(404);
+      await request(h.app).delete(`/api/contacts/${id}`).set('Authorization', `Bearer ${b.token}`).expect(404);
+    });
+
+    it('custom fields: org B cannot delete org A\'s custom field definition', async () => {
+      const { a, b } = await twoOrgs();
+      const field = await request(h.app).post('/api/custom-fields')
+        .set('Authorization', `Bearer ${a.token}`)
+        .send({ entity_type: 'contact', key: 'org_a_field', label: 'OrgA Field', field_type: 'text' })
+        .expect(201);
+      const id = field.body.customField.id;
+
+      await request(h.app).delete(`/api/custom-fields/${id}`).set('Authorization', `Bearer ${b.token}`).expect(404);
+      await request(h.app).delete(`/api/custom-fields/${id}`).set('Authorization', `Bearer ${a.token}`).expect(204);
+    });
+
+    it('admin user management: org B admin cannot view, promote, suspend, or delete org A\'s user', async () => {
+      const { a, b } = await twoOrgs();
+
+      // GET /api/users never returns another org's users
+      const listB = await request(h.app).get('/api/users').set('Authorization', `Bearer ${b.token}`).expect(200);
+      expect(listB.body.users.map((u: any) => u.id)).not.toContain(a.userId);
+
+      await request(h.app).put(`/api/users/${a.userId}/role`).set('Authorization', `Bearer ${b.token}`)
+        .send({ role: UserRole.ADMIN }).expect(404);
+      await request(h.app).post(`/api/users/${a.userId}/toggle-status`).set('Authorization', `Bearer ${b.token}`).expect(404);
+      await request(h.app).delete(`/api/users/${a.userId}`).set('Authorization', `Bearer ${b.token}`).expect(404);
+    });
+
+    it('admin account-unlock: org B admin cannot clear org A\'s lockout by email', async () => {
+      const { a, b } = await twoOrgs();
+      const r = await request(h.app).post('/api/auth/admin/unlock')
+        .set('Authorization', `Bearer ${b.token}`).send({ email: a.email }).expect(404);
+      expect(r.body.error?.code || r.body.code).toBeTruthy();
+    });
+
+    it('admin token-revocation: org B admin cannot revoke org A\'s tokens by user id', async () => {
+      const { a, b } = await twoOrgs();
+      await request(h.app).post('/api/auth/admin/revoke-tokens')
+        .set('Authorization', `Bearer ${b.token}`).send({ user_id: a.userId }).expect(404);
+    });
+  });
 });

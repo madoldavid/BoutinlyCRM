@@ -489,18 +489,23 @@ export class InMemoryCrmRepository implements CrmRepository {
     }
   }
 
-  /** Filter items by current tenant org. Include items without org_id for backward compat. */
+  /**
+   * Filter items by current tenant org. Items with no organization_id are
+   * excluded — an org-less record is a data bug (every "add"/"create" method
+   * must stamp organization_id), and treating it as globally visible would
+   * leak it to every tenant instead of just failing loudly (G-SEC-11).
+   */
   private filterByOrg<T extends { organization_id?: string }>(items: T[]): T[] {
     const orgId = getCurrentOrgId();
     if (!orgId) return items;
-    return items.filter(item => !item.organization_id || item.organization_id === orgId);
+    return items.filter(item => item.organization_id === orgId);
   }
 
   /** Check if a single item belongs to the current tenant org. */
   private checkOrg<T extends { organization_id?: string }>(item: T): boolean {
     const orgId = getCurrentOrgId();
     if (!orgId) return true;
-    return !item.organization_id || item.organization_id === orgId;
+    return item.organization_id === orgId;
   }
 
   // ─── Organization ────────────────────────────────────
@@ -536,12 +541,17 @@ export class InMemoryCrmRepository implements CrmRepository {
 
   async getUserById(userId: string) {
     const user = this.users.find(item => item.id === userId);
-    return user ? clone(user) : null;
+    // No tenant context (pre-auth flows: login, refresh, MFA challenge) is a
+    // deliberate no-op here — checkOrg() only enforces once a request has
+    // been authenticated and runWithTenant() has scoped it to an org.
+    if (!user || !this.checkOrg(user)) return null;
+    return clone(user);
   }
 
   async getUserByEmail(email: string) {
     const user = this.users.find(item => item.email.toLowerCase() === email.toLowerCase());
-    return user ? clone(user) : null;
+    if (!user || !this.checkOrg(user)) return null;
+    return clone(user);
   }
 
   async storePasswordResetToken(userId: string): Promise<string> {
@@ -630,21 +640,21 @@ export class InMemoryCrmRepository implements CrmRepository {
 
   async updateUserRole(userId: string, role: UserRole) {
     const user = this.users.find(item => item.id === userId);
-    if (!user) return null;
+    if (!user || !this.checkOrg(user)) return null;
     user.role = role;
     return clone(user);
   }
 
   async toggleUserStatus(userId: string) {
     const user = this.users.find(item => item.id === userId);
-    if (!user) return null;
+    if (!user || !this.checkOrg(user)) return null;
     user.is_active = !user.is_active;
     return clone(user);
   }
 
   async deleteUser(userId: string): Promise<boolean> {
     const idx = this.users.findIndex(item => item.id === userId);
-    if (idx === -1) return false;
+    if (idx === -1 || !this.checkOrg(this.users[idx])) return false;
     this.users.splice(idx, 1);
     return true;
   }
@@ -688,14 +698,14 @@ export class InMemoryCrmRepository implements CrmRepository {
 
   async updateContact(id: string, input: UpdateContactInput) {
     const idx = this.contacts.findIndex(item => item.id === id);
-    if (idx === -1) return null;
+    if (idx === -1 || !this.checkOrg(this.contacts[idx])) return null;
     this.contacts[idx] = { ...this.contacts[idx], ...input, updated_at: new Date().toISOString() };
     return clone(this.contacts[idx]);
   }
 
   async deleteContact(id: string) {
     const idx = this.contacts.findIndex(item => item.id === id);
-    if (idx === -1) return false;
+    if (idx === -1 || !this.checkOrg(this.contacts[idx])) return false;
     this.contacts.splice(idx, 1);
     return true;
   }
@@ -762,6 +772,7 @@ export class InMemoryCrmRepository implements CrmRepository {
     const account: Account = {
       ...input,
       id: `acc-${randomUUID()}`,
+      organization_id: getCurrentOrgId(),
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     };
@@ -771,14 +782,14 @@ export class InMemoryCrmRepository implements CrmRepository {
 
   async updateAccount(id: string, input: UpdateAccountInput) {
     const idx = this.accounts.findIndex(item => item.id === id);
-    if (idx === -1) return null;
+    if (idx === -1 || !this.checkOrg(this.accounts[idx])) return null;
     this.accounts[idx] = { ...this.accounts[idx], ...input, updated_at: new Date().toISOString() };
     return clone(this.accounts[idx]);
   }
 
   async deleteAccount(id: string) {
     const idx = this.accounts.findIndex(item => item.id === id);
-    if (idx === -1) return false;
+    if (idx === -1 || !this.checkOrg(this.accounts[idx])) return false;
     this.accounts.splice(idx, 1);
     return true;
   }
@@ -839,14 +850,14 @@ export class InMemoryCrmRepository implements CrmRepository {
 
   async updateLead(id: string, input: UpdateLeadInput) {
     const idx = this.leads.findIndex(item => item.id === id);
-    if (idx === -1) return null;
+    if (idx === -1 || !this.checkOrg(this.leads[idx])) return null;
     this.leads[idx] = { ...this.leads[idx], ...input, updated_at: new Date().toISOString() };
     return clone(this.leads[idx]);
   }
 
   async deleteLead(id: string) {
     const idx = this.leads.findIndex(item => item.id === id);
-    if (idx === -1) return false;
+    if (idx === -1 || !this.checkOrg(this.leads[idx])) return false;
     this.leads.splice(idx, 1);
     // Detach lead-linked activities and tasks (they stay in the timeline as history)
     this.activities = this.activities.map(a => a.lead_id === id ? { ...a, lead_id: undefined } : a);
@@ -866,7 +877,7 @@ export class InMemoryCrmRepository implements CrmRepository {
    */
   async convertLead(id: string, input: ConvertLeadInput, converterUserId: string) {
     const leadIdx = this.leads.findIndex(item => item.id === id);
-    if (leadIdx === -1) return null;
+    if (leadIdx === -1 || !this.checkOrg(this.leads[leadIdx])) return null;
     const lead = this.leads[leadIdx];
     if (lead.is_converted || lead.status === 'converted') return null;
     // Only qualified leads are ready to convert — the UI disables Convert
@@ -1046,6 +1057,7 @@ export class InMemoryCrmRepository implements CrmRepository {
     const deal: Deal = {
       ...input,
       id: `deal-${randomUUID()}`,
+      organization_id: getCurrentOrgId(),
       created_at: new Date().toISOString(),
       stage_entered_at: new Date().toISOString(),
     };
@@ -1055,21 +1067,21 @@ export class InMemoryCrmRepository implements CrmRepository {
 
   async updateDeal(id: string, input: UpdateDealInput) {
     const idx = this.deals.findIndex(item => item.id === id);
-    if (idx === -1) return null;
+    if (idx === -1 || !this.checkOrg(this.deals[idx])) return null;
     this.deals[idx] = { ...this.deals[idx], ...input };
     return clone(this.deals[idx]);
   }
 
   async deleteDeal(id: string) {
     const idx = this.deals.findIndex(item => item.id === id);
-    if (idx === -1) return false;
+    if (idx === -1 || !this.checkOrg(this.deals[idx])) return false;
     this.deals.splice(idx, 1);
     return true;
   }
 
   async moveDealStage(id: string, targetStageId: string) {
     const dealIdx = this.deals.findIndex(item => item.id === id);
-    if (dealIdx === -1) return null;
+    if (dealIdx === -1 || !this.checkOrg(this.deals[dealIdx])) return null;
 
     const stage = this.stages.find(s => s.id === targetStageId);
     if (!stage) return null;
@@ -1148,6 +1160,7 @@ export class InMemoryCrmRepository implements CrmRepository {
     const task: Task = {
       ...input,
       id: `task-${randomUUID()}`,
+      organization_id: getCurrentOrgId(),
     };
     this.tasks.unshift(task);
     return clone(task);
@@ -1155,21 +1168,21 @@ export class InMemoryCrmRepository implements CrmRepository {
 
   async updateTask(id: string, input: UpdateTaskInput) {
     const idx = this.tasks.findIndex(item => item.id === id);
-    if (idx === -1) return null;
+    if (idx === -1 || !this.checkOrg(this.tasks[idx])) return null;
     this.tasks[idx] = { ...this.tasks[idx], ...input };
     return clone(this.tasks[idx]);
   }
 
   async completeTask(id: string) {
     const idx = this.tasks.findIndex(item => item.id === id);
-    if (idx === -1) return null;
+    if (idx === -1 || !this.checkOrg(this.tasks[idx])) return null;
     this.tasks[idx] = { ...this.tasks[idx], completed_at: new Date().toISOString() };
     return clone(this.tasks[idx]);
   }
 
   async deleteTask(id: string) {
     const idx = this.tasks.findIndex(item => item.id === id);
-    if (idx === -1) return false;
+    if (idx === -1 || !this.checkOrg(this.tasks[idx])) return false;
     this.tasks.splice(idx, 1);
     return true;
   }
@@ -1201,6 +1214,7 @@ export class InMemoryCrmRepository implements CrmRepository {
     const activity: Activity = {
       ...input,
       id: `act-${randomUUID()}`,
+      organization_id: getCurrentOrgId(),
       created_at: new Date().toISOString(),
     };
     this.activities.unshift(activity);
@@ -1251,7 +1265,7 @@ export class InMemoryCrmRepository implements CrmRepository {
 
   async updateRecordTask(id: string, input: UpdateRecordTaskInput) {
     const idx = this.recordTasks.findIndex(item => item.id === id);
-    if (idx === -1) return null;
+    if (idx === -1 || !this.checkOrg(this.recordTasks[idx])) return null;
     const next: RecordTask = { ...this.recordTasks[idx] };
     if (input.subject !== undefined) next.subject = input.subject;
     if (input.description !== undefined) next.description = input.description;
@@ -1264,7 +1278,7 @@ export class InMemoryCrmRepository implements CrmRepository {
 
   async deleteRecordTask(id: string) {
     const idx = this.recordTasks.findIndex(item => item.id === id);
-    if (idx === -1) return false;
+    if (idx === -1 || !this.checkOrg(this.recordTasks[idx])) return false;
     this.recordTasks.splice(idx, 1);
     return true;
   }
@@ -1343,13 +1357,15 @@ export class InMemoryCrmRepository implements CrmRepository {
 
   async getEmailTemplateById(id: string) {
     const t = this.emailTemplates.find(item => item.id === id);
-    return t ? clone(t) : null;
+    if (!t || !this.checkOrg(t)) return null;
+    return clone(t);
   }
 
   async addEmailTemplate(input: CreateEmailTemplateInput) {
     const template: EmailTemplate = {
       ...input,
       id: `tmp-${randomUUID()}`,
+      organization_id: getCurrentOrgId(),
     };
     this.emailTemplates.push(template);
     return clone(template);
@@ -1365,6 +1381,7 @@ export class InMemoryCrmRepository implements CrmRepository {
     const campaign: EmailCampaign = {
       ...input,
       id: input.id || `cmp-${randomUUID()}`,
+      organization_id: getCurrentOrgId(),
     };
     this.emailCampaigns.unshift(campaign);
     return clone(campaign);
@@ -1380,6 +1397,7 @@ export class InMemoryCrmRepository implements CrmRepository {
     const cfd: CustomFieldDefinition = {
       ...input,
       id: `cfd-${randomUUID()}`,
+      organization_id: getCurrentOrgId(),
     };
     this.customFields.push(cfd);
     return clone(cfd);
@@ -1387,7 +1405,7 @@ export class InMemoryCrmRepository implements CrmRepository {
 
   async deleteCustomFieldDefinition(id: string) {
     const idx = this.customFields.findIndex(item => item.id === id);
-    if (idx === -1) return false;
+    if (idx === -1 || !this.checkOrg(this.customFields[idx])) return false;
     this.customFields.splice(idx, 1);
     return true;
   }
@@ -1468,6 +1486,7 @@ export class InMemoryCrmRepository implements CrmRepository {
     const file: FileRecord = {
       ...input,
       id: `file-${randomBytes(8).toString('hex')}`,
+      organization_id: getCurrentOrgId(),
       created_at: new Date().toISOString(),
     };
     this.files.unshift(file);
@@ -1476,7 +1495,8 @@ export class InMemoryCrmRepository implements CrmRepository {
 
   async getFileById(id: string): Promise<FileRecord | null> {
     const file = this.files.find(f => f.id === id);
-    return file ? clone(file) : null;
+    if (!file || !this.checkOrg(file)) return null;
+    return clone(file);
   }
 
   async listFiles(params?: { entity_type?: string; entity_id?: string; page?: number; limit?: number }): Promise<FileRecord[]> {
@@ -1493,7 +1513,7 @@ export class InMemoryCrmRepository implements CrmRepository {
 
   async deleteFile(id: string): Promise<boolean> {
     const idx = this.files.findIndex(f => f.id === id);
-    if (idx === -1) return false;
+    if (idx === -1 || !this.checkOrg(this.files[idx])) return false;
     this.files.splice(idx, 1);
     return true;
   }
@@ -1521,6 +1541,7 @@ export class InMemoryCrmRepository implements CrmRepository {
     const log: AuditLog = {
       ...input,
       id: `log-${randomUUID()}`,
+      organization_id: getCurrentOrgId(),
       created_at: new Date().toISOString(),
     };
     this.auditLogs.unshift(log);

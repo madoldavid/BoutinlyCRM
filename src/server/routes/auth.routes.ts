@@ -357,6 +357,15 @@ export function registerAuthRoutes(
     const { email } = req.body as { email?: string };
     if (!email) throw new ApiError(400, 'Email is required.', 'invalid_request');
 
+    // The lockout service is a plain in-memory store keyed by email, entirely
+    // outside the repository/RLS layer — it has no concept of organizations
+    // on its own. getUserByEmail is org-scoped whenever a tenant context is
+    // active (it is here, via authenticate()), so this 404s for an email
+    // belonging to a different organization instead of letting one org's
+    // admin clear another org's lockout state (G-SEC-11).
+    const target = await repository.getUserByEmail(email);
+    if (!target) throw new ApiError(404, 'User not found.', 'not_found');
+
     const lockoutKey = `login:${email.toLowerCase()}`;
     const unlocked = lockoutService.unlock(lockoutKey);
 
@@ -380,6 +389,12 @@ export function registerAuthRoutes(
     }
     const { user_id } = req.body as { user_id?: string };
     if (!user_id) throw new ApiError(400, 'user_id is required.', 'invalid_request');
+
+    // Same reasoning as /admin/unlock above — tokenBlocklist is a plain
+    // in-memory/Redis store keyed by user id with no org awareness, so
+    // confirm the target belongs to the caller's organization first.
+    const target = await repository.getUserById(user_id);
+    if (!target) throw new ApiError(404, 'User not found.', 'not_found');
 
     const count = tokenBlocklist.revokeAllForUser(user_id);
 
